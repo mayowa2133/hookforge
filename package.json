@@ -1,0 +1,71 @@
+{
+  "name": "hookforge",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.12.3",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "worker": "tsx worker/index.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "api:key": "tsx scripts/create-api-key.ts",
+    "test": "vitest run --maxWorkers=1 --minWorkers=1",
+    "test:watch": "vitest",
+    "test:e2e:all": "bash scripts/e2e-all.sh",
+    "test:e2e:phase2": "bash scripts/e2e-phase2.sh",
+    "test:e2e:phase012": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh",
+    "progress": "tsx scripts/update-progress.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.699.0",
+    "@aws-sdk/s3-request-presigner": "^3.699.0",
+    "@prisma/client": "^5.20.0",
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "@remotion/bundler": "^4.0.0",
+    "@remotion/player": "^4.0.0",
+    "@remotion/renderer": "^4.0.0",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.16.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "dotenv": "^16.4.7",
+    "ffprobe-static": "^3.1.0",
+    "ioredis": "^5.4.1",
+    "jose": "^5.9.6",
+    "lucide-react": "^0.453.0",
+    "next": "^14.2.17",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-dropzone": "^14.2.9",
+    "remotion": "^4.0.0",
+    "tailwind-merge": "^2.5.4",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.8.4",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "prisma": "^5.20.0",
+    "tailwindcss": "^3.4.14",
+    "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}

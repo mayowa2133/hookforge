@@ -1,0 +1,101 @@
+{
+  "project": "HookForge Parity Program",
+  "items": [
+    {
+      "id": "stack_foundation",
+      "title": "Next.js + TypeScript + Tailwind + shadcn scaffolding",
+      "status": "DONE",
+      "details": "App Router, UI primitives, global theming, project scripts configured"
+    },
+    {
+      "id": "auth",
+      "title": "Credentials auth with hashed passwords",
+      "status": "DONE",
+      "details": "Register/login/logout APIs with bcrypt + signed cookie session"
+    },
+    {
+      "id": "template_library",
+      "title": "Template library, dashboard, and template detail pages",
+      "status": "DONE",
+      "details": "5 curated templates with required inputs and recipe cards"
+    },
+    {
+      "id": "project_flow",
+      "title": "Template-driven project flow (upload, preview, render trigger)",
+      "status": "DONE",
+      "details": "Slot upload via presigned URL + Zustand editor + Remotion Player preview"
+    },
+    {
+      "id": "render_pipeline",
+      "title": "Async cloud render pipeline",
+      "status": "DONE",
+      "details": "BullMQ worker renders MP4 with Remotion and uploads output to S3/MinIO"
+    },
+    {
+      "id": "recipe_generator",
+      "title": "Reference hook analyzer and recipe suggestion",
+      "status": "DONE",
+      "details": "Heuristic pipeline with optional LLM enhancement behind env flag"
+    },
+    {
+      "id": "compliance_guardrails",
+      "title": "Compliance guardrails in UI + README",
+      "status": "DONE",
+      "details": "Ownership messaging included with rights-attested URL import scaffolding and trust-event audit logging"
+    },
+    {
+      "id": "progress_tracker",
+      "title": "Progress tracking files + update script",
+      "status": "DONE",
+      "details": "Machine-readable JSON plus generated markdown checklist"
+    },
+    {
+      "id": "tests",
+      "title": "Validation and queue tests",
+      "status": "DONE",
+      "details": "Template slot schema, render enqueue, queue topology, and chat-edit planner tests added"
+    },
+    {
+      "id": "docs",
+      "title": "README setup + limitations + runbook",
+      "status": "DONE",
+      "details": "README includes setup, migration, seed, run, and limitations"
+    },
+    {
+      "id": "phase0_schema_foundation",
+      "title": "Phase 0 schema foundation for parity domains",
+      "status": "DONE",
+      "details": "Workspace, billing, timeline, AI orchestration, trust/safety, and public API key models added"
+    },
+    {
+      "id": "phase0_api_surface",
+      "title": "Phase 0 API surface scaffolding",
+      "status": "DONE",
+      "details": "Internal/public parity endpoints added with auth, validation, queueing, and credit hooks"
+    },
+    {
+      "id": "phase0_queue_orchestrator",
+      "title": "Phase 0 queue topology and AI orchestrator",
+      "status": "DONE",
+      "details": "Named queues, AI job abstraction, provider registry, and worker execution loop integrated"
+    },
+    {
+      "id": "phase1_timeline_editor",
+      "title": "Phase 1 manual timeline editor parity",
+      "status": "DONE",
+      "details": "Timeline editor now ships split/merge/reorder/trim/transitions/keyframes, multi-track audio (voiceover/music/sfx + bundled library), media overlay transforms, export presets, and project revision history with timeline-aware preview/render wiring"
+    },
+    {
+      "id": "phase2_ai_caption_chat",
+      "title": "Phase 2 captions, AI edit, and chat edit",
+      "status": "DONE",
+      "details": "Auto-captions, caption translation, AI edit style packs, chat-edit apply/undo, editor UI controls, AI job polling API, and end-to-end validation are operational"
+    },
+    {
+      "id": "phase3_to_phase6_full_parity",
+      "title": "Phase 3-6 creator, ads, shorts, dubbing API, mobile, and commercialization",
+      "status": "TODO",
+      "details": "Execution roadmap confirmed; implementation pending across app surfaces and runtime infrastructure"
+    }
+  ]
+}

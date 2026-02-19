@@ -1,0 +1,761 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProjectStatus {
+  DRAFT
+  READY
+  RENDERING
+  DONE
+  ERROR
+}
+
+enum AssetKind {
+  VIDEO
+  IMAGE
+  AUDIO
+}
+
+enum RenderJobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  ERROR
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum PlanStatus {
+  ACTIVE
+  PAUSED
+  CANCELED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum CreditEntryType {
+  CREDIT
+  DEBIT
+  ADJUSTMENT
+  REFUND
+}
+
+enum MediaSource {
+  UPLOAD
+  URL_IMPORT
+  GENERATED
+}
+
+enum MediaArtifactKind {
+  ORIGINAL
+  NORMALIZED
+  PREVIEW
+  THUMBNAIL
+  TRANSCRIPT
+  CAPTIONS
+  DUBBED
+  LIPSYNC
+  OUTPUT
+}
+
+enum SourceLinkType {
+  WEBSITE
+  YOUTUBE
+  REDDIT
+  OTHER
+}
+
+enum TimelineTrackKind {
+  VIDEO
+  AUDIO
+  CAPTION
+  EFFECT
+}
+
+enum ClipType {
+  MEDIA
+  COLOR
+  GENERATOR
+  TEXT
+}
+
+enum AIJobType {
+  INGEST_URL
+  TRANSCRIBE
+  CAPTION_TRANSLATE
+  AI_EDIT
+  CHAT_EDIT
+  AI_CREATOR
+  AI_ADS
+  AI_SHORTS
+  DUBBING
+  LIPSYNC
+  EYE_CONTACT
+  DENOISE
+}
+
+enum AIJobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  ERROR
+  CANCELED
+}
+
+enum ConsentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  REVOKED
+}
+
+enum TrustEventType {
+  RIGHTS_ATTESTED
+  CONSENT_SUBMITTED
+  CONSENT_VERIFIED
+  CONTENT_FLAGGED
+  CONTENT_TAKEDOWN
+  POLICY_VIOLATION
+}
+
+enum TrustSeverity {
+  INFO
+  WARN
+  HIGH
+  CRITICAL
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  DISABLED
+}
+
+model User {
+  id                 String                @id @default(cuid())
+  email              String                @unique
+  passwordHash       String
+  createdAt          DateTime              @default(now())
+  projects           Project[]
+  workspacesOwned    Workspace[]           @relation("WorkspaceOwner")
+  workspaceMembers   WorkspaceMember[]
+  projectV2Created   ProjectV2[]           @relation("ProjectV2Creator")
+  timelineCreated    TimelineRevision[]    @relation("TimelineRevisionCreator")
+  rightsAttestations RightsAttestation[]
+  consentReviewed    ConsentVerification[] @relation("ConsentReviewer")
+  trustEvents        TrustEvent[]
+  sourceImports      IngestionSourceLink[]
+  apiKeysCreated     PublicApiKey[]        @relation("ApiKeyCreator")
+}
+
+model Workspace {
+  id                  String                @id @default(cuid())
+  name                String
+  slug                String                @unique
+  ownerId             String
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  owner               User                  @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members             WorkspaceMember[]
+  projectsLegacy      Project[]             @relation("WorkspaceLegacyProjects")
+  projectsV2          ProjectV2[]
+  plans               Plan[]
+  subscriptions       Subscription[]
+  creditWallet        CreditWallet?
+  creditLedgerEntries CreditLedgerEntry[]
+  captionStylePresets CaptionStylePreset[]
+  mediaAssets         MediaAsset[]
+  aiJobs              AIJob[]
+  voiceProfiles       VoiceProfile[]
+  voiceClones         VoiceClone[]
+  avatarProfiles      AvatarProfile[]
+  aiTwins             AITwin[]
+  rightsAttestations  RightsAttestation[]
+  consentVerifications ConsentVerification[]
+  trustEvents         TrustEvent[]
+  publicApiKeys       PublicApiKey[]
+
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(EDITOR)
+  createdAt   DateTime      @default(now())
+
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Template {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  name        String
+  description String
+  tags        String[]
+  slotSchema  Json
+  createdAt   DateTime  @default(now())
+  projects    Project[]
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  userId      String
+  templateId  String
+  workspaceId String?
+  title       String
+  status      ProjectStatus @default(DRAFT)
+  config      Json
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template    Template      @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  workspace   Workspace?    @relation("WorkspaceLegacyProjects", fields: [workspaceId], references: [id], onDelete: SetNull)
+  assets      Asset[]
+  renderJobs  RenderJob[]
+
+  @@index([userId])
+  @@index([templateId])
+  @@index([workspaceId])
+}
+
+model Asset {
+  id          String    @id @default(cuid())
+  projectId   String
+  slotKey     String
+  kind        AssetKind
+  storageKey  String
+  mimeType    String
+  durationSec Float?
+  width       Int?
+  height      Int?
+  createdAt   DateTime  @default(now())
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@unique([projectId, slotKey])
+}
+
+model RenderJob {
+  id               String          @id @default(cuid())
+  projectId        String
+  status           RenderJobStatus @default(QUEUED)
+  progress         Int             @default(0)
+  outputStorageKey String?
+  errorMessage     String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  project          Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Plan {
+  id             String      @id @default(cuid())
+  workspaceId    String
+  name           String
+  tier           String
+  monthlyCredits Int
+  trialDays      Int?
+  status         PlanStatus  @default(ACTIVE)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  subscriptions  Subscription[]
+
+  @@index([workspaceId])
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  workspaceId        String
+  planId             String?
+  provider           String
+  externalReference  String?
+  status             SubscriptionStatus @default(TRIALING)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan               Plan?              @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([planId])
+}
+
+model CreditWallet {
+  id          String              @id @default(cuid())
+  workspaceId String              @unique
+  balance     Int                 @default(0)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entries     CreditLedgerEntry[]
+}
+
+model CreditLedgerEntry {
+  id            String          @id @default(cuid())
+  walletId      String
+  workspaceId   String
+  feature       String
+  entryType     CreditEntryType
+  amount        Int
+  referenceType String?
+  referenceId   String?
+  metadata      Json?
+  createdAt     DateTime        @default(now())
+
+  wallet        CreditWallet    @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([walletId])
+  @@index([workspaceId, createdAt])
+}
+
+model ProjectV2 {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  legacyProjectId  String?            @unique
+  createdByUserId  String?
+  title            String
+  status           ProjectStatus      @default(DRAFT)
+  currentRevisionId String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User?              @relation("ProjectV2Creator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  currentRevision  TimelineRevision?  @relation("CurrentRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  revisions        TimelineRevision[] @relation("ProjectRevisions")
+  tracks           TimelineTrack[]
+  mediaAssets      MediaAsset[]
+  transcriptWords  TranscriptWord[]
+  captionSegments  CaptionSegment[]
+  aiJobs           AIJob[]
+
+  @@index([workspaceId])
+  @@index([createdByUserId])
+}
+
+model TimelineRevision {
+  id                String          @id @default(cuid())
+  projectId         String
+  revisionNumber    Int
+  operations        Json
+  timelineHash      String
+  createdByUserId   String?
+  createdAt         DateTime        @default(now())
+
+  project           ProjectV2       @relation("ProjectRevisions", fields: [projectId], references: [id], onDelete: Cascade)
+  currentForProject ProjectV2[]     @relation("CurrentRevision")
+  createdBy         User?           @relation("TimelineRevisionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tracks            TimelineTrack[]
+
+  @@unique([projectId, revisionNumber])
+  @@index([projectId])
+}
+
+model TimelineTrack {
+  id          String            @id @default(cuid())
+  projectId   String
+  revisionId  String?
+  kind        TimelineTrackKind
+  name        String
+  sortOrder   Int
+  volumeDb    Float?
+  isMuted     Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  project     ProjectV2         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revision    TimelineRevision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  clips       Clip[]
+  captionSegments CaptionSegment[]
+
+  @@index([projectId])
+  @@index([revisionId])
+}
+
+model Clip {
+  id           String      @id @default(cuid())
+  trackId      String
+  clipType     ClipType    @default(MEDIA)
+  mediaAssetId String?
+  label        String?
+  timelineInMs Int
+  timelineOutMs Int
+  sourceInMs   Int
+  sourceOutMs  Int
+  transform    Json?
+  audio        Json?
+  createdAt    DateTime    @default(now())
+
+  track        TimelineTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  mediaAsset   MediaAsset?   @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+  effects      Effect[]
+
+  @@index([trackId])
+  @@index([mediaAssetId])
+}
+
+model Effect {
+  id          String      @id @default(cuid())
+  clipId      String
+  type        String
+  config      Json
+  createdAt   DateTime    @default(now())
+
+  clip        Clip        @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  keyframes   Keyframe[]
+
+  @@index([clipId])
+}
+
+model Keyframe {
+  id          String      @id @default(cuid())
+  effectId    String
+  property    String
+  timeMs      Int
+  value       Json
+  easing      String?
+  createdAt   DateTime    @default(now())
+
+  effect      Effect      @relation(fields: [effectId], references: [id], onDelete: Cascade)
+
+  @@index([effectId])
+}
+
+model MediaAsset {
+  id            String           @id @default(cuid())
+  workspaceId   String
+  projectId     String?
+  source        MediaSource      @default(UPLOAD)
+  storageKey    String
+  mimeType      String
+  sizeBytes     BigInt?
+  durationSec   Float?
+  width         Int?
+  height        Int?
+  sha256        String?
+  createdAt     DateTime         @default(now())
+
+  workspace     Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       ProjectV2?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  artifacts     MediaArtifact[]
+  sourceLinks   IngestionSourceLink[]
+  clips         Clip[]
+
+  @@index([workspaceId])
+  @@index([projectId])
+}
+
+model MediaArtifact {
+  id           String            @id @default(cuid())
+  mediaAssetId String
+  kind         MediaArtifactKind
+  storageKey   String
+  mimeType     String
+  metadata     Json?
+  createdAt    DateTime          @default(now())
+
+  mediaAsset   MediaAsset        @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@index([mediaAssetId])
+}
+
+model IngestionSourceLink {
+  id              String         @id @default(cuid())
+  mediaAssetId    String
+  sourceType      SourceLinkType
+  sourceUrl       String
+  canonicalUrl    String?
+  rightsAttested  Boolean        @default(false)
+  importedByUserId String
+  createdAt       DateTime       @default(now())
+
+  mediaAsset      MediaAsset     @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  importedBy      User           @relation(fields: [importedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([mediaAssetId])
+  @@index([importedByUserId])
+}
+
+model TranscriptWord {
+  id           String      @id @default(cuid())
+  projectId    String
+  startMs      Int
+  endMs        Int
+  text         String
+  speakerLabel String?
+  confidence   Float?
+  createdAt    DateTime    @default(now())
+
+  project      ProjectV2   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, startMs])
+}
+
+model CaptionStylePreset {
+  id           String         @id @default(cuid())
+  workspaceId  String
+  name         String
+  config       Json
+  isSystem     Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  captions     CaptionSegment[]
+
+  @@index([workspaceId])
+}
+
+model CaptionSegment {
+  id            String             @id @default(cuid())
+  projectId     String
+  trackId       String?
+  language      String
+  text          String
+  startMs       Int
+  endMs         Int
+  stylePresetId String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  project       ProjectV2          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  track         TimelineTrack?     @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  stylePreset   CaptionStylePreset? @relation(fields: [stylePresetId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, language])
+  @@index([trackId])
+}
+
+model AIJob {
+  id           String         @id @default(cuid())
+  workspaceId  String
+  projectId    String?
+  type         AIJobType
+  status       AIJobStatus    @default(QUEUED)
+  progress     Int            @default(0)
+  providerHint String?
+  input        Json
+  output       Json?
+  errorMessage String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project      ProjectV2?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  providerRuns AIProviderRun[]
+  results      AIOperationResult[]
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId])
+  @@index([status])
+}
+
+model AIProviderRun {
+  id          String   @id @default(cuid())
+  aiJobId     String
+  providerName String
+  operation   String
+  model       String?
+  request     Json?
+  response    Json?
+  tokensIn    Int?
+  tokensOut   Int?
+  durationMs  Int?
+  costUsd     Decimal? @db.Decimal(10, 4)
+  createdAt   DateTime @default(now())
+
+  aiJob       AIJob    @relation(fields: [aiJobId], references: [id], onDelete: Cascade)
+
+  @@index([aiJobId])
+}
+
+model AIOperationResult {
+  id              String   @id @default(cuid())
+  aiJobId         String
+  kind            String
+  outputStorageKey String?
+  output          Json?
+  createdAt       DateTime @default(now())
+
+  aiJob           AIJob    @relation(fields: [aiJobId], references: [id], onDelete: Cascade)
+
+  @@index([aiJobId])
+}
+
+model VoiceProfile {
+  id             String      @id @default(cuid())
+  workspaceId    String
+  name           String
+  provider       String
+  providerVoiceId String?
+  language       String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  voiceClones    VoiceClone[]
+  aiTwins        AITwin[]
+
+  @@index([workspaceId])
+}
+
+model VoiceClone {
+  id                    String             @id @default(cuid())
+  workspaceId           String
+  voiceProfileId        String
+  consentVerificationId String?
+  status                ConsentStatus      @default(PENDING)
+  sampleStorageKey      String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  workspace             Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  voiceProfile          VoiceProfile       @relation(fields: [voiceProfileId], references: [id], onDelete: Cascade)
+  consentVerification   ConsentVerification? @relation(fields: [consentVerificationId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([voiceProfileId])
+}
+
+model AvatarProfile {
+  id                    String             @id @default(cuid())
+  workspaceId           String
+  name                  String
+  provider              String
+  providerAvatarId      String?
+  previewStorageKey     String?
+  consentVerificationId String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  workspace             Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  consentVerification   ConsentVerification? @relation(fields: [consentVerificationId], references: [id], onDelete: SetNull)
+  aiTwins               AITwin[]
+
+  @@index([workspaceId])
+}
+
+model AITwin {
+  id                    String             @id @default(cuid())
+  workspaceId           String
+  name                  String
+  avatarProfileId       String?
+  voiceProfileId        String?
+  consentVerificationId String?
+  status                ConsentStatus      @default(PENDING)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  workspace             Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  avatarProfile         AvatarProfile?     @relation(fields: [avatarProfileId], references: [id], onDelete: SetNull)
+  voiceProfile          VoiceProfile?      @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
+  consentVerification   ConsentVerification? @relation(fields: [consentVerificationId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+}
+
+model RightsAttestation {
+  id          String         @id @default(cuid())
+  workspaceId String
+  userId      String
+  sourceType  SourceLinkType
+  sourceUrl   String
+  statement   String
+  metadata    Json?
+  acceptedAt  DateTime
+  createdAt   DateTime       @default(now())
+
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([userId])
+}
+
+model ConsentVerification {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  subjectType      String
+  subjectName      String
+  subjectEmail     String?
+  status           ConsentStatus  @default(PENDING)
+  evidenceStorageKey String?
+  reviewedByUserId String?
+  verifiedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  reviewedBy       User?          @relation("ConsentReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  voiceClones      VoiceClone[]
+  avatarProfiles   AvatarProfile[]
+  aiTwins          AITwin[]
+
+  @@index([workspaceId, status])
+}
+
+model TrustEvent {
+  id          String         @id @default(cuid())
+  workspaceId String
+  userId      String?
+  eventType   TrustEventType
+  severity    TrustSeverity  @default(INFO)
+  summary     String
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+}
+
+model PublicApiKey {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  createdByUserId String?
+  name            String
+  keyPrefix       String
+  keyHash         String        @unique
+  status          ApiKeyStatus  @default(ACTIVE)
+  lastUsedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy       User?         @relation("ApiKeyCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+}
