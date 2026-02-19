@@ -38,6 +38,13 @@ export default async function DashboardPage() {
           Dashboard
         </h1>
         <p className="text-sm text-muted-foreground">Build with structure-first templates and cloud renders.</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Need script-to-video, teleprompter, or camera capture?{" "}
+          <Link href="/creator" className="underline">
+            Open Creator Studio
+          </Link>
+          .
+        </p>
       </div>
 
       <ReferenceAnalyzer />

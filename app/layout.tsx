@@ -34,6 +34,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   <Link href="/dashboard" className="font-medium hover:text-primary">
                     Dashboard
                   </Link>
+                  <Link href="/creator" className="font-medium hover:text-primary">
+                    Creator
+                  </Link>
                   <LogoutButton />
                 </>
               ) : (

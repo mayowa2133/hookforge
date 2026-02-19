@@ -13,6 +13,39 @@ const CreateProjectSchema = z.object({
 
 export const runtime = "nodejs";
 
+export async function GET() {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const projects = await prisma.project.findMany({
+      where: {
+        userId: user.id
+      },
+      include: {
+        template: {
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            slotSchema: true
+          }
+        }
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      take: 80
+    });
+
+    return NextResponse.json({ projects });
+  } catch (error) {
+    return routeErrorToResponse(error);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();

@@ -92,10 +92,16 @@
       "details": "Auto-captions, caption translation, AI edit style packs, chat-edit apply/undo, editor UI controls, AI job polling API, and end-to-end validation are operational"
     },
     {
-      "id": "phase3_to_phase6_full_parity",
-      "title": "Phase 3-6 creator, ads, shorts, dubbing API, mobile, and commercialization",
+      "id": "phase3_ai_creator_stack",
+      "title": "Phase 3 AI creator stack",
+      "status": "DONE",
+      "details": "Web Creator Studio now includes prompt/script generation jobs, actor presets, voice clone + AI Echo onboarding, AI twin onboarding, teleprompter assist, camera capture/upload, and end-to-end AI_CREATOR render path coverage"
+    },
+    {
+      "id": "phase4_to_phase6_full_parity",
+      "title": "Phase 4-6 ads, shorts, dubbing API hardening, mobile, and commercialization",
       "status": "TODO",
-      "details": "Execution roadmap confirmed; implementation pending across app surfaces and runtime infrastructure"
+      "details": "Roadmap remains active for deeper ads/shorts generation quality, full dubbing/lipsync productization, mobile parity, and subscription commercialization"
     }
   ]
 }

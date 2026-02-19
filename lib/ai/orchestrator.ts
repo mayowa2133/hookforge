@@ -4,6 +4,7 @@ import { getPrimaryProvider } from "../providers/registry";
 import { logger } from "../observability/logger";
 import { metrics } from "../observability/metrics";
 import { applyPhase2SideEffects } from "./phase2";
+import { applyPhase3SideEffects } from "./phase3";
 
 const capabilityByJobType: Record<string, Parameters<typeof getPrimaryProvider>[0]> = {
   INGEST_URL: "generative_media",
@@ -51,7 +52,12 @@ export async function processAIJob(aiJobId: string) {
       }
     });
 
-    const sideEffects = await applyPhase2SideEffects(aiJob);
+    const phase2SideEffects = await applyPhase2SideEffects(aiJob);
+    const phase3SideEffects = await applyPhase3SideEffects(aiJob);
+    const sideEffects =
+      phase2SideEffects && phase3SideEffects
+        ? { phase2: phase2SideEffects, phase3: phase3SideEffects }
+        : phase2SideEffects ?? phase3SideEffects ?? null;
 
     await prisma.aIJob.update({
       where: { id: aiJob.id },

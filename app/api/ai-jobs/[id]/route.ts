@@ -51,28 +51,44 @@ export async function GET(request: Request, { params }: Context) {
       }
     });
 
-    if (!aiJob || !aiJob.project?.legacyProjectId) {
+    if (!aiJob) {
       return jsonError("Job not found", 404);
     }
 
-    const project = await prisma.project.findFirst({
-      where: {
-        id: aiJob.project.legacyProjectId,
-        userId: user.id
-      },
-      select: {
-        id: true
+    let legacyProjectId: string | null = null;
+    if (aiJob.project?.legacyProjectId) {
+      const project = await prisma.project.findFirst({
+        where: {
+          id: aiJob.project.legacyProjectId,
+          userId: user.id
+        },
+        select: {
+          id: true
+        }
+      });
+      if (!project) {
+        return jsonError("Job not found", 404);
       }
-    });
-
-    if (!project) {
-      return jsonError("Job not found", 404);
+      legacyProjectId = project.id;
+    } else {
+      const membership = await prisma.workspaceMember.findFirst({
+        where: {
+          workspaceId: aiJob.workspaceId,
+          userId: user.id
+        },
+        select: {
+          id: true
+        }
+      });
+      if (!membership) {
+        return jsonError("Job not found", 404);
+      }
     }
 
     return jsonOk({
       aiJob: {
         id: aiJob.id,
-        projectId: project.id,
+        projectId: legacyProjectId,
         type: aiJob.type,
         status: aiJob.status,
         progress: aiJob.progress,

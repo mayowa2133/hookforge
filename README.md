@@ -91,6 +91,8 @@ pnpm worker
 
 Open: `http://localhost:3000`
 
+Creator Studio: `http://localhost:3000/creator`
+
 ## End-to-End Render Flow
 
 1. Register or login.
@@ -107,6 +109,7 @@ Open: `http://localhost:3000`
 Implemented route handlers:
 
 - `POST /api/projects` create project
+- `GET /api/projects` list current user projects
 - `GET /api/projects/:id` fetch project + assets
 - `PATCH /api/projects/:id` update config/title
 - `POST /api/projects/:id/assets/presign` create presigned upload URL
@@ -122,6 +125,13 @@ Implemented route handlers:
 - `POST /api/projects/:id/ai-edit` queue one-click AI edit pipeline
 - `POST /api/projects/:id/chat-edit` deterministic chat-edit planner + revision append
 - `POST /api/ai-creator/generate` queue creator generation flow
+- `GET /api/ai-creator/actors` list creator actor presets
+- `GET /api/ai-creator/profiles` list voice profiles, clones, twins, and consent records
+- `POST /api/ai-creator/voice-clones` consent-tracked voice clone onboarding
+- `POST /api/ai-creator/echo/presign` presigned upload for recorded AI Echo voice sample
+- `POST /api/ai-creator/echo/submit` AI Echo submit + training job enqueue
+- `GET/POST /api/ai-creator/twins` AI twin catalog and onboarding
+- `POST /api/ai-creator/teleprompter/assist` deterministic script assist for teleprompter
 - `POST /api/ai-ads/generate` queue ad generation flow
 - `POST /api/ai-shorts/generate` queue shorts generation flow
 - `POST /api/dubbing/submit` queue dubbing/lipsync jobs with credit estimation
@@ -214,6 +224,29 @@ Implemented and wired into preview + cloud render:
 
 The Phase 1 editor is now operational end-to-end on web.
 
+## Phase 2 AI Captions + Edit + Chat (Completed)
+
+Implemented:
+
+- Auto-caption generation with transcript word timing
+- Caption translation jobs for supported top languages
+- AI Edit style packs applied as timeline operations
+- Chat-based edit planning with apply + undo stack
+- AI job polling and timeline refresh in-editor
+
+## Phase 3 AI Creator Stack (Completed on Web)
+
+Implemented:
+
+- `/creator` web app for AI Creator workflows
+- Prompt/script generation flow to a renderable project (`/api/ai-creator/generate`)
+- AI actor preset catalog and generation mapping
+- AI Echo voice record flow (presign upload + submit) with consent verification
+- Voice clone and AI twin onboarding APIs with trust-event logging
+- Teleprompter script assist + auto-scroll capture workflow
+- In-browser camera capture + direct upload into project video slots
+- End-to-end worker materialization for `AI_CREATOR` jobs
+
 ## Progress Tracker
 
 Progress artifacts:
@@ -243,6 +276,14 @@ Run tests:
 
 ```bash
 pnpm test
+```
+
+Run phase e2e checks:
+
+```bash
+pnpm test:e2e:phase012
+pnpm test:e2e:phase3
+pnpm test:e2e:phase0123
 ```
 
 ## Security / Safety Controls

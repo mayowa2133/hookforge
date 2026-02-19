@@ -26,6 +26,9 @@ export default function HomePage() {
             <Button asChild variant="outline" size="lg">
               <Link href="/dashboard">Open dashboard</Link>
             </Button>
+            <Button asChild variant="outline" size="lg">
+              <Link href="/creator">Creator studio</Link>
+            </Button>
           </div>
         </div>
         <div className="rounded-2xl border bg-slate-950 p-5 text-slate-100">
