@@ -43,6 +43,12 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   <Link href="/localization" className="font-medium hover:text-primary">
                     Localization
                   </Link>
+                  <Link href="/launch" className="font-medium hover:text-primary">
+                    Launch
+                  </Link>
+                  <Link href="/mobile" className="font-medium hover:text-primary">
+                    Mobile
+                  </Link>
                   <LogoutButton />
                 </>
               ) : (

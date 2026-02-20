@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getDefaultConfigFromTemplate } from "@/lib/template-runtime";
 import { routeErrorToResponse } from "@/lib/http";
+import { ensurePersonalWorkspace } from "@/lib/workspaces";
 
 const CreateProjectSchema = z.object({
   templateId: z.string().optional(),
@@ -67,9 +68,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Template not found" }, { status: 404 });
     }
 
+    const workspace = await ensurePersonalWorkspace(user.id, user.email);
+
     const project = await prisma.project.create({
       data: {
         userId: user.id,
+        workspaceId: workspace.id,
         templateId: template.id,
         title: body.title ?? `${template.name} Project`,
         status: "DRAFT",

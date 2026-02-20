@@ -94,6 +94,8 @@ Open: `http://localhost:3000`
 Creator Studio: `http://localhost:3000/creator`
 Growth Lab: `http://localhost:3000/growth`
 Localization Lab: `http://localhost:3000/localization`
+Launch Console: `http://localhost:3000/launch`
+Mobile Beta Guide: `http://localhost:3000/mobile`
 
 ## End-to-End Render Flow
 
@@ -145,6 +147,17 @@ Implemented route handlers:
 - `GET /api/public-api-keys` list workspace API keys
 - `POST /api/public-api-keys` create workspace API key (secret returned once)
 - `POST /api/public-api-keys/:id/disable` disable API key
+- `GET /api/workspace/members` list workspace members
+- `POST /api/workspace/members` add/update workspace member role
+- `PATCH /api/workspace/members/:memberId` update member role
+- `DELETE /api/workspace/members/:memberId` remove workspace member
+- `GET /api/workspace/projects` list shared workspace projects
+- `GET /api/billing/plans` plan and credit-pack catalog
+- `GET /api/billing/overview` billing + usage overview
+- `POST /api/billing/subscribe` activate subscription tier
+- `POST /api/billing/credit-packs/purchase` purchase one-time credits
+- `GET /api/billing/usage-alerts` derive credit usage alerts
+- `GET /api/mobile/config` mobile rollout and quick-link config
 
 Public API scaffold:
 
@@ -279,6 +292,19 @@ Implemented:
   - Public API sandbox submit/status
   - API key lifecycle controls and credit visibility
 
+## Phase 6 Mobile + Commercial Hardening (Completed)
+
+Implemented:
+
+- Launch Console web surface (`/launch`) for subscription tier management, credit-pack purchases, usage alerts, and shared workspace operations
+- Workspace collaboration baseline: member add/update/remove APIs and shared workspace project listing
+- Subscription and credit pack commercialization endpoints with ledger integration and balance updates
+- Usage alert derivation APIs for low-credit and high-burn detection
+- Mobile beta support:
+  - `/mobile` install and workflow guidance
+  - `/api/mobile/config` for mobile quick-link/capability config
+  - PWA manifest route (`/manifest.webmanifest`) for installability
+
 ## Progress Tracker
 
 Progress artifacts:
@@ -317,9 +343,11 @@ pnpm test:e2e:phase012
 pnpm test:e2e:phase3
 pnpm test:e2e:phase4
 pnpm test:e2e:phase5
+pnpm test:e2e:phase6
 pnpm test:e2e:phase0123
 pnpm test:e2e:phase01234
 pnpm test:e2e:phase012345
+pnpm test:e2e:phase0123456
 ```
 
 ## Security / Safety Controls

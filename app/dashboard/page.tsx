@@ -51,6 +51,10 @@ export default async function DashboardPage() {
           <Link href="/localization" className="underline">
             Open Localization Lab
           </Link>
+          . Need workspace billing, mobile rollout, and collaboration controls?{" "}
+          <Link href="/launch" className="underline">
+            Open Launch Console
+          </Link>
           .
         </p>
       </div>
