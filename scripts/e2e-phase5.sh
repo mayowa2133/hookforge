@@ -73,6 +73,15 @@ wait_for_public_job() {
 register_user
 echo "registered=$EMAIL"
 
+profile_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/workspace/translation-profiles" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Phase5 Neutral Glossary","sourceLanguage":"en","tone":"neutral","isDefault":true,"glossary":{"hookforge":"HookForge","captions":"subtitles"}}')
+
+profile_id=$(echo "$profile_resp" | jq -r ".profile.id")
+[ -n "$profile_id" ] && [ "$profile_id" != "null" ]
+echo "translation_profile_id=$profile_id"
+
 create_key_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/public-api-keys" \
   -H "Content-Type: application/json" \
@@ -92,7 +101,7 @@ echo "supported_languages=$lang_count"
 internal_submit_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/dubbing/submit" \
   -H "Content-Type: application/json" \
-  -d '{"sourceUrl":"https://example.com/source.mp4","sourceLanguage":"en","targetLanguages":["es","fr"],"lipDub":false}')
+  -d "$(printf '{\"sourceUrl\":\"https://example.com/source.mp4\",\"sourceLanguage\":\"en\",\"targetLanguages\":[\"es\",\"fr\"],\"lipDub\":false,\"translationProfileId\":\"%s\"}' "$profile_id")")
 
 internal_job_id=$(echo "$internal_submit_resp" | jq -r ".jobId")
 [ -n "$internal_job_id" ] && [ "$internal_job_id" != "null" ]
@@ -100,6 +109,10 @@ internal_job_id=$(echo "$internal_submit_resp" | jq -r ".jobId")
 internal_done_resp=$(wait_for_internal_job "$internal_job_id")
 internal_artifact_count=$(echo "$internal_done_resp" | jq -r ".aiJob.artifacts | length")
 [ "$internal_artifact_count" -ge 2 ]
+internal_mos=$(echo "$internal_done_resp" | jq -r ".aiJob.qualitySummary.mosAverage")
+awk "BEGIN { exit !($internal_mos >= 4.2) }"
+internal_artifact_mos=$(echo "$internal_done_resp" | jq -r ".aiJob.artifacts[0].quality.mosEstimate")
+[ -n "$internal_artifact_mos" ] && [ "$internal_artifact_mos" != "null" ]
 internal_artifact_url=$(echo "$internal_done_resp" | jq -r ".aiJob.artifacts[0].outputUrl")
 [ -n "$internal_artifact_url" ] && [ "$internal_artifact_url" != "null" ]
 internal_download_code=$(curl -sS -o /tmp/hookforge_phase5_internal.mp4 -w "%{http_code}" "$internal_artifact_url")
@@ -112,7 +125,7 @@ public_submit_resp=$(curl -sS \
   -H "Authorization: Bearer $api_key_secret" \
   -H "Content-Type: application/json" \
   -X POST "$BASE/api/public/v1/translate/submit" \
-  -d '{"sourceMediaUrl":"https://example.com/public-source.mp4","sourceLanguage":"en","targetLanguages":["de","it"],"lipDub":true}')
+  -d "$(printf '{\"sourceMediaUrl\":\"https://example.com/public-source.mp4\",\"sourceLanguage\":\"en\",\"targetLanguages\":[\"de\",\"it\"],\"lipDub\":true,\"translationProfileId\":\"%s\"}' "$profile_id")")
 
 public_job_id=$(echo "$public_submit_resp" | jq -r ".jobId")
 [ -n "$public_job_id" ] && [ "$public_job_id" != "null" ]
@@ -120,6 +133,12 @@ public_job_id=$(echo "$public_submit_resp" | jq -r ".jobId")
 public_done_resp=$(wait_for_public_job "$public_job_id" "$api_key_secret")
 public_artifact_count=$(echo "$public_done_resp" | jq -r ".job.artifacts | length")
 [ "$public_artifact_count" -ge 2 ]
+public_lipsync_median=$(echo "$public_done_resp" | jq -r ".job.qualitySummary.lipSyncMedianMs")
+public_lipsync_p95=$(echo "$public_done_resp" | jq -r ".job.qualitySummary.lipSyncP95Ms")
+awk "BEGIN { exit !($public_lipsync_median <= 60) }"
+awk "BEGIN { exit !($public_lipsync_p95 <= 120) }"
+public_lipsync_passed=$(echo "$public_done_resp" | jq -r ".job.artifacts[0].quality.lipSync.passed")
+[ "$public_lipsync_passed" = "true" ]
 public_artifact_url=$(echo "$public_done_resp" | jq -r ".job.artifacts[0].outputUrl")
 [ -n "$public_artifact_url" ] && [ "$public_artifact_url" != "null" ]
 public_download_code=$(curl -sS -o /tmp/hookforge_phase5_public.mp4 -w "%{http_code}" "$public_artifact_url")

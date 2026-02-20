@@ -129,6 +129,13 @@ function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
+function mergeStringRecord(base: Record<string, string>, override: Record<string, string>) {
+  return {
+    ...base,
+    ...override
+  };
+}
+
 function chooseStylePack(styleId: string) {
   const normalized = styleId.trim().toLowerCase();
   if (stylePacks[normalized]) {
@@ -816,8 +823,11 @@ async function handleCaptionTranslateJob(aiJob: AIJob) {
   const targetLanguages = asStringArray(input.targetLanguages)
     .map((entry) => entry.toLowerCase())
     .filter((entry) => entry !== sourceLanguage && isSupportedLanguage(entry));
-  const tone = asString(input.tone);
-  const glossary = asRecord(input.glossary);
+  const translationProfile = asRecord(input.translationProfile);
+  const tone = asString(translationProfile.tone, asString(input.tone));
+  const profileGlossary = asRecord(translationProfile.glossary) as Record<string, string>;
+  const inputGlossary = asRecord(input.glossary) as Record<string, string>;
+  const glossary = mergeStringRecord(profileGlossary, inputGlossary);
 
   const sourceSegments = await prisma.captionSegment.findMany({
     where: {
@@ -848,13 +858,13 @@ async function handleCaptionTranslateJob(aiJob: AIJob) {
     const translated = sourceSegments.map((segment) => ({
       startMs: segment.startMs,
       endMs: segment.endMs,
-      text: translateTextDeterministic({
-        text: segment.text,
-        targetLanguage: language,
-        tone,
-        glossary: glossary as Record<string, string>
-      })
-    }));
+        text: translateTextDeterministic({
+          text: segment.text,
+          targetLanguage: language,
+          tone,
+          glossary
+        })
+      }));
 
     if (translated.length === 0) {
       continue;
@@ -927,7 +937,8 @@ async function handleCaptionTranslateJob(aiJob: AIJob) {
     sourceLanguage,
     targetLanguages,
     translatedLanguages,
-    segmentCount: sourceSegments.length
+    segmentCount: sourceSegments.length,
+    translationProfileId: asString(translationProfile.profileId) || null
   };
 }
 

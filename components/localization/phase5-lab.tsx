@@ -17,6 +17,18 @@ type ApiKeyRow = {
   createdAt: string;
 };
 
+type TranslationProfileRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  sourceLanguage: string;
+  tone: string;
+  glossary: Record<string, string>;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type Artifact = {
   id: string;
   kind: string;
@@ -26,6 +38,14 @@ type Artifact = {
   sourceLanguage: string | null;
   mimeType: string | null;
   durationSec: number | null;
+  quality?: {
+    mosEstimate?: number;
+    lipSync?: {
+      driftMedianMs: number;
+      driftP95Ms: number;
+      passed: boolean;
+    };
+  } | null;
 };
 
 type InternalAiJob = {
@@ -35,6 +55,12 @@ type InternalAiJob = {
   progress: number;
   errorMessage?: string | null;
   artifacts: Artifact[];
+  qualitySummary?: {
+    mosAverage: number | null;
+    lipSyncMedianMs: number | null;
+    lipSyncP95Ms: number | null;
+    lipSyncPassRate: number | null;
+  } | null;
 };
 
 type PublicAiJob = {
@@ -44,14 +70,43 @@ type PublicAiJob = {
   progress: number;
   errorMessage?: string | null;
   artifacts: Artifact[];
+  qualitySummary?: {
+    mosAverage: number | null;
+    lipSyncMedianMs: number | null;
+    lipSyncP95Ms: number | null;
+    lipSyncPassRate: number | null;
+  } | null;
 };
 
 function toLanguageList(input: string) {
   return [...new Set(input.split(",").map((code) => code.trim().toLowerCase()).filter(Boolean))];
 }
 
+function parseGlossaryInput(input: string) {
+  const rows = input
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const glossary: Record<string, string> = {};
+  for (const row of rows) {
+    const [left, ...rest] = row.split("=");
+    if (!left || rest.length === 0) {
+      continue;
+    }
+    const key = left.trim().toLowerCase();
+    const value = rest.join("=").trim();
+    if (!key || !value) {
+      continue;
+    }
+    glossary[key] = value;
+  }
+  return glossary;
+}
+
 export function Phase5Lab() {
   const [apiKeys, setApiKeys] = useState<ApiKeyRow[]>([]);
+  const [translationProfiles, setTranslationProfiles] = useState<TranslationProfileRow[]>([]);
   const [credits, setCredits] = useState<number | null>(null);
   const [latestSecret, setLatestSecret] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -63,12 +118,20 @@ export function Phase5Lab() {
   const [internalSourceLanguage, setInternalSourceLanguage] = useState("en");
   const [internalTargetLanguages, setInternalTargetLanguages] = useState("es,fr");
   const [internalLipDub, setInternalLipDub] = useState(false);
+  const [internalProfileId, setInternalProfileId] = useState("");
 
   const [publicApiKey, setPublicApiKey] = useState("");
   const [publicSourceUrl, setPublicSourceUrl] = useState("https://example.com/reference-video.mp4");
   const [publicSourceLanguage, setPublicSourceLanguage] = useState("en");
   const [publicTargetLanguages, setPublicTargetLanguages] = useState("de,it");
   const [publicLipDub, setPublicLipDub] = useState(false);
+  const [publicProfileId, setPublicProfileId] = useState("");
+
+  const [profileName, setProfileName] = useState("Default Glossary");
+  const [profileSourceLanguage, setProfileSourceLanguage] = useState("en");
+  const [profileTone, setProfileTone] = useState("neutral");
+  const [profileGlossaryInput, setProfileGlossaryInput] = useState("hookforge=HookForge\\ncaption=subtitle");
+  const [profileIsDefault, setProfileIsDefault] = useState(true);
 
   const [internalJob, setInternalJob] = useState<InternalAiJob | null>(null);
   const [publicJob, setPublicJob] = useState<PublicAiJob | null>(null);
@@ -93,11 +156,26 @@ export function Phase5Lab() {
     setApiKeys((payload.apiKeys as ApiKeyRow[]) ?? []);
   };
 
+  const refreshTranslationProfiles = async () => {
+    const response = await fetch("/api/workspace/translation-profiles");
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Failed to load translation profiles");
+    }
+
+    const profiles = (payload.profiles as TranslationProfileRow[]) ?? [];
+    setTranslationProfiles(profiles);
+    if (profiles.length > 0) {
+      setInternalProfileId((current) => current || profiles[0].id);
+      setPublicProfileId((current) => current || profiles[0].id);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        await Promise.all([refreshApiKeys(), refreshCredits()]);
+        await Promise.all([refreshApiKeys(), refreshCredits(), refreshTranslationProfiles()]);
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : "Failed to load Phase 5 data");
@@ -185,6 +263,39 @@ export function Phase5Lab() {
     }
   };
 
+  const createTranslationProfile = async () => {
+    setBusyAction("create-profile");
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await fetch("/api/workspace/translation-profiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: profileName,
+          sourceLanguage: profileSourceLanguage,
+          tone: profileTone,
+          isDefault: profileIsDefault,
+          glossary: parseGlossaryInput(profileGlossaryInput)
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to create translation profile");
+      }
+      await refreshTranslationProfiles();
+      if (payload.profile?.id) {
+        setInternalProfileId(payload.profile.id as string);
+        setPublicProfileId(payload.profile.id as string);
+      }
+      setSuccess("Translation profile saved.");
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Failed to create translation profile");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const disableApiKey = async (id: string) => {
     setBusyAction(`disable-${id}`);
     setError(null);
@@ -216,7 +327,8 @@ export function Phase5Lab() {
           sourceUrl: internalSourceUrl,
           sourceLanguage: internalSourceLanguage,
           targetLanguages: toLanguageList(internalTargetLanguages),
-          lipDub: internalLipDub
+          lipDub: internalLipDub,
+          translationProfileId: internalProfileId || undefined
         })
       });
       const payload = await response.json();
@@ -253,7 +365,8 @@ export function Phase5Lab() {
           sourceMediaUrl: publicSourceUrl,
           sourceLanguage: publicSourceLanguage,
           targetLanguages: toLanguageList(publicTargetLanguages),
-          lipDub: publicLipDub
+          lipDub: publicLipDub,
+          translationProfileId: publicProfileId || undefined
         })
       });
       const payload = await response.json();
@@ -346,6 +459,48 @@ export function Phase5Lab() {
               )}
             </div>
             <p className="text-xs text-muted-foreground">Active keys: {activeApiKeys.length}</p>
+
+            <div className="space-y-2 rounded-md border p-3">
+              <p className="text-sm font-medium">Translation Profiles</p>
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Profile name</Label>
+                  <Input value={profileName} onChange={(event) => setProfileName(event.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Source language</Label>
+                  <Input value={profileSourceLanguage} onChange={(event) => setProfileSourceLanguage(event.target.value)} />
+                </div>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Tone</Label>
+                  <Input value={profileTone} onChange={(event) => setProfileTone(event.target.value)} />
+                </div>
+                <label className="mt-7 flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={profileIsDefault} onChange={(event) => setProfileIsDefault(event.target.checked)} />
+                  Set as default
+                </label>
+              </div>
+              <div className="space-y-1">
+                <Label>Glossary (one per line: key=value)</Label>
+                <Textarea rows={3} value={profileGlossaryInput} onChange={(event) => setProfileGlossaryInput(event.target.value)} />
+              </div>
+              <Button size="sm" variant="outline" onClick={createTranslationProfile} disabled={busyAction === "create-profile"}>
+                {busyAction === "create-profile" ? "Saving..." : "Save Translation Profile"}
+              </Button>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                {translationProfiles.length === 0 ? (
+                  <p>No profiles yet.</p>
+                ) : (
+                  translationProfiles.map((profile) => (
+                    <p key={profile.id}>
+                      {profile.name} ({profile.sourceLanguage}) {profile.isDefault ? "- default" : ""}
+                    </p>
+                  ))
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -369,6 +524,21 @@ export function Phase5Lab() {
                 <Input value={internalTargetLanguages} onChange={(event) => setInternalTargetLanguages(event.target.value)} />
               </div>
             </div>
+            <div className="space-y-1">
+              <Label>Translation profile</Label>
+              <select
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                value={internalProfileId}
+                onChange={(event) => setInternalProfileId(event.target.value)}
+              >
+                <option value="">None</option>
+                {translationProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name} ({profile.sourceLanguage})
+                  </option>
+                ))}
+              </select>
+            </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={internalLipDub} onChange={(event) => setInternalLipDub(event.target.checked)} />
               Enable lipdub pipeline
@@ -381,12 +551,20 @@ export function Phase5Lab() {
                 <p className="font-medium">
                   Job {internalJob.id} - {internalJob.status} ({internalJob.progress}%)
                 </p>
+                {internalJob.qualitySummary ? (
+                  <p className="text-xs text-muted-foreground">
+                    MOS avg: {internalJob.qualitySummary.mosAverage ?? "-"} | Lip-sync median/p95:{" "}
+                    {internalJob.qualitySummary.lipSyncMedianMs ?? "-"} / {internalJob.qualitySummary.lipSyncP95Ms ?? "-"} ms
+                  </p>
+                ) : null}
                 {internalJob.errorMessage ? <p className="text-destructive">{internalJob.errorMessage}</p> : null}
                 {internalJob.artifacts.length > 0 ? (
                   <div className="mt-2 space-y-1">
                     {internalJob.artifacts.map((artifact) => (
                       <a key={artifact.id} href={artifact.outputUrl} className="block text-primary underline" target="_blank" rel="noreferrer">
                         {artifact.language ?? "track"} - {artifact.kind}
+                        {artifact.quality?.mosEstimate ? ` (MOS ${artifact.quality.mosEstimate.toFixed(2)})` : ""}
+                        {artifact.quality?.lipSync ? ` [lip-sync ${artifact.quality.lipSync.driftMedianMs}/${artifact.quality.lipSync.driftP95Ms}ms]` : ""}
                       </a>
                     ))}
                   </div>
@@ -421,6 +599,21 @@ export function Phase5Lab() {
             <Label>Target languages (comma-separated)</Label>
             <Input value={publicTargetLanguages} onChange={(event) => setPublicTargetLanguages(event.target.value)} />
           </div>
+          <div className="space-y-1">
+            <Label>Translation profile</Label>
+            <select
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={publicProfileId}
+              onChange={(event) => setPublicProfileId(event.target.value)}
+            >
+              <option value="">None</option>
+              {translationProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name} ({profile.sourceLanguage})
+                </option>
+              ))}
+            </select>
+          </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={publicLipDub} onChange={(event) => setPublicLipDub(event.target.checked)} />
             Enable lipdub pipeline
@@ -430,19 +623,27 @@ export function Phase5Lab() {
           </Button>
           {publicJob ? (
             <div className="rounded-md border bg-muted/30 p-3 text-sm">
-              <p className="font-medium">
-                Public Job {publicJob.id} - {publicJob.status} ({publicJob.progress}%)
-              </p>
-              {publicJob.errorMessage ? <p className="text-destructive">{publicJob.errorMessage}</p> : null}
+                <p className="font-medium">
+                  Public Job {publicJob.id} - {publicJob.status} ({publicJob.progress}%)
+                </p>
+                {publicJob.qualitySummary ? (
+                  <p className="text-xs text-muted-foreground">
+                    MOS avg: {publicJob.qualitySummary.mosAverage ?? "-"} | Lip-sync median/p95:{" "}
+                    {publicJob.qualitySummary.lipSyncMedianMs ?? "-"} / {publicJob.qualitySummary.lipSyncP95Ms ?? "-"} ms
+                  </p>
+                ) : null}
+                {publicJob.errorMessage ? <p className="text-destructive">{publicJob.errorMessage}</p> : null}
               {publicJob.artifacts.length > 0 ? (
                 <div className="mt-2 space-y-1">
-                  {publicJob.artifacts.map((artifact) => (
-                    <a key={artifact.id} href={artifact.outputUrl} className="block text-primary underline" target="_blank" rel="noreferrer">
-                      {artifact.language ?? "track"} - {artifact.kind}
-                    </a>
-                  ))}
-                </div>
-              ) : null}
+                    {publicJob.artifacts.map((artifact) => (
+                      <a key={artifact.id} href={artifact.outputUrl} className="block text-primary underline" target="_blank" rel="noreferrer">
+                        {artifact.language ?? "track"} - {artifact.kind}
+                        {artifact.quality?.mosEstimate ? ` (MOS ${artifact.quality.mosEstimate.toFixed(2)})` : ""}
+                        {artifact.quality?.lipSync ? ` [lip-sync ${artifact.quality.lipSync.driftMedianMs}/${artifact.quality.lipSync.driftP95Ms}ms]` : ""}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
             </div>
           ) : null}
         </CardContent>

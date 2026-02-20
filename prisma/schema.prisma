@@ -223,6 +223,7 @@ model Workspace {
   publicApiKeys       PublicApiKey[]
   qualityFeedback     QualityFeedback[]
   usageAnomalies      UsageAnomaly[]
+  translationProfiles TranslationProfile[]
 
   @@index([ownerId])
 }
@@ -570,6 +571,23 @@ model CaptionStylePreset {
   captions     CaptionSegment[]
 
   @@index([workspaceId])
+}
+
+model TranslationProfile {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  name           String
+  sourceLanguage String
+  tone           String
+  glossary       Json
+  isDefault      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, sourceLanguage, isDefault])
 }
 
 model CaptionSegment {

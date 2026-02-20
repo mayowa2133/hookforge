@@ -6,6 +6,7 @@ import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { isSupportedLanguage } from "@/lib/languages";
 import { authenticatePublicApiKey } from "@/lib/public-api";
 import { validateImportUrl } from "@/lib/media-import";
+import { resolveWorkspaceTranslationProfile } from "@/lib/translation-profiles";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,10 @@ const TranslateSubmitSchema = z
     sourceMediaUrl: z.string().url().optional(),
     sourceStorageKey: z.string().min(1).optional(),
     lipDub: z.boolean().default(false),
-    callbackUrl: z.string().url().optional()
+    callbackUrl: z.string().url().optional(),
+    tone: z.string().max(120).optional(),
+    glossary: z.record(z.string()).optional(),
+    translationProfileId: z.string().min(1).optional()
   })
   .refine((value) => Boolean(value.sourceMediaUrl || value.sourceStorageKey), {
     message: "Provide sourceMediaUrl or sourceStorageKey"
@@ -43,6 +47,13 @@ export async function POST(request: Request) {
     }
 
     const sourceMediaUrl = body.sourceMediaUrl ? validateImportUrl(body.sourceMediaUrl).toString() : undefined;
+    const translationProfile = await resolveWorkspaceTranslationProfile({
+      workspaceId: apiKey.workspaceId,
+      profileId: body.translationProfileId,
+      sourceLanguage: body.sourceLanguage,
+      tone: body.tone,
+      glossary: body.glossary
+    });
 
     const jobType = body.lipDub ? "LIPSYNC" : "DUBBING";
     const aiJob = await enqueueAIJob({
@@ -56,7 +67,11 @@ export async function POST(request: Request) {
         sourceStorageKey: body.sourceStorageKey,
         callbackUrl: body.callbackUrl,
         lipDub: body.lipDub,
-        apiKeyId: apiKey.id
+        apiKeyId: apiKey.id,
+        tone: body.tone,
+        glossary: body.glossary,
+        translationProfileId: body.translationProfileId,
+        translationProfile
       }
     });
 
@@ -82,7 +97,8 @@ export async function POST(request: Request) {
         jobId: aiJob.id,
         status: aiJob.status,
         creditEstimate,
-        targetLanguages
+        targetLanguages,
+        translationProfile
       },
       202
     );

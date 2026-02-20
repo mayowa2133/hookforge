@@ -4,6 +4,13 @@ import { prisma } from "../prisma";
 import { isSupportedLanguage } from "../languages";
 import { copyStorageObject, uploadFileToStorage } from "../storage";
 import { probeStorageAsset } from "../ffprobe";
+import {
+  buildDubbingAdaptationPlan,
+  estimateDubbingMos,
+  scoreLipSyncAlignment,
+  summarizeDubbingQuality
+} from "./phase5-quality";
+import { normalizeGlossary } from "../translation-profiles";
 
 const VIDEO_MIME = "video/mp4";
 const MAX_TARGET_LANGUAGES = 8;
@@ -25,6 +32,24 @@ function asStringArray(value: unknown) {
 
 function normalizeLanguage(code: string) {
   return code.trim().toLowerCase();
+}
+
+function asNumber(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function resolveTranslationProfileInput(input: Record<string, unknown>, sourceLanguage: string) {
+  const raw = asRecord(input.translationProfile);
+  const source = normalizeLanguage(asString(raw.sourceLanguage, sourceLanguage));
+
+  return {
+    profileId: asString(raw.profileId) || null,
+    profileName: asString(raw.profileName) || null,
+    sourceLanguage: source,
+    tone: asString(raw.tone, "neutral"),
+    glossary: normalizeGlossary(raw.glossary as Record<string, unknown>)
+  };
 }
 
 export function normalizeTargetLanguages(targetLanguages: string[]) {
@@ -161,9 +186,11 @@ async function materializeArtifactFromSource(params: {
   sourceStorageKey: string;
   targetLanguage: string;
   lipDub: boolean;
+  attempt: number;
 }) {
   const variant = params.lipDub ? "lipsync" : "dub";
-  const storageKey = `ai/phase5/${params.aiJob.workspaceId}/${params.aiJob.id}/${variant}/${params.targetLanguage}.mp4`;
+  const suffix = params.attempt > 0 ? `-retry${params.attempt}` : "";
+  const storageKey = `ai/phase5/${params.aiJob.workspaceId}/${params.aiJob.id}/${variant}/${params.targetLanguage}${suffix}.mp4`;
 
   try {
     await copyStorageObject({
@@ -187,9 +214,15 @@ async function materializeArtifactFromSource(params: {
   };
 }
 
-async function materializeArtifactFromDemo(params: { aiJob: AIJob; targetLanguage: string; lipDub: boolean }) {
+async function materializeArtifactFromDemo(params: {
+  aiJob: AIJob;
+  targetLanguage: string;
+  lipDub: boolean;
+  attempt: number;
+}) {
   const variant = params.lipDub ? "lipsync" : "dub";
-  const storageKey = `ai/phase5/${params.aiJob.workspaceId}/${params.aiJob.id}/${variant}/${params.targetLanguage}.mp4`;
+  const suffix = params.attempt > 0 ? `-retry${params.attempt}` : "";
+  const storageKey = `ai/phase5/${params.aiJob.workspaceId}/${params.aiJob.id}/${variant}/${params.targetLanguage}${suffix}.mp4`;
   const demoSource = join(process.cwd(), "public", "demo-assets", "demo-portrait.mp4");
   await uploadFileToStorage(storageKey, demoSource, VIDEO_MIME);
   const probe = await probeStorageAsset(storageKey);
@@ -213,20 +246,39 @@ async function applyDubbingSideEffects(aiJob: AIJob, lipDub: boolean) {
   });
 
   if (existing.length > 0) {
+    const artifacts = existing.map((item) => {
+      const output = typeof item.output === "object" && item.output !== null ? (item.output as Record<string, unknown>) : {};
+      return {
+        storageKey: item.outputStorageKey,
+        output
+      };
+    });
+
+    const qualityRows = artifacts.map((artifact) => ({
+      language: asString(artifact.output.language, "unknown"),
+      quality: asRecord(artifact.output.quality) as {
+        mosEstimate: number;
+        lipSync?: { driftMedianMs: number; driftP95Ms: number; passed: boolean };
+      }
+    }));
+
     return {
       created: false,
       reused: true,
-      artifacts: existing.map((item) => ({
-        storageKey: item.outputStorageKey,
-        ...(typeof item.output === "object" && item.output !== null ? (item.output as Record<string, unknown>) : {})
-      }))
+      artifacts: artifacts.map((artifact) => ({
+        storageKey: artifact.storageKey,
+        ...artifact.output
+      })),
+      qualitySummary: summarizeDubbingQuality(qualityRows)
     };
   }
 
   const input = asRecord(aiJob.input);
   const requestedLanguages = asStringArray(input.targetLanguages);
   const targetLanguages = normalizeTargetLanguages(requestedLanguages);
-  const sourceLanguage = normalizeLanguage(asString(input.sourceLanguage, "en"));
+  const requestedSourceLanguage = normalizeLanguage(asString(input.sourceLanguage, "en"));
+  const translationProfile = resolveTranslationProfileInput(input, requestedSourceLanguage);
+  const sourceLanguage = normalizeLanguage(translationProfile.sourceLanguage || requestedSourceLanguage);
 
   if (targetLanguages.length === 0) {
     return {
@@ -248,16 +300,28 @@ async function applyDubbingSideEffects(aiJob: AIJob, lipDub: boolean) {
     };
   }
 
-  const firstLanguage = targetLanguages[0];
-  const firstArtifact =
-    source.storageKey && source.mimeType.startsWith("video/")
-      ? await materializeArtifactFromSource({
-          aiJob,
-          sourceStorageKey: source.storageKey,
-          targetLanguage: firstLanguage,
-          lipDub
-        })
-      : await materializeArtifactFromDemo({ aiJob, targetLanguage: firstLanguage, lipDub });
+  const sourceDurationSec = Math.max(1, asNumber(source.durationSec, 8));
+
+  const materialize = async (language: string, attempt: number) => {
+    if (source.storageKey && source.mimeType.startsWith("video/")) {
+      return materializeArtifactFromSource({
+        aiJob,
+        sourceStorageKey: source.storageKey,
+        targetLanguage: language,
+        lipDub,
+        attempt
+      });
+    }
+
+    return materializeArtifactFromDemo({
+      aiJob,
+      targetLanguage: language,
+      lipDub,
+      attempt
+    });
+  };
+
+  const firstArtifact = await materialize(targetLanguages[0], 0);
 
   const sourceStorageKey = source.storageKey ?? firstArtifact.storageKey;
   const sourceMediaAssetId = await ensureSourceMediaAsset({
@@ -273,21 +337,78 @@ async function applyDubbingSideEffects(aiJob: AIJob, lipDub: boolean) {
     }
   });
 
-  const rest = await Promise.all(
-    targetLanguages.slice(1).map(async (language) => {
-      if (source.storageKey && source.mimeType.startsWith("video/")) {
-        return materializeArtifactFromSource({
-          aiJob,
-          sourceStorageKey: source.storageKey,
-          targetLanguage: language,
-          lipDub
-        });
-      }
-      return materializeArtifactFromDemo({ aiJob, targetLanguage: language, lipDub });
-    })
-  );
+  const artifacts: Array<{
+    language: string;
+    storageKey: string;
+    mimeType: string;
+    durationSec: number | null;
+    width: number | null;
+    height: number | null;
+    quality: {
+      adaptationPlan: ReturnType<typeof buildDubbingAdaptationPlan>;
+      lipSync?: ReturnType<typeof scoreLipSyncAlignment>;
+      mosEstimate: number;
+      passed: {
+        mosTarget: boolean;
+        lipSyncTarget: boolean;
+      };
+      regenerateCount: number;
+    };
+  }> = [];
 
-  const artifacts = [firstArtifact, ...rest];
+  for (const language of targetLanguages) {
+    const adaptationPlan = buildDubbingAdaptationPlan({
+      sourceDurationSec,
+      sourceLanguage,
+      targetLanguage: language,
+      lipDub,
+      tone: translationProfile.tone,
+      glossarySize: Object.keys(translationProfile.glossary).length
+    });
+
+    let attempt = 0;
+    let artifact = await materialize(language, attempt);
+    let lipSyncScore = lipDub
+      ? scoreLipSyncAlignment({
+          targetLanguage: language,
+          durationSec: Math.max(1, asNumber(artifact.durationSec, sourceDurationSec)),
+          attempt,
+          adaptationPlan
+        })
+      : undefined;
+
+    while (lipSyncScore?.regenerateRecommended) {
+      attempt += 1;
+      artifact = await materialize(language, attempt);
+      lipSyncScore = scoreLipSyncAlignment({
+        targetLanguage: language,
+        durationSec: Math.max(1, asNumber(artifact.durationSec, sourceDurationSec)),
+        attempt,
+        adaptationPlan
+      });
+    }
+
+    const mosEstimate = estimateDubbingMos({
+      adaptationPlan,
+      lipSyncScore,
+      lipDub
+    });
+
+    artifacts.push({
+      ...artifact,
+      quality: {
+        adaptationPlan,
+        lipSync: lipSyncScore,
+        mosEstimate,
+        passed: {
+          mosTarget: mosEstimate >= 4.2,
+          lipSyncTarget: lipDub ? Boolean(lipSyncScore?.passed) : true
+        },
+        regenerateCount: attempt
+      }
+    });
+  }
+
   const artifactKind = lipDub ? "LIPSYNC" : "DUBBED";
   const resultKind = lipDub ? "phase5_lipsync_track" : "phase5_dubbed_track";
 
@@ -304,7 +425,9 @@ async function applyDubbingSideEffects(aiJob: AIJob, lipDub: boolean) {
             sourceLanguage,
             lipDub,
             aiJobId: aiJob.id,
-            legacyProjectId: source.legacyProjectId
+            legacyProjectId: source.legacyProjectId,
+            translationProfile,
+            quality: artifact.quality
           }
         }
       });
@@ -322,12 +445,30 @@ async function applyDubbingSideEffects(aiJob: AIJob, lipDub: boolean) {
             durationSec: artifact.durationSec,
             width: artifact.width,
             height: artifact.height,
-            mediaArtifactKind: artifactKind
+            mediaArtifactKind: artifactKind,
+            quality: artifact.quality,
+            translationProfile
           }
         }
       });
     }
   });
+
+  const qualitySummary = summarizeDubbingQuality(
+    artifacts.map((artifact) => ({
+      language: artifact.language,
+      quality: {
+        mosEstimate: artifact.quality.mosEstimate,
+        lipSync: artifact.quality.lipSync
+          ? {
+              driftMedianMs: artifact.quality.lipSync.driftMedianMs,
+              driftP95Ms: artifact.quality.lipSync.driftP95Ms,
+              passed: artifact.quality.lipSync.passed
+            }
+          : undefined
+      }
+    }))
+  );
 
   return {
     created: true,
@@ -335,6 +476,8 @@ async function applyDubbingSideEffects(aiJob: AIJob, lipDub: boolean) {
     targetLanguages,
     legacyProjectId: source.legacyProjectId,
     sourceStorageKey,
+    translationProfile,
+    qualitySummary,
     artifacts
   };
 }

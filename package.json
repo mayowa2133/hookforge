@@ -26,6 +26,7 @@
     "test:e2e:phase5": "bash scripts/e2e-phase5.sh",
     "test:e2e:phase6": "bash scripts/e2e-phase6.sh",
     "test:e2e:trackab": "bash scripts/e2e-trackab.sh",
+    "test:e2e:trackabc": "bash scripts/e2e-trackabc.sh",
     "test:e2e:phase012": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh",
     "test:e2e:phase0123": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh && bash scripts/e2e-phase3.sh",
     "test:e2e:phase01234": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh && bash scripts/e2e-phase3.sh && bash scripts/e2e-phase4.sh",

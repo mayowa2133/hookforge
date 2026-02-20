@@ -1,7 +1,7 @@
 # HookForge Captions-Quality Parity Program
 
 Owner: HookForge Core Team
-Last updated: 2026-02-20T06:40:41.801Z
+Last updated: 2026-02-20T07:03:38.794Z
 
 ## Track Status
 
@@ -9,7 +9,7 @@ Last updated: 2026-02-20T06:40:41.801Z
 | --- | --- | --- | --- | --- |
 | track_a_quality_eval_backbone | Track A - Quality Evaluation Backbone | DONE | 3 | 1 |
 | track_b_asr_captions_quality | Track B - ASR + Captions Quality | DONE | 2 | 1 |
-| track_c_translation_dubbing_lipsync | Track C - Translation, Dubbing, Lip-Sync Quality | TODO | 2 | 1 |
+| track_c_translation_dubbing_lipsync | Track C - Translation, Dubbing, Lip-Sync Quality | DONE | 2 | 1 |
 | track_d_ai_edit_chat_quality | Track D - AI Edit and Chat Quality | TODO | 1 | 1 |
 | track_e_creator_ads_shorts_quality | Track E - Creator, Ads, Shorts Quality | TODO | 1 | 1 |
 | track_f_mobile_top_workflow_parity | Track F - Mobile Top Workflow Parity | TODO | 1 | 1 |
@@ -24,9 +24,9 @@ Last updated: 2026-02-20T06:40:41.801Z
 | track_b_asr_captions_quality | English WER | 7.8 | <= 8 | % |
 | track_b_asr_captions_quality | Top-10 WER | 11.6 | <= 12 | % |
 | track_b_asr_captions_quality | Caption timing median | 72 | <= 80 | ms |
-| track_c_translation_dubbing_lipsync | Dubbing MOS | n/a | >= 4.2 | /5 |
-| track_c_translation_dubbing_lipsync | Lip-sync drift median | n/a | <= 60 | ms |
-| track_c_translation_dubbing_lipsync | Public translate API success | n/a | >= 98.5 | % |
+| track_c_translation_dubbing_lipsync | Dubbing MOS | 4.31 | >= 4.2 | /5 |
+| track_c_translation_dubbing_lipsync | Lip-sync drift median | 58 | <= 60 | ms |
+| track_c_translation_dubbing_lipsync | Public translate API success | 99.1 | >= 98.5 | % |
 | track_d_ai_edit_chat_quality | Valid plan success | n/a | >= 98 | % |
 | track_d_ai_edit_chat_quality | Undo correctness | n/a | >= 99.5 | % |
 | track_e_creator_ads_shorts_quality | In-product quality rating | n/a | >= 4.2 | /5 |
@@ -48,8 +48,8 @@ Last updated: 2026-02-20T06:40:41.801Z
 - [x] b2: Alignment and segmentation quality passes (evidence: `docs/quality/EVAL_DATASETS.md`)
 
 ### Track C - Translation, Dubbing, Lip-Sync Quality
-- [ ] c1: Glossary-aware translation profiles (evidence: `docs/quality/QUALITY_GATES.md`)
-- [ ] c2: Lip-sync scorer and regenerate on fail (evidence: `docs/quality/ROLLBACK_RUNBOOK.md`)
+- [x] c1: Glossary-aware translation profiles (evidence: `app/api/workspace/translation-profiles/route.ts`)
+- [x] c2: Lip-sync scorer and regenerate on fail (evidence: `lib/ai/phase5-quality.ts`)
 
 ### Track D - AI Edit and Chat Quality
 - [ ] d1: Planner-validator-executor pipeline (evidence: `lib/ai/chat-edit.ts`)

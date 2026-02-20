@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { prisma } from "./prisma";
 import { env } from "./env";
+import { ensureDefaultWorkspaceTranslationProfile } from "./translation-profiles";
 
 function toSlug(input: string) {
   return input
@@ -41,6 +42,7 @@ export async function ensurePersonalWorkspace(userId: string, email: string) {
         }
       });
     }
+    await ensureDefaultWorkspaceTranslationProfile(existingMembership.workspace.id);
     return existingMembership.workspace;
   }
 
@@ -66,6 +68,8 @@ export async function ensurePersonalWorkspace(userId: string, email: string) {
       }
     }
   });
+
+  await ensureDefaultWorkspaceTranslationProfile(workspace.id);
 
   return workspace;
 }

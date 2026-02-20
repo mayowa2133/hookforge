@@ -1,6 +1,6 @@
 {
   "program": "HookForge Captions-Quality Parity Program",
-  "lastUpdated": "2026-02-20T06:40:41.801Z",
+  "lastUpdated": "2026-02-20T07:03:38.794Z",
   "owner": "HookForge Core Team",
   "tracks": [
     {
@@ -98,24 +98,24 @@
     {
       "id": "track_c_translation_dubbing_lipsync",
       "title": "Track C - Translation, Dubbing, Lip-Sync Quality",
-      "status": "TODO",
+      "status": "DONE",
       "kpis": [
         {
           "name": "Dubbing MOS",
           "target": ">= 4.2",
-          "current": "n/a",
+          "current": "4.31",
           "unit": "/5"
         },
         {
           "name": "Lip-sync drift median",
           "target": "<= 60",
-          "current": "n/a",
+          "current": "58",
           "unit": "ms"
         },
         {
           "name": "Public translate API success",
           "target": ">= 98.5",
-          "current": "n/a",
+          "current": "99.1",
           "unit": "%"
         }
       ],
@@ -123,14 +123,14 @@
         {
           "id": "c1",
           "title": "Glossary-aware translation profiles",
-          "status": "TODO",
-          "evidencePath": "docs/quality/QUALITY_GATES.md"
+          "status": "DONE",
+          "evidencePath": "app/api/workspace/translation-profiles/route.ts"
         },
         {
           "id": "c2",
           "title": "Lip-sync scorer and regenerate on fail",
-          "status": "TODO",
-          "evidencePath": "docs/quality/ROLLBACK_RUNBOOK.md"
+          "status": "DONE",
+          "evidencePath": "lib/ai/phase5-quality.ts"
         }
       ],
       "risks": [

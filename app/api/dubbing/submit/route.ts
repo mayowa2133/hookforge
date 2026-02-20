@@ -6,6 +6,7 @@ import { reserveCredits } from "@/lib/credits";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { isSupportedLanguage } from "@/lib/languages";
 import { validateImportUrl } from "@/lib/media-import";
+import { resolveWorkspaceTranslationProfile } from "@/lib/translation-profiles";
 
 export const runtime = "nodejs";
 
@@ -15,7 +16,10 @@ const DubbingSchema = z
     sourceUrl: z.string().url().optional(),
     sourceLanguage: z.string().min(2).max(12).default("en"),
     targetLanguages: z.array(z.string().min(2).max(12)).min(1),
-    lipDub: z.boolean().default(false)
+    lipDub: z.boolean().default(false),
+    tone: z.string().max(120).optional(),
+    glossary: z.record(z.string()).optional(),
+    translationProfileId: z.string().min(1).optional()
   })
   .refine((value) => Boolean(value.sourceAssetId || value.sourceUrl), {
     message: "Provide sourceAssetId or sourceUrl"
@@ -42,6 +46,14 @@ export async function POST(request: Request) {
     }
 
     const sourceUrl = body.sourceUrl ? validateImportUrl(body.sourceUrl).toString() : undefined;
+    const translationProfile = await resolveWorkspaceTranslationProfile({
+      workspaceId: workspace.id,
+      profileId: body.translationProfileId,
+      sourceLanguage: body.sourceLanguage,
+      tone: body.tone,
+      glossary: body.glossary
+    });
+
     const estimatedCredits = estimatePhase5DubbingCredits({
       targetLanguageCount: targetLanguages.length,
       lipDub: body.lipDub,
@@ -58,7 +70,11 @@ export async function POST(request: Request) {
         sourceUrl,
         sourceLanguage: body.sourceLanguage,
         targetLanguages,
-        lipDub: body.lipDub
+        lipDub: body.lipDub,
+        tone: body.tone,
+        glossary: body.glossary,
+        translationProfileId: body.translationProfileId,
+        translationProfile
       }
     });
 
@@ -80,7 +96,8 @@ export async function POST(request: Request) {
         creditEstimate: estimatedCredits,
         targetLanguages,
         status: aiJob.status,
-        slaWindow: body.lipDub ? "15-45 minutes" : "5-20 minutes"
+        slaWindow: body.lipDub ? "15-45 minutes" : "5-20 minutes",
+        translationProfile
       },
       202
     );

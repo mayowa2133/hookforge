@@ -46,10 +46,24 @@ export async function GET(request: Request, { params }: Context) {
             language: typeof output.language === "string" ? output.language : null,
             sourceLanguage: typeof output.sourceLanguage === "string" ? output.sourceLanguage : null,
             mimeType: typeof output.mimeType === "string" ? output.mimeType : null,
-            durationSec: typeof output.durationSec === "number" ? output.durationSec : null
+            durationSec: typeof output.durationSec === "number" ? output.durationSec : null,
+            quality: typeof output.quality === "object" && output.quality !== null ? output.quality : null,
+            translationProfile:
+              typeof output.translationProfile === "object" && output.translationProfile !== null
+                ? output.translationProfile
+                : null
           };
         })
     );
+
+    const outputRecord = typeof aiJob.output === "object" && aiJob.output !== null ? (aiJob.output as Record<string, unknown>) : {};
+    const sideEffects = typeof outputRecord.sideEffects === "object" && outputRecord.sideEffects !== null
+      ? (outputRecord.sideEffects as Record<string, unknown>)
+      : {};
+    const phase5Summary =
+      typeof sideEffects.phase5 === "object" && sideEffects.phase5 !== null
+        ? (sideEffects.phase5 as Record<string, unknown>).qualitySummary ?? null
+        : null;
 
     return jsonOk({
       job: {
@@ -63,7 +77,8 @@ export async function GET(request: Request, { params }: Context) {
         updatedAt: aiJob.updatedAt,
         latestProviderRun: aiJob.providerRuns[0] ?? null,
         results: aiJob.results,
-        artifacts
+        artifacts,
+        qualitySummary: phase5Summary
       }
     });
   } catch (error) {
