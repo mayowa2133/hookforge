@@ -43,6 +43,10 @@ export default async function DashboardPage() {
           <Link href="/creator" className="underline">
             Open Creator Studio
           </Link>
+          . Need ads, shorts, Reddit workflows, and compliance controls?{" "}
+          <Link href="/growth" className="underline">
+            Open Growth Lab
+          </Link>
           .
         </p>
       </div>

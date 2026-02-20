@@ -98,10 +98,16 @@
       "details": "Web Creator Studio now includes prompt/script generation jobs, actor presets, voice clone + AI Echo onboarding, AI twin onboarding, teleprompter assist, camera capture/upload, and end-to-end AI_CREATOR render path coverage"
     },
     {
-      "id": "phase4_to_phase6_full_parity",
-      "title": "Phase 4-6 ads, shorts, dubbing API hardening, mobile, and commercialization",
+      "id": "phase4_growth_url_compliance",
+      "title": "Phase 4 ads, shorts, Reddit workflows, and compliance controls",
+      "status": "DONE",
+      "details": "Growth Lab now ships AI Ads from rights-attested website URLs, AI Shorts from long-form URLs (including YouTube), Reddit-to-video generation, compliance audit APIs, and takedown/source-link deactivation workflows with trust-event logging"
+    },
+    {
+      "id": "phase5_to_phase6_full_parity",
+      "title": "Phase 5-6 dubbing API hardening, mobile, and commercialization",
       "status": "TODO",
-      "details": "Roadmap remains active for deeper ads/shorts generation quality, full dubbing/lipsync productization, mobile parity, and subscription commercialization"
+      "details": "Roadmap remains active for full dubbing/lipsync productization, public API monetization hardening, mobile parity, and subscription commercialization"
     }
   ]
 }

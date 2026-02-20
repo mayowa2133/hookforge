@@ -92,6 +92,7 @@ pnpm worker
 Open: `http://localhost:3000`
 
 Creator Studio: `http://localhost:3000/creator`
+Growth Lab: `http://localhost:3000/growth`
 
 ## End-to-End Render Flow
 
@@ -134,6 +135,9 @@ Implemented route handlers:
 - `POST /api/ai-creator/teleprompter/assist` deterministic script assist for teleprompter
 - `POST /api/ai-ads/generate` queue ad generation flow
 - `POST /api/ai-shorts/generate` queue shorts generation flow
+- `POST /api/reddit-to-video/generate` queue Reddit-to-video flow
+- `GET /api/compliance/audit` rights/source/trust event audit summary
+- `POST /api/compliance/takedown` record takedown and disable source link attestations
 - `POST /api/dubbing/submit` queue dubbing/lipsync jobs with credit estimation
 - `GET /api/credits/balance` workspace credit balance
 - `GET /api/credits/ledger` workspace credit ledger entries
@@ -247,6 +251,17 @@ Implemented:
 - In-browser camera capture + direct upload into project video slots
 - End-to-end worker materialization for `AI_CREATOR` jobs
 
+## Phase 4 Ads + Shorts + Reddit + Compliance (Completed on Web)
+
+Implemented:
+
+- AI Ads flow from rights-attested website URLs with editable deterministic ad script blocks
+- AI Shorts flow from rights-attested source URLs (including YouTube URL workflows) with shortlist generation and editable project drafts
+- Reddit-to-video generation route with context extraction and editable project draft outputs
+- Compliance audit API and takedown API with trust-event logging and source-link attestation deactivation
+- Growth Lab web surface (`/growth`) covering all Phase 4 workflows
+- End-to-end AI side-effects for `AI_ADS` and `AI_SHORTS` in worker orchestration
+
 ## Progress Tracker
 
 Progress artifacts:
@@ -283,7 +298,9 @@ Run phase e2e checks:
 ```bash
 pnpm test:e2e:phase012
 pnpm test:e2e:phase3
+pnpm test:e2e:phase4
 pnpm test:e2e:phase0123
+pnpm test:e2e:phase01234
 ```
 
 ## Security / Safety Controls

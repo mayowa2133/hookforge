@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-19T15:38:58.405Z
+Last updated: 2026-02-20T04:53:27.184Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -34,7 +34,9 @@ Last updated: 2026-02-19T15:38:58.405Z
   - Auto-captions, caption translation, AI edit style packs, chat-edit apply/undo, editor UI controls, AI job polling API, and end-to-end validation are operational
 - [x] Phase 3 AI creator stack
   - Web Creator Studio now includes prompt/script generation jobs, actor presets, voice clone + AI Echo onboarding, AI twin onboarding, teleprompter assist, camera capture/upload, and end-to-end AI_CREATOR render path coverage
-- [ ] Phase 4-6 ads, shorts, dubbing API hardening, mobile, and commercialization
-  - Roadmap remains active for deeper ads/shorts generation quality, full dubbing/lipsync productization, mobile parity, and subscription commercialization
+- [x] Phase 4 ads, shorts, Reddit workflows, and compliance controls
+  - Growth Lab now ships AI Ads from rights-attested website URLs, AI Shorts from long-form URLs (including YouTube), Reddit-to-video generation, compliance audit APIs, and takedown/source-link deactivation workflows with trust-event logging
+- [ ] Phase 5-6 dubbing API hardening, mobile, and commercialization
+  - Roadmap remains active for full dubbing/lipsync productization, public API monetization hardening, mobile parity, and subscription commercialization
 
 Status legend: `[x]=DONE`, `[-]=IN_PROGRESS`, `[ ]=TODO`

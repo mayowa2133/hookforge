@@ -22,8 +22,10 @@
     "test:e2e:all": "bash scripts/e2e-all.sh",
     "test:e2e:phase2": "bash scripts/e2e-phase2.sh",
     "test:e2e:phase3": "bash scripts/e2e-phase3.sh",
+    "test:e2e:phase4": "bash scripts/e2e-phase4.sh",
     "test:e2e:phase012": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh",
     "test:e2e:phase0123": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh && bash scripts/e2e-phase3.sh",
+    "test:e2e:phase01234": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh && bash scripts/e2e-phase3.sh && bash scripts/e2e-phase4.sh",
     "progress": "tsx scripts/update-progress.ts"
   },
   "dependencies": {
