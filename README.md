@@ -158,12 +158,20 @@ Implemented route handlers:
 - `POST /api/billing/credit-packs/purchase` purchase one-time credits
 - `GET /api/billing/usage-alerts` derive credit usage alerts
 - `GET /api/mobile/config` mobile rollout and quick-link config
+- `GET /api/mobile/health` mobile reliability + quality-system health signal
+- `POST /api/quality/evals/run` trigger quality eval execution and gate scoring
+- `GET /api/quality/evals/:id` read eval-run status/results
+- `GET /api/quality/metrics` read quality/routing/anomaly dashboard payload
+- `POST /api/quality/feedback` submit structured quality feedback
+- `GET /api/models/route-policy` list model routing policies
+- `POST /api/models/route-policy` upsert model routing policy with quality-gate enforcement
 
 Public API scaffold:
 
 - `GET /api/public/v1/translate/supported-languages`
 - `POST /api/public/v1/translate/submit`
 - `GET /api/public/v1/translate/status/:id`
+- `POST /api/public/v1/translate/estimate`
 
 Create a public API key for local testing:
 
@@ -249,7 +257,7 @@ The Phase 1 editor is now operational end-to-end on web.
 
 Implemented:
 
-- Auto-caption generation with transcript word timing
+- Auto-caption generation with ASR orchestration, confidence-gated fallback re-decode, forced alignment refinement, and style-safe segmentation
 - Caption translation jobs for supported top languages
 - AI Edit style packs applied as timeline operations
 - Chat-based edit planning with apply + undo stack
@@ -312,11 +320,18 @@ Progress artifacts:
 - `progress/progress.json` (machine-readable)
 - `progress/PROGRESS.md` (generated checklist)
 - `scripts/update-progress.ts`
+- `progress/captions_quality_progress.json` (quality parity machine state)
+- `progress/CAPTIONS_QUALITY_PARITY_PLAN.md` (generated quality parity board)
+- `scripts/update-captions-quality-progress.ts`
+- `docs/quality/QUALITY_GATES.md`
+- `docs/quality/EVAL_DATASETS.md`
+- `docs/quality/ROLLBACK_RUNBOOK.md`
 
 Update command:
 
 ```bash
 pnpm progress
+pnpm progress:quality
 ```
 
 ## Tests
@@ -344,6 +359,7 @@ pnpm test:e2e:phase3
 pnpm test:e2e:phase4
 pnpm test:e2e:phase5
 pnpm test:e2e:phase6
+pnpm test:e2e:trackab
 pnpm test:e2e:phase0123
 pnpm test:e2e:phase01234
 pnpm test:e2e:phase012345

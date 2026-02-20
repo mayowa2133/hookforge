@@ -59,3 +59,29 @@ export function getPrimaryProvider(capability: ProviderCapability) {
   const configured = providers.find((provider) => provider.configured);
   return configured ?? providers[0];
 }
+
+export function getProviderByName(capability: ProviderCapability, providerName: string) {
+  const providers = providerRegistry[capability];
+  const matched = providers.find((provider) => provider.name === providerName);
+  if (!matched) {
+    return null;
+  }
+  return matched;
+}
+
+export function listProviders(capability: ProviderCapability) {
+  return providerRegistry[capability];
+}
+
+export function getFallbackProvider(capability: ProviderCapability, excludeProviderName?: string) {
+  const providers = providerRegistry[capability];
+  const configured = providers.find(
+    (provider) => provider.configured && provider.name !== excludeProviderName
+  );
+  if (configured) {
+    return configured;
+  }
+
+  const firstAvailable = providers.find((provider) => provider.name !== excludeProviderName);
+  return firstAvailable ?? null;
+}

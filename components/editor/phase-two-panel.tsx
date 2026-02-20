@@ -47,6 +47,11 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
   const [autoLanguage, setAutoLanguage] = useState("en");
   const [diarization, setDiarization] = useState(false);
   const [punctuationStyle, setPunctuationStyle] = useState<"auto" | "minimal" | "full">("auto");
+  const [confidenceThreshold, setConfidenceThreshold] = useState(0.86);
+  const [reDecodeEnabled, setReDecodeEnabled] = useState(true);
+  const [maxWordsPerSegment, setMaxWordsPerSegment] = useState(7);
+  const [maxCharsPerLine, setMaxCharsPerLine] = useState(24);
+  const [maxLinesPerSegment, setMaxLinesPerSegment] = useState(2);
   const [targetLanguagesInput, setTargetLanguagesInput] = useState("es,fr");
   const [translateTone, setTranslateTone] = useState("neutral");
   const [aiEditStyle, setAiEditStyle] = useState("punchy");
@@ -151,7 +156,12 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
         body: JSON.stringify({
           language: autoLanguage,
           diarization,
-          punctuationStyle
+          punctuationStyle,
+          confidenceThreshold: Number.isFinite(confidenceThreshold) ? confidenceThreshold : 0.86,
+          reDecodeEnabled,
+          maxWordsPerSegment: Number.isFinite(maxWordsPerSegment) ? maxWordsPerSegment : 7,
+          maxCharsPerLine: Number.isFinite(maxCharsPerLine) ? maxCharsPerLine : 24,
+          maxLinesPerSegment: Number.isFinite(maxLinesPerSegment) ? maxLinesPerSegment : 2
         })
       });
       const payload = await response.json();
@@ -319,9 +329,56 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
               </select>
             </div>
           </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <Label>Confidence gate</Label>
+              <Input
+                type="number"
+                min={0.55}
+                max={0.99}
+                step={0.01}
+                value={confidenceThreshold}
+                onChange={(event) => setConfidenceThreshold(Number(event.target.value))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Words/segment</Label>
+              <Input
+                type="number"
+                min={3}
+                max={12}
+                step={1}
+                value={maxWordsPerSegment}
+                onChange={(event) => setMaxWordsPerSegment(Number(event.target.value))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Chars/line</Label>
+              <Input
+                type="number"
+                min={14}
+                max={42}
+                step={1}
+                value={maxCharsPerLine}
+                onChange={(event) => setMaxCharsPerLine(Number(event.target.value))}
+              />
+            </div>
+          </div>
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input type="checkbox" checked={diarization} onChange={(event) => setDiarization(event.target.checked)} />
             Enable diarization labels
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={reDecodeEnabled} onChange={(event) => setReDecodeEnabled(event.target.checked)} />
+            Re-decode with fallback provider if confidence gate fails
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={maxLinesPerSegment === 2}
+              onChange={(event) => setMaxLinesPerSegment(event.target.checked ? 2 : 1)}
+            />
+            Style-safe captions (2 lines max)
           </label>
           <Button size="sm" onClick={() => void runAutoCaptions()} disabled={busyAction !== null}>
             {busyAction === "auto" ? "Queueing..." : "Generate Auto Captions"}

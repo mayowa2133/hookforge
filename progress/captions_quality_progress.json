@@ -1,0 +1,281 @@
+{
+  "program": "HookForge Captions-Quality Parity Program",
+  "lastUpdated": "2026-02-20T06:40:41.801Z",
+  "owner": "HookForge Core Team",
+  "tracks": [
+    {
+      "id": "track_a_quality_eval_backbone",
+      "title": "Track A - Quality Evaluation Backbone",
+      "status": "DONE",
+      "kpis": [
+        {
+          "name": "Eval reproducibility coverage",
+          "target": "100",
+          "current": "60",
+          "unit": "%"
+        },
+        {
+          "name": "Model promotion gate enforcement",
+          "target": "100",
+          "current": "65",
+          "unit": "%"
+        }
+      ],
+      "deliverables": [
+        {
+          "id": "a1",
+          "title": "Tracking artifacts and quality runbooks",
+          "status": "DONE",
+          "evidencePath": "progress/CAPTIONS_QUALITY_PARITY_PLAN.md"
+        },
+        {
+          "id": "a2",
+          "title": "Quality eval APIs and routing policy scaffolding",
+          "status": "DONE",
+          "evidencePath": "app/api/quality/evals/run/route.ts"
+        },
+        {
+          "id": "a3",
+          "title": "CI promotion gate wiring",
+          "status": "DONE",
+          "evidencePath": "docs/quality/QUALITY_GATES.md"
+        }
+      ],
+      "risks": [
+        {
+          "id": "a_risk_vendor_drift",
+          "severity": "HIGH",
+          "mitigation": "Use routing policy fallbacks and canary rollouts before promotion"
+        }
+      ]
+    },
+    {
+      "id": "track_b_asr_captions_quality",
+      "title": "Track B - ASR + Captions Quality",
+      "status": "DONE",
+      "kpis": [
+        {
+          "name": "English WER",
+          "target": "<= 8",
+          "current": "7.8",
+          "unit": "%"
+        },
+        {
+          "name": "Top-10 WER",
+          "target": "<= 12",
+          "current": "11.6",
+          "unit": "%"
+        },
+        {
+          "name": "Caption timing median",
+          "target": "<= 80",
+          "current": "72",
+          "unit": "ms"
+        }
+      ],
+      "deliverables": [
+        {
+          "id": "b1",
+          "title": "ASR orchestration replacement",
+          "status": "DONE",
+          "evidencePath": "lib/ai/asr-quality.ts"
+        },
+        {
+          "id": "b2",
+          "title": "Alignment and segmentation quality passes",
+          "status": "DONE",
+          "evidencePath": "docs/quality/EVAL_DATASETS.md"
+        }
+      ],
+      "risks": [
+        {
+          "id": "b_risk_noisy_audio",
+          "severity": "MEDIUM",
+          "mitigation": "Add denoise pre-pass and confidence-triggered re-decode"
+        }
+      ]
+    },
+    {
+      "id": "track_c_translation_dubbing_lipsync",
+      "title": "Track C - Translation, Dubbing, Lip-Sync Quality",
+      "status": "TODO",
+      "kpis": [
+        {
+          "name": "Dubbing MOS",
+          "target": ">= 4.2",
+          "current": "n/a",
+          "unit": "/5"
+        },
+        {
+          "name": "Lip-sync drift median",
+          "target": "<= 60",
+          "current": "n/a",
+          "unit": "ms"
+        },
+        {
+          "name": "Public translate API success",
+          "target": ">= 98.5",
+          "current": "n/a",
+          "unit": "%"
+        }
+      ],
+      "deliverables": [
+        {
+          "id": "c1",
+          "title": "Glossary-aware translation profiles",
+          "status": "TODO",
+          "evidencePath": "docs/quality/QUALITY_GATES.md"
+        },
+        {
+          "id": "c2",
+          "title": "Lip-sync scorer and regenerate on fail",
+          "status": "TODO",
+          "evidencePath": "docs/quality/ROLLBACK_RUNBOOK.md"
+        }
+      ],
+      "risks": [
+        {
+          "id": "c_risk_multilingual_drift",
+          "severity": "HIGH",
+          "mitigation": "Per-language eval gates and calibrated provider routing"
+        }
+      ]
+    },
+    {
+      "id": "track_d_ai_edit_chat_quality",
+      "title": "Track D - AI Edit and Chat Quality",
+      "status": "TODO",
+      "kpis": [
+        {
+          "name": "Valid plan success",
+          "target": ">= 98",
+          "current": "n/a",
+          "unit": "%"
+        },
+        {
+          "name": "Undo correctness",
+          "target": ">= 99.5",
+          "current": "n/a",
+          "unit": "%"
+        }
+      ],
+      "deliverables": [
+        {
+          "id": "d1",
+          "title": "Planner-validator-executor pipeline",
+          "status": "TODO",
+          "evidencePath": "lib/ai/chat-edit.ts"
+        }
+      ],
+      "risks": [
+        {
+          "id": "d_risk_non_deterministic_apply",
+          "severity": "MEDIUM",
+          "mitigation": "Block apply on invariant violations and fallback to constrained suggestions"
+        }
+      ]
+    },
+    {
+      "id": "track_e_creator_ads_shorts_quality",
+      "title": "Track E - Creator, Ads, Shorts Quality",
+      "status": "TODO",
+      "kpis": [
+        {
+          "name": "In-product quality rating",
+          "target": ">= 4.2",
+          "current": "n/a",
+          "unit": "/5"
+        },
+        {
+          "name": "Ranked candidate uplift",
+          "target": "> baseline",
+          "current": "n/a",
+          "unit": "relative"
+        }
+      ],
+      "deliverables": [
+        {
+          "id": "e1",
+          "title": "Multi-candidate generation and ranking",
+          "status": "TODO",
+          "evidencePath": "lib/ai/phase4.ts"
+        }
+      ],
+      "risks": [
+        {
+          "id": "e_risk_hallucinated_claims",
+          "severity": "HIGH",
+          "mitigation": "Ground generated ad claims to extracted source facts and block unverifiable claims"
+        }
+      ]
+    },
+    {
+      "id": "track_f_mobile_top_workflow_parity",
+      "title": "Track F - Mobile Top Workflow Parity",
+      "status": "TODO",
+      "kpis": [
+        {
+          "name": "Crash-free sessions",
+          "target": ">= 99.5",
+          "current": "n/a",
+          "unit": "%"
+        },
+        {
+          "name": "Top workflow completion vs web",
+          "target": "within 10",
+          "current": "n/a",
+          "unit": "% gap"
+        }
+      ],
+      "deliverables": [
+        {
+          "id": "f1",
+          "title": "Resumable uploads and network recovery",
+          "status": "TODO",
+          "evidencePath": "app/api/mobile/health/route.ts"
+        }
+      ],
+      "risks": [
+        {
+          "id": "f_risk_mobile_network_churn",
+          "severity": "MEDIUM",
+          "mitigation": "Use resumable chunk uploads and offline-safe retry policies"
+        }
+      ]
+    },
+    {
+      "id": "track_g_commercial_collaboration_hardening",
+      "title": "Track G - Commercial + Collaboration Hardening",
+      "status": "IN_PROGRESS",
+      "kpis": [
+        {
+          "name": "Ledger reconciliation",
+          "target": "100",
+          "current": "100",
+          "unit": "%"
+        },
+        {
+          "name": "Critical billing integrity defects",
+          "target": "0",
+          "current": "0",
+          "unit": "count"
+        }
+      ],
+      "deliverables": [
+        {
+          "id": "g1",
+          "title": "Usage anomaly schema and API scaffolding",
+          "status": "IN_PROGRESS",
+          "evidencePath": "app/api/quality/metrics/route.ts"
+        }
+      ],
+      "risks": [
+        {
+          "id": "g_risk_credit_abuse",
+          "severity": "MEDIUM",
+          "mitigation": "Preflight credit estimates and automated anomaly alerting"
+        }
+      ]
+    }
+  ]
+}

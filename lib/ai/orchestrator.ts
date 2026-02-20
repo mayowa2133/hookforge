@@ -1,14 +1,15 @@
 import { prisma } from "../prisma";
 import { Prisma } from "@prisma/client";
-import { getPrimaryProvider } from "../providers/registry";
 import { logger } from "../observability/logger";
 import { metrics } from "../observability/metrics";
 import { applyPhase2SideEffects } from "./phase2";
 import { applyPhase3SideEffects } from "./phase3";
 import { applyPhase4SideEffects } from "./phase4";
 import { applyPhase5SideEffects } from "./phase5";
+import { resolveProviderForCapability } from "../models/provider-routing";
+import type { ProviderCapability } from "../providers/types";
 
-const capabilityByJobType: Record<string, Parameters<typeof getPrimaryProvider>[0]> = {
+const capabilityByJobType: Record<string, ProviderCapability> = {
   INGEST_URL: "generative_media",
   TRANSCRIBE: "asr",
   CAPTION_TRANSLATE: "translation",
@@ -30,7 +31,8 @@ export async function processAIJob(aiJobId: string) {
   }
 
   const capability = capabilityByJobType[aiJob.type] ?? "generative_media";
-  const provider = getPrimaryProvider(capability);
+  const routing = await resolveProviderForCapability(capability);
+  const provider = routing.provider;
 
   await prisma.aIJob.update({
     where: { id: aiJob.id },
@@ -84,7 +86,12 @@ export async function processAIJob(aiJobId: string) {
         operation: aiJob.type,
         model: providerResponse.model,
         request: aiJob.input as Prisma.InputJsonValue,
-        response: providerResponse.output as Prisma.InputJsonValue,
+        response: {
+          ...(providerResponse.output as Record<string, unknown>),
+          routeSource: routing.routeSource,
+          routingPolicyId: routing.policyId,
+          routedModelVersionId: routing.modelVersionId
+        } as Prisma.InputJsonValue,
         tokensIn: providerResponse.usage?.tokensIn,
         tokensOut: providerResponse.usage?.tokensOut,
         durationMs: providerResponse.usage?.durationMs ?? durationMs,
@@ -118,11 +125,13 @@ export async function processAIJob(aiJobId: string) {
 
     metrics.increment("ai_job_completed", 1, {
       type: aiJob.type,
-      provider: provider.name
+      provider: provider.name,
+      routeSource: routing.routeSource
     });
     metrics.observe("ai_job_duration_ms", durationMs, {
       type: aiJob.type,
-      provider: provider.name
+      provider: provider.name,
+      routeSource: routing.routeSource
     });
 
     return {

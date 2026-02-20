@@ -137,7 +137,7 @@ echo "status_after_assets=$status"
 auto_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects/$project_id/captions/auto" \
   -H "Content-Type: application/json" \
-  -d '{"language":"en","diarization":false,"punctuationStyle":"auto"}')
+  -d '{"language":"en","diarization":false,"punctuationStyle":"auto","confidenceThreshold":0.86,"reDecodeEnabled":true,"maxWordsPerSegment":7,"maxCharsPerLine":24,"maxLinesPerSegment":2}')
 auto_job_id=$(echo "$auto_resp" | jq -r ".aiJobId")
 [ -n "$auto_job_id" ] && [ "$auto_job_id" != "null" ]
 wait_for_ai_job "$auto_job_id"

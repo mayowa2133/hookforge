@@ -146,6 +146,33 @@ enum ApiKeyStatus {
   DISABLED
 }
 
+enum ModelVersionStatus {
+  CANDIDATE
+  ACTIVE
+  DEPRECATED
+  ROLLED_BACK
+}
+
+enum EvalRunStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum UsageAnomalySeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum UsageAnomalyStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
 model User {
   id                 String                @id @default(cuid())
   email              String                @unique
@@ -161,6 +188,10 @@ model User {
   trustEvents        TrustEvent[]
   sourceImports      IngestionSourceLink[]
   apiKeysCreated     PublicApiKey[]        @relation("ApiKeyCreator")
+  routePoliciesUpdated RoutingPolicy[]     @relation("RoutingPolicyUpdatedBy")
+  qualityEvalRunsCreated QualityEvalRun[]  @relation("QualityEvalCreatedBy")
+  qualityFeedbackCreated QualityFeedback[] @relation("QualityFeedbackCreatedBy")
+  usageAnomaliesResolved UsageAnomaly[]    @relation("UsageAnomalyResolvedBy")
 }
 
 model Workspace {
@@ -190,6 +221,8 @@ model Workspace {
   consentVerifications ConsentVerification[]
   trustEvents         TrustEvent[]
   publicApiKeys       PublicApiKey[]
+  qualityFeedback     QualityFeedback[]
+  usageAnomalies      UsageAnomaly[]
 
   @@index([ownerId])
 }
@@ -360,6 +393,7 @@ model ProjectV2 {
   transcriptWords  TranscriptWord[]
   captionSegments  CaptionSegment[]
   aiJobs           AIJob[]
+  qualityFeedback  QualityFeedback[]
 
   @@index([workspaceId])
   @@index([createdByUserId])
@@ -576,6 +610,7 @@ model AIJob {
   project      ProjectV2?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
   providerRuns AIProviderRun[]
   results      AIOperationResult[]
+  qualityFeedback QualityFeedback[]
 
   @@index([workspaceId, createdAt])
   @@index([projectId])
@@ -740,6 +775,121 @@ model TrustEvent {
   user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, createdAt])
+}
+
+model ModelVersion {
+  id            String             @id @default(cuid())
+  capability    String
+  provider      String
+  model         String
+  version       String
+  status        ModelVersionStatus @default(CANDIDATE)
+  qualityScore  Float?
+  latencyP95Ms  Int?
+  successRate   Float?
+  costPerMinUsd Decimal?           @db.Decimal(10, 4)
+  releasedAt    DateTime?
+  metadata      Json?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  activePolicies   RoutingPolicy[] @relation("RoutingPolicyActiveModel")
+  fallbackPolicies RoutingPolicy[] @relation("RoutingPolicyFallbackModel")
+  evalRuns         QualityEvalRun[]
+
+  @@unique([capability, provider, model, version])
+  @@index([capability, status])
+}
+
+model RoutingPolicy {
+  id                   String       @id @default(cuid())
+  capability           String       @unique
+  activeModelVersionId String?
+  fallbackModelVersionId String?
+  rolloutPercent       Int          @default(100)
+  maxP95LatencyMs      Int?
+  minSuccessRate       Float?
+  enforceQualityGate   Boolean      @default(true)
+  updatedByUserId      String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  activeModelVersion   ModelVersion? @relation("RoutingPolicyActiveModel", fields: [activeModelVersionId], references: [id], onDelete: SetNull)
+  fallbackModelVersion ModelVersion? @relation("RoutingPolicyFallbackModel", fields: [fallbackModelVersionId], references: [id], onDelete: SetNull)
+  updatedBy            User?         @relation("RoutingPolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([activeModelVersionId])
+  @@index([fallbackModelVersionId])
+}
+
+model QualityEvalRun {
+  id              String         @id @default(cuid())
+  capability      String
+  modelVersionId  String?
+  status          EvalRunStatus  @default(QUEUED)
+  trigger         String         @default("manual")
+  datasetRef      String?
+  metrics         Json?
+  passed          Boolean?
+  summary         String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  modelVersion    ModelVersion?  @relation(fields: [modelVersionId], references: [id], onDelete: SetNull)
+  createdBy       User?          @relation("QualityEvalCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([capability, createdAt])
+  @@index([status, createdAt])
+}
+
+model QualityFeedback {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  projectId       String?
+  aiJobId         String?
+  category        String
+  rating          Int?
+  comment         String?
+  metadata        Json?
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project         ProjectV2? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  aiJob           AIJob?    @relation(fields: [aiJobId], references: [id], onDelete: SetNull)
+  createdBy       User?     @relation("QualityFeedbackCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId])
+  @@index([aiJobId])
+}
+
+model UsageAnomaly {
+  id               String               @id @default(cuid())
+  workspaceId      String
+  feature          String
+  windowStart      DateTime
+  windowEnd        DateTime
+  severity         UsageAnomalySeverity @default(MEDIUM)
+  status           UsageAnomalyStatus   @default(OPEN)
+  expectedAmount   Int?
+  actualAmount     Int?
+  deviationPct     Float?
+  summary          String
+  metadata         Json?
+  resolvedAt       DateTime?
+  resolvedByUserId String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  resolvedBy       User?                @relation("UsageAnomalyResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([severity, createdAt])
 }
 
 model PublicApiKey {

@@ -6,6 +6,9 @@ import { sanitizeOverlayText } from "../sanitize";
 import { prisma } from "../prisma";
 import { appendTimelineRevision } from "../project-v2";
 import { isSupportedLanguage } from "../languages";
+import { runAsrQualityPipeline } from "./asr-quality";
+import { resolveProviderForCapability } from "../models/provider-routing";
+import { getFallbackProvider } from "../providers/registry";
 
 const CAPTION_STYLE_NAME = "HookForge Bold";
 
@@ -115,6 +118,11 @@ function asString(value: unknown, fallback = "") {
 
 function asBoolean(value: unknown, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function asStringArray(value: unknown) {
@@ -672,15 +680,33 @@ async function handleTranscribeJob(aiJob: AIJob) {
   const requestedLanguage = asString(input.language, "en").toLowerCase();
   const language = isSupportedLanguage(requestedLanguage) ? requestedLanguage : "en";
   const diarization = asBoolean(input.diarization, false);
-  const punctuationStyle = asString(input.punctuationStyle, "auto");
+  const punctuationStyleRaw = asString(input.punctuationStyle, "auto");
+  const punctuationStyle: "auto" | "minimal" | "full" =
+    punctuationStyleRaw === "minimal" || punctuationStyleRaw === "full" ? punctuationStyleRaw : "auto";
+  const confidenceThreshold = asNumber(input.confidenceThreshold, 0.86);
+  const reDecodeEnabled = asBoolean(input.reDecodeEnabled, true);
+  const maxWordsPerSegment = asNumber(input.maxWordsPerSegment, 7);
+  const maxCharsPerLine = asNumber(input.maxCharsPerLine, 24);
+  const maxLinesPerSegment = asNumber(input.maxLinesPerSegment, 2);
 
   const primaryVideo = selectPrimaryVideoAsset(context.legacyProject.assets);
   const sourceDurationMs = Math.max(2600, Math.floor((primaryVideo?.durationSec ?? 7) * 1000));
-  const generated = generateDeterministicTranscript({
+
+  const routing = await resolveProviderForCapability("asr");
+  const fallbackProvider = getFallbackProvider("asr", routing.provider.name);
+
+  const asr = await runAsrQualityPipeline({
     language,
     durationMs: sourceDurationMs,
     diarization,
-    punctuationStyle
+    punctuationStyle,
+    confidenceThreshold,
+    reDecodeEnabled,
+    maxWordsPerSegment,
+    maxCharsPerLine,
+    maxLinesPerSegment,
+    primaryProvider: routing.provider,
+    fallbackProvider
   });
 
   const stylePreset = await ensureCaptionStylePreset(context.projectV2.workspaceId);
@@ -712,9 +738,9 @@ async function handleTranscribeJob(aiJob: AIJob) {
     }
   });
 
-  if (generated.words.length > 0) {
+  if (asr.words.length > 0) {
     await prisma.transcriptWord.createMany({
-      data: generated.words.map((word) => ({
+      data: asr.words.map((word) => ({
         projectId: context.projectV2.id,
         startMs: word.startMs,
         endMs: word.endMs,
@@ -725,9 +751,9 @@ async function handleTranscribeJob(aiJob: AIJob) {
     });
   }
 
-  if (generated.segments.length > 0) {
+  if (asr.segments.length > 0) {
     await prisma.captionSegment.createMany({
-      data: generated.segments.map((segment) => ({
+      data: asr.segments.map((segment) => ({
         projectId: context.projectV2.id,
         trackId: captionTrackId,
         language,
@@ -743,7 +769,7 @@ async function handleTranscribeJob(aiJob: AIJob) {
   const trackPlan = buildReplaceCaptionTrackOperations({
     state,
     trackName: `Auto captions (${language})`,
-    segments: generated.segments
+    segments: asr.segments
   });
 
   if (trackPlan.operations.length > 0) {
@@ -763,9 +789,15 @@ async function handleTranscribeJob(aiJob: AIJob) {
 
   return {
     language,
-    wordCount: generated.words.length,
-    segmentCount: generated.segments.length,
-    captionTrackId
+    wordCount: asr.words.length,
+    segmentCount: asr.segments.length,
+    captionTrackId,
+    asrAverageConfidence: asr.averageConfidence,
+    asrFallbackUsed: asr.usedFallback,
+    decodeAttempts: asr.decodeAttempts,
+    styleSafety: asr.styleSafety,
+    routingPolicyId: routing.policyId,
+    routeSource: routing.routeSource
   };
 }
 
