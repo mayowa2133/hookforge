@@ -47,6 +47,10 @@ export default async function DashboardPage() {
           <Link href="/growth" className="underline">
             Open Growth Lab
           </Link>
+          . Need dubbing/lipdub and public API controls?{" "}
+          <Link href="/localization" className="underline">
+            Open Localization Lab
+          </Link>
           .
         </p>
       </div>

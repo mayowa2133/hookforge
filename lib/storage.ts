@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -75,6 +76,21 @@ export async function uploadFileToStorage(storageKey: string, filePath: string, 
     Key: storageKey,
     Body: createReadStream(filePath),
     ContentType: contentType
+  });
+  await s3Client.send(command);
+}
+
+export async function copyStorageObject(params: {
+  sourceKey: string;
+  destinationKey: string;
+  contentType?: string;
+}) {
+  const command = new CopyObjectCommand({
+    Bucket: BUCKET,
+    CopySource: `${BUCKET}/${params.sourceKey}`,
+    Key: params.destinationKey,
+    ContentType: params.contentType,
+    MetadataDirective: params.contentType ? "REPLACE" : "COPY"
   });
   await s3Client.send(command);
 }

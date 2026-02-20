@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireUserWithWorkspace } from "@/lib/api-context";
 import { enqueueAIJob, queueNameForJobType } from "@/lib/ai/jobs";
+import { estimatePhase5DubbingCredits, normalizeTargetLanguages } from "@/lib/ai/phase5";
 import { reserveCredits } from "@/lib/credits";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { isSupportedLanguage } from "@/lib/languages";
@@ -20,10 +21,6 @@ const DubbingSchema = z
     message: "Provide sourceAssetId or sourceUrl"
   });
 
-function estimateCredits(targetLanguageCount: number, lipDub: boolean) {
-  return targetLanguageCount * 120 + (lipDub ? 80 : 0);
-}
-
 export async function POST(request: Request) {
   try {
     const body = DubbingSchema.parse(await request.json());
@@ -39,8 +36,17 @@ export async function POST(request: Request) {
       }
     }
 
+    const targetLanguages = normalizeTargetLanguages(body.targetLanguages);
+    if (targetLanguages.length === 0) {
+      throw new Error("No supported targetLanguages provided");
+    }
+
     const sourceUrl = body.sourceUrl ? validateImportUrl(body.sourceUrl).toString() : undefined;
-    const estimatedCredits = estimateCredits(body.targetLanguages.length, body.lipDub);
+    const estimatedCredits = estimatePhase5DubbingCredits({
+      targetLanguageCount: targetLanguages.length,
+      lipDub: body.lipDub,
+      channel: "internal"
+    });
 
     const aiJobType = body.lipDub ? "LIPSYNC" : "DUBBING";
     const aiJob = await enqueueAIJob({
@@ -51,7 +57,7 @@ export async function POST(request: Request) {
         sourceAssetId: body.sourceAssetId,
         sourceUrl,
         sourceLanguage: body.sourceLanguage,
-        targetLanguages: body.targetLanguages,
+        targetLanguages,
         lipDub: body.lipDub
       }
     });
@@ -63,7 +69,7 @@ export async function POST(request: Request) {
       referenceType: "AIJob",
       referenceId: aiJob.id,
       metadata: {
-        targetLanguages: body.targetLanguages,
+        targetLanguages,
         lipDub: body.lipDub
       }
     });
@@ -72,6 +78,7 @@ export async function POST(request: Request) {
       {
         jobId: aiJob.id,
         creditEstimate: estimatedCredits,
+        targetLanguages,
         status: aiJob.status,
         slaWindow: body.lipDub ? "15-45 minutes" : "5-20 minutes"
       },

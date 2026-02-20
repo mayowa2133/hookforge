@@ -93,6 +93,7 @@ Open: `http://localhost:3000`
 
 Creator Studio: `http://localhost:3000/creator`
 Growth Lab: `http://localhost:3000/growth`
+Localization Lab: `http://localhost:3000/localization`
 
 ## End-to-End Render Flow
 
@@ -141,6 +142,9 @@ Implemented route handlers:
 - `POST /api/dubbing/submit` queue dubbing/lipsync jobs with credit estimation
 - `GET /api/credits/balance` workspace credit balance
 - `GET /api/credits/ledger` workspace credit ledger entries
+- `GET /api/public-api-keys` list workspace API keys
+- `POST /api/public-api-keys` create workspace API key (secret returned once)
+- `POST /api/public-api-keys/:id/disable` disable API key
 
 Public API scaffold:
 
@@ -262,6 +266,19 @@ Implemented:
 - Growth Lab web surface (`/growth`) covering all Phase 4 workflows
 - End-to-end AI side-effects for `AI_ADS` and `AI_SHORTS` in worker orchestration
 
+## Phase 5 Dubbing + Public API (Completed on Web)
+
+Implemented:
+
+- Internal dubbing/lipdub submit flow with credit estimation and queue routing
+- Worker-side Phase 5 side-effects that materialize downloadable dubbed/lipsync media artifacts per target language
+- Public Translate API status now includes artifact download URLs
+- Workspace API key management APIs (create/list/disable)
+- Localization Lab web surface (`/localization`) with:
+  - Internal dubbing queue + job polling
+  - Public API sandbox submit/status
+  - API key lifecycle controls and credit visibility
+
 ## Progress Tracker
 
 Progress artifacts:
@@ -299,8 +316,10 @@ Run phase e2e checks:
 pnpm test:e2e:phase012
 pnpm test:e2e:phase3
 pnpm test:e2e:phase4
+pnpm test:e2e:phase5
 pnpm test:e2e:phase0123
 pnpm test:e2e:phase01234
+pnpm test:e2e:phase012345
 ```
 
 ## Security / Safety Controls

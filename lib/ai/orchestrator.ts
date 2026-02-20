@@ -6,6 +6,7 @@ import { metrics } from "../observability/metrics";
 import { applyPhase2SideEffects } from "./phase2";
 import { applyPhase3SideEffects } from "./phase3";
 import { applyPhase4SideEffects } from "./phase4";
+import { applyPhase5SideEffects } from "./phase5";
 
 const capabilityByJobType: Record<string, Parameters<typeof getPrimaryProvider>[0]> = {
   INGEST_URL: "generative_media",
@@ -56,12 +57,14 @@ export async function processAIJob(aiJobId: string) {
     const phase2SideEffects = await applyPhase2SideEffects(aiJob);
     const phase3SideEffects = await applyPhase3SideEffects(aiJob);
     const phase4SideEffects = await applyPhase4SideEffects(aiJob);
+    const phase5SideEffects = await applyPhase5SideEffects(aiJob);
     const sideEffects =
-      phase2SideEffects || phase3SideEffects || phase4SideEffects
+      phase2SideEffects || phase3SideEffects || phase4SideEffects || phase5SideEffects
         ? {
             phase2: phase2SideEffects,
             phase3: phase3SideEffects,
-            phase4: phase4SideEffects
+            phase4: phase4SideEffects,
+            phase5: phase5SideEffects
           }
         : null;
 

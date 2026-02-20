@@ -104,10 +104,16 @@
       "details": "Growth Lab now ships AI Ads from rights-attested website URLs, AI Shorts from long-form URLs (including YouTube), Reddit-to-video generation, compliance audit APIs, and takedown/source-link deactivation workflows with trust-event logging"
     },
     {
-      "id": "phase5_to_phase6_full_parity",
-      "title": "Phase 5-6 dubbing API hardening, mobile, and commercialization",
+      "id": "phase5_dubbing_public_api",
+      "title": "Phase 5 dubbing/lipdub and public API channel",
+      "status": "DONE",
+      "details": "Localization Lab now ships internal dubbing/lipdub submit flows, worker-side media artifact materialization, public translate API status/download outputs, and workspace API key lifecycle endpoints"
+    },
+    {
+      "id": "phase6_mobile_commercialization",
+      "title": "Phase 6 mobile parity and commercialization",
       "status": "TODO",
-      "details": "Roadmap remains active for full dubbing/lipsync productization, public API monetization hardening, mobile parity, and subscription commercialization"
+      "details": "Roadmap remains active for iOS/Android parity, subscription packaging, and production collaboration controls"
     }
   ]
 }

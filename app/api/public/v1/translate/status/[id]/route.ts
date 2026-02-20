@@ -1,6 +1,7 @@
 import { authenticatePublicApiKey } from "@/lib/public-api";
 import { prisma } from "@/lib/prisma";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
+import { getDownloadPresignedUrl } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -31,6 +32,25 @@ export async function GET(request: Request, { params }: Context) {
       return jsonError("Job not found", 404);
     }
 
+    const artifacts = await Promise.all(
+      aiJob.results
+        .filter((result) => Boolean(result.outputStorageKey))
+        .map(async (result) => {
+          const output = typeof result.output === "object" && result.output !== null ? (result.output as Record<string, unknown>) : {};
+          const storageKey = result.outputStorageKey as string;
+          return {
+            id: result.id,
+            kind: result.kind,
+            storageKey,
+            outputUrl: await getDownloadPresignedUrl(storageKey),
+            language: typeof output.language === "string" ? output.language : null,
+            sourceLanguage: typeof output.sourceLanguage === "string" ? output.sourceLanguage : null,
+            mimeType: typeof output.mimeType === "string" ? output.mimeType : null,
+            durationSec: typeof output.durationSec === "number" ? output.durationSec : null
+          };
+        })
+    );
+
     return jsonOk({
       job: {
         id: aiJob.id,
@@ -42,7 +62,8 @@ export async function GET(request: Request, { params }: Context) {
         createdAt: aiJob.createdAt,
         updatedAt: aiJob.updatedAt,
         latestProviderRun: aiJob.providerRuns[0] ?? null,
-        results: aiJob.results
+        results: aiJob.results,
+        artifacts
       }
     });
   } catch (error) {

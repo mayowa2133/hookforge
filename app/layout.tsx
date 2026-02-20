@@ -40,6 +40,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   <Link href="/growth" className="font-medium hover:text-primary">
                     Growth
                   </Link>
+                  <Link href="/localization" className="font-medium hover:text-primary">
+                    Localization
+                  </Link>
                   <LogoutButton />
                 </>
               ) : (

@@ -38,6 +38,7 @@ export async function GET() {
 
   return NextResponse.json(
     {
+      ok: healthy,
       status: healthy ? "ok" : "degraded",
       services: {
         database: db,

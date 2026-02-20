@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { enqueueAIJob, queueNameForJobType } from "@/lib/ai/jobs";
+import { estimatePhase5DubbingCredits, normalizeTargetLanguages } from "@/lib/ai/phase5";
 import { reserveCredits } from "@/lib/credits";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { isSupportedLanguage } from "@/lib/languages";
@@ -21,10 +22,6 @@ const TranslateSubmitSchema = z
     message: "Provide sourceMediaUrl or sourceStorageKey"
   });
 
-function estimateCredits(languageCount: number, lipDub: boolean) {
-  return languageCount * 100 + (lipDub ? 70 : 0);
-}
-
 export async function POST(request: Request) {
   try {
     const apiKey = await authenticatePublicApiKey(request);
@@ -40,6 +37,11 @@ export async function POST(request: Request) {
       }
     }
 
+    const targetLanguages = normalizeTargetLanguages(body.targetLanguages);
+    if (targetLanguages.length === 0) {
+      throw new Error("No supported targetLanguages provided");
+    }
+
     const sourceMediaUrl = body.sourceMediaUrl ? validateImportUrl(body.sourceMediaUrl).toString() : undefined;
 
     const jobType = body.lipDub ? "LIPSYNC" : "DUBBING";
@@ -49,7 +51,7 @@ export async function POST(request: Request) {
       queueName: queueNameForJobType(jobType, body.lipDub),
       input: {
         sourceLanguage: body.sourceLanguage,
-        targetLanguages: body.targetLanguages,
+        targetLanguages,
         sourceMediaUrl,
         sourceStorageKey: body.sourceStorageKey,
         callbackUrl: body.callbackUrl,
@@ -58,7 +60,11 @@ export async function POST(request: Request) {
       }
     });
 
-    const creditEstimate = estimateCredits(body.targetLanguages.length, body.lipDub);
+    const creditEstimate = estimatePhase5DubbingCredits({
+      targetLanguageCount: targetLanguages.length,
+      lipDub: body.lipDub,
+      channel: "public"
+    });
     await reserveCredits({
       workspaceId: apiKey.workspaceId,
       feature: "public-api.translate",
@@ -67,7 +73,7 @@ export async function POST(request: Request) {
       referenceId: aiJob.id,
       metadata: {
         lipDub: body.lipDub,
-        targetLanguages: body.targetLanguages
+        targetLanguages
       }
     });
 
@@ -75,7 +81,8 @@ export async function POST(request: Request) {
       {
         jobId: aiJob.id,
         status: aiJob.status,
-        creditEstimate
+        creditEstimate,
+        targetLanguages
       },
       202
     );

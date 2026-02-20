@@ -42,8 +42,12 @@ export async function authenticatePublicApiKey(request: Request) {
     }
   });
 
-  if (!apiKey || apiKey.status !== "ACTIVE") {
+  if (!apiKey) {
     throw new Error("Unauthorized");
+  }
+
+  if (apiKey.status !== "ACTIVE") {
+    throw new Error("API key is disabled");
   }
 
   await prisma.publicApiKey.update({
