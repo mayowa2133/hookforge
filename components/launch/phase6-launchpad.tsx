@@ -75,6 +75,14 @@ type OverviewPayload = {
     spent7d: number;
     byFeature: Record<string, number>;
     alerts: UsageAlert[];
+    anomalies: Array<{
+      id: string;
+      feature: string;
+      severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+      status: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+      summary: string;
+      createdAt: string;
+    }>;
   };
   plans: Plan[];
   creditPacks: CreditPack[];
@@ -215,6 +223,33 @@ export function Phase6Launchpad() {
     }
   };
 
+  const reconcileBilling = async () => {
+    setBusyAction("reconcile-billing");
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await fetch("/api/billing/reconcile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          repairWalletMismatch: false
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Billing reconcile failed");
+      }
+      await refreshAll();
+      setSuccess(`Billing reconciled. Open critical anomalies: ${payload.summary?.anomalies?.openCriticalCount ?? 0}.`);
+    } catch (reconcileError) {
+      setError(reconcileError instanceof Error ? reconcileError.message : "Billing reconcile failed");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const inviteMember = async () => {
     setBusyAction("invite");
     setError(null);
@@ -294,10 +329,10 @@ export function Phase6Launchpad() {
     <div className="space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-black" style={{ fontFamily: "var(--font-heading)" }}>
-          Launch Console (Phase 6)
+          Launch Console (Phase 7)
         </h1>
         <p className="text-sm text-muted-foreground">
-          Mobile-ready operations, subscription commercialization, and shared workspace controls.
+          Mobile-ready operations, commercial guardrails, and shared workspace controls.
         </p>
       </div>
 
@@ -363,6 +398,15 @@ export function Phase6Launchpad() {
               ))}
             </div>
 
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => void reconcileBilling()} disabled={busyAction === "reconcile-billing"}>
+                {busyAction === "reconcile-billing" ? "Reconciling..." : "Run Billing Reconcile"}
+              </Button>
+              <Link href="/api/workspace/audit" className="inline-flex h-10 items-center rounded-md border px-3 text-sm underline">
+                Open Workspace Audit Trail
+              </Link>
+            </div>
+
             {overview?.usage.alerts.length ? (
               <div className="space-y-2">
                 <p className="text-xs uppercase text-muted-foreground">Usage Alerts</p>
@@ -373,6 +417,23 @@ export function Phase6Launchpad() {
                       <p className="font-medium">{alert.title}</p>
                     </div>
                     <p className="text-muted-foreground">{alert.detail}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {overview?.usage.anomalies.length ? (
+              <div className="space-y-2">
+                <p className="text-xs uppercase text-muted-foreground">Detected Anomalies</p>
+                {overview.usage.anomalies.slice(0, 3).map((anomaly) => (
+                  <div key={anomaly.id} className="rounded-md border p-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={anomaly.severity === "CRITICAL" || anomaly.severity === "HIGH" ? "default" : "secondary"}>
+                        {anomaly.severity}
+                      </Badge>
+                      <p className="font-medium">{anomaly.feature}</p>
+                    </div>
+                    <p className="text-muted-foreground">{anomaly.summary}</p>
                   </div>
                 ))}
               </div>

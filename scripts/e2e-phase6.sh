@@ -88,6 +88,62 @@ project_id=$(echo "$create_project_resp" | jq -r ".project.id")
 [ -n "$project_id" ] && [ "$project_id" != "null" ]
 echo "shared_project=$project_id"
 
+asset_file="public/demo-assets/template-green-screen.svg"
+asset_size=$(wc -c < "$asset_file" | tr -d ' ')
+initiate_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" \
+  -X POST "$BASE/api/mobile/uploads/resumable/initiate" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"projectId":"%s","slotKey":"background","fileName":"phase6-bg.svg","mimeType":"image/svg+xml","sizeBytes":%s,"totalParts":1}' "$project_id" "$asset_size")")
+upload_session_id=$(echo "$initiate_resp" | jq -r ".session.id")
+[ -n "$upload_session_id" ] && [ "$upload_session_id" != "null" ]
+echo "upload_session=$upload_session_id"
+
+part_url_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" \
+  -X POST "$BASE/api/mobile/uploads/resumable/$upload_session_id/part-url" \
+  -H "Content-Type: application/json" \
+  -d '{"partNumber":1}')
+part_upload_url=$(echo "$part_url_resp" | jq -r ".uploadUrl")
+[ -n "$part_upload_url" ] && [ "$part_upload_url" != "null" ]
+
+put_headers=$(mktemp)
+curl -sS -D "$put_headers" -o /dev/null -X PUT --upload-file "$asset_file" "$part_upload_url"
+part_etag=$(awk 'BEGIN{IGNORECASE=1} /^ETag:/ {print $2}' "$put_headers" | tr -d '\r"')
+rm -f "$put_headers"
+[ -n "$part_etag" ] && [ "$part_etag" != "null" ]
+
+part_complete_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" \
+  -X POST "$BASE/api/mobile/uploads/resumable/$upload_session_id/part-complete" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"partNumber":1,"eTag":"%s"}' "$part_etag")")
+completed_parts=$(echo "$part_complete_resp" | jq -r ".progress.completedParts")
+[ "$completed_parts" -eq 1 ]
+
+upload_status_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" "$BASE/api/mobile/uploads/resumable/$upload_session_id")
+status_progress=$(echo "$upload_status_resp" | jq -r ".progress.progressPct")
+[ "$status_progress" -eq 100 ]
+
+complete_upload_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" \
+  -X POST "$BASE/api/mobile/uploads/resumable/$upload_session_id/complete")
+completed_status=$(echo "$complete_upload_resp" | jq -r ".session.status")
+registered_slot=$(echo "$complete_upload_resp" | jq -r ".registration.asset.slotKey")
+[ "$completed_status" = "COMPLETED" ]
+[ "$registered_slot" = "background" ]
+echo "upload_completed_status=$completed_status"
+
+telemetry_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" \
+  -X POST "$BASE/api/mobile/telemetry" \
+  -H "Content-Type: application/json" \
+  -d '{"events":[{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"SESSION_START"},{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"WORKFLOW_START","workflowId":"creator_to_render"},{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"WORKFLOW_COMPLETE","workflowId":"creator_to_render","latencyMs":1820},{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"WORKFLOW_START","workflowId":"template_edit_render"},{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"WORKFLOW_COMPLETE","workflowId":"template_edit_render","latencyMs":1440},{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"WORKFLOW_START","workflowId":"localization_dub"},{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"WORKFLOW_COMPLETE","workflowId":"localization_dub","latencyMs":2360},{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"UPLOAD_RESUME"},{"sessionId":"phase6-mobile-session-1","platform":"ios","event":"SESSION_END"}]}')
+telemetry_ingested=$(echo "$telemetry_resp" | jq -r ".ingested")
+[ "$telemetry_ingested" -ge 9 ]
+
+workflows_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" "$BASE/api/mobile/workflows/top")
+workflow_count=$(echo "$workflows_resp" | jq -r ".workflows | length")
+top_gap=$(echo "$workflows_resp" | jq -r ".topWorkflowGapPct")
+[ "$workflow_count" -ge 3 ]
+awk -v gap="$top_gap" 'BEGIN { exit !(gap <= 10) }'
+echo "mobile_workflows=$workflow_count top_gap=$top_gap"
+
 shared_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" "$BASE/api/workspace/projects")
 shared_count=$(echo "$shared_resp" | jq -r ".projects | length")
 shared_match=$(echo "$shared_resp" | jq -r --arg PROJECT "$project_id" '[.projects[] | select(.id==$PROJECT)] | length')
@@ -97,8 +153,18 @@ echo "shared_projects=$shared_count"
 
 mobile_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" "$BASE/api/mobile/config")
 mobile_platforms=$(echo "$mobile_resp" | jq -r ".platforms | length")
+mobile_resumable=$(echo "$mobile_resp" | jq -r ".captureCapabilities.resumableUploads")
 [ "$mobile_platforms" -ge 2 ]
+[ "$mobile_resumable" = "true" ]
 echo "mobile_platforms=$mobile_platforms"
+
+mobile_health_resp=$(curl -sS "$BASE/api/mobile/health")
+mobile_health_ok=$(echo "$mobile_health_resp" | jq -r ".ok")
+mobile_crash_target=$(echo "$mobile_health_resp" | jq -r ".mobile.meetsCrashFreeTarget")
+mobile_gap_target=$(echo "$mobile_health_resp" | jq -r ".mobile.meetsWorkflowGapTarget")
+[ "$mobile_health_ok" = "true" ]
+[ "$mobile_crash_target" = "true" ]
+[ "$mobile_gap_target" = "true" ]
 
 remove_member_resp=$(curl -sS -c "$COOKIE_ONE" -b "$COOKIE_ONE" \
   -X DELETE "$BASE/api/workspace/members/$member_id")

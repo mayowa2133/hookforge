@@ -5,6 +5,7 @@ import { addLedgerEntry, getCreditBalance } from "@/lib/credits";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { canManageWorkspaceMembers } from "@/lib/workspace-roles";
+import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 
 export const runtime = "nodejs";
 
@@ -49,6 +50,19 @@ export async function POST(request: Request) {
     });
 
     const balance = await getCreditBalance(workspace.id);
+
+    await recordWorkspaceAuditEvent({
+      workspaceId: workspace.id,
+      actorUserId: user.id,
+      action: "credit_pack_purchase",
+      targetType: "CreditPack",
+      targetId: pack.id,
+      details: {
+        credits: pack.credits,
+        priceCents: pack.priceCents
+      }
+    });
+
     return jsonOk({
       status: "PURCHASED",
       pack,

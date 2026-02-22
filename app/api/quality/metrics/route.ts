@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireCurrentUser } from "@/lib/auth";
 import { jsonOk, routeErrorToResponse } from "@/lib/http";
+import { prisma } from "@/lib/prisma";
 import { summarizeQualityMetrics } from "@/lib/quality/evals";
 
 export const runtime = "nodejs";
@@ -17,8 +18,31 @@ export async function GET(request: Request) {
       limit: url.searchParams.get("limit") ?? undefined
     });
 
-    const metrics = await summarizeQualityMetrics(query.limit);
-    return jsonOk(metrics);
+    const [metrics, openBillingAnomaliesBySeverity] = await Promise.all([
+      summarizeQualityMetrics(query.limit),
+      prisma.usageAnomaly.groupBy({
+        by: ["severity"],
+        where: {
+          status: {
+            in: ["OPEN", "ACKNOWLEDGED"]
+          },
+          feature: {
+            startsWith: "billing."
+          }
+        },
+        _count: {
+          _all: true
+        }
+      })
+    ]);
+
+    return jsonOk({
+      ...metrics,
+      billingAnomaliesBySeverity: openBillingAnomaliesBySeverity.map((item) => ({
+        severity: item.severity,
+        count: item._count._all
+      }))
+    });
   } catch (error) {
     return routeErrorToResponse(error);
   }

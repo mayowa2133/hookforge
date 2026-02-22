@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { requireUserWithWorkspace } from "@/lib/api-context";
 import { getPlanByTier } from "@/lib/billing/catalog";
+import { reconcileWorkspaceBillingState } from "@/lib/billing/reconciliation";
 import { addLedgerEntry, getCreditBalance } from "@/lib/credits";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { canManageWorkspaceMembers } from "@/lib/workspace-roles";
+import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 
 export const runtime = "nodejs";
 
@@ -34,6 +36,12 @@ export async function POST(request: Request) {
     if (!membership || !canManageWorkspaceMembers(membership.role)) {
       return jsonError("Only admins can update subscriptions", 403);
     }
+
+    await reconcileWorkspaceBillingState({
+      workspaceId: workspace.id,
+      actorUserId: user.id,
+      repairWalletMismatch: false
+    });
 
     const existingActive = await prisma.subscription.findFirst({
       where: {
@@ -80,6 +88,16 @@ export async function POST(request: Request) {
         }
       });
 
+      await tx.plan.updateMany({
+        where: {
+          workspaceId: workspace.id,
+          status: "ACTIVE"
+        },
+        data: {
+          status: "PAUSED"
+        }
+      });
+
       const planRecord = await tx.plan.create({
         data: {
           workspaceId: workspace.id,
@@ -119,6 +137,19 @@ export async function POST(request: Request) {
     });
 
     const balance = await getCreditBalance(workspace.id);
+
+    await recordWorkspaceAuditEvent({
+      workspaceId: workspace.id,
+      actorUserId: user.id,
+      action: "subscription_change",
+      targetType: "Subscription",
+      targetId: next.subscription.id,
+      details: {
+        tier: requestedPlan.tier,
+        status: "ACTIVE"
+      }
+    });
+
     return jsonOk({
       status: "SUBSCRIBED",
       balance,

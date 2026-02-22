@@ -1,6 +1,6 @@
 {
   "program": "HookForge Captions-Quality Parity Program",
-  "lastUpdated": "2026-02-22T01:32:11.315Z",
+  "lastUpdated": "2026-02-22T02:36:12.914Z",
   "owner": "HookForge Core Team",
   "tracks": [
     {
@@ -242,18 +242,18 @@
     {
       "id": "track_f_mobile_top_workflow_parity",
       "title": "Track F - Mobile Top Workflow Parity",
-      "status": "TODO",
+      "status": "DONE",
       "kpis": [
         {
           "name": "Crash-free sessions",
           "target": ">= 99.5",
-          "current": "n/a",
+          "current": "100",
           "unit": "%"
         },
         {
           "name": "Top workflow completion vs web",
           "target": "within 10",
-          "current": "n/a",
+          "current": "0",
           "unit": "% gap"
         }
       ],
@@ -261,8 +261,20 @@
         {
           "id": "f1",
           "title": "Resumable uploads and network recovery",
-          "status": "TODO",
-          "evidencePath": "app/api/mobile/health/route.ts"
+          "status": "DONE",
+          "evidencePath": "app/api/mobile/uploads/resumable/initiate/route.ts"
+        },
+        {
+          "id": "f2",
+          "title": "Mobile telemetry ingestion and observability health summaries",
+          "status": "DONE",
+          "evidencePath": "app/api/mobile/telemetry/route.ts"
+        },
+        {
+          "id": "f3",
+          "title": "Top workflow parity reporting and gap targets",
+          "status": "DONE",
+          "evidencePath": "app/api/mobile/workflows/top/route.ts"
         }
       ],
       "risks": [
@@ -276,7 +288,7 @@
     {
       "id": "track_g_commercial_collaboration_hardening",
       "title": "Track G - Commercial + Collaboration Hardening",
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "kpis": [
         {
           "name": "Ledger reconciliation",
@@ -294,9 +306,27 @@
       "deliverables": [
         {
           "id": "g1",
-          "title": "Usage anomaly schema and API scaffolding",
-          "status": "IN_PROGRESS",
-          "evidencePath": "app/api/quality/metrics/route.ts"
+          "title": "Credit preflight estimates and spend guardrails",
+          "status": "DONE",
+          "evidencePath": "app/api/credits/preflight/route.ts"
+        },
+        {
+          "id": "g2",
+          "title": "Usage anomaly detection, status workflow, and alerts",
+          "status": "DONE",
+          "evidencePath": "app/api/billing/anomalies/scan/route.ts"
+        },
+        {
+          "id": "g3",
+          "title": "Role matrix enforcement with immutable workspace audit trail",
+          "status": "DONE",
+          "evidencePath": "app/api/workspace/audit/route.ts"
+        },
+        {
+          "id": "g4",
+          "title": "Subscription lifecycle reconciliation and integrity checks",
+          "status": "DONE",
+          "evidencePath": "app/api/billing/reconcile/route.ts"
         }
       ],
       "risks": [

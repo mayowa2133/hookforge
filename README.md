@@ -144,6 +144,7 @@ Implemented route handlers:
 - `POST /api/dubbing/submit` queue dubbing/lipsync jobs with credit estimation
 - `GET /api/credits/balance` workspace credit balance
 - `GET /api/credits/ledger` workspace credit ledger entries
+- `POST /api/credits/preflight` guardrail preflight for estimated credit usage
 - `GET /api/public-api-keys` list workspace API keys
 - `POST /api/public-api-keys` create workspace API key (secret returned once)
 - `POST /api/public-api-keys/:id/disable` disable API key
@@ -157,8 +158,21 @@ Implemented route handlers:
 - `POST /api/billing/subscribe` activate subscription tier
 - `POST /api/billing/credit-packs/purchase` purchase one-time credits
 - `GET /api/billing/usage-alerts` derive credit usage alerts
+- `GET /api/billing/anomalies` list workspace usage anomalies
+- `POST /api/billing/anomalies/scan` run workspace anomaly detection scan
+- `POST /api/billing/anomalies/:id/status` acknowledge or resolve an anomaly
+- `POST /api/billing/reconcile` run subscription + ledger reconciliation checks
+- `GET /api/workspace/audit` immutable workspace audit trail events
 - `GET /api/mobile/config` mobile rollout and quick-link config
 - `GET /api/mobile/health` mobile reliability + quality-system health signal
+- `POST /api/mobile/uploads/resumable/initiate` start resumable multipart upload session
+- `POST /api/mobile/uploads/resumable/:sessionId/part-url` fetch signed URL for an upload part
+- `POST /api/mobile/uploads/resumable/:sessionId/part-complete` confirm uploaded part ETag
+- `GET /api/mobile/uploads/resumable/:sessionId` resumable upload progress + recovery state
+- `POST /api/mobile/uploads/resumable/:sessionId/complete` finalize upload and register asset
+- `POST /api/mobile/uploads/resumable/:sessionId/abort` abort resumable upload session
+- `POST /api/mobile/telemetry` ingest mobile reliability/perf telemetry events
+- `GET /api/mobile/workflows/top` mobile-vs-web completion parity for top workflows
 - `POST /api/quality/evals/run` trigger quality eval execution and gate scoring
 - `GET /api/quality/evals/:id` read eval-run status/results
 - `GET /api/quality/metrics` read quality/routing/anomaly dashboard payload
@@ -312,6 +326,20 @@ Implemented:
   - `/mobile` install and workflow guidance
   - `/api/mobile/config` for mobile quick-link/capability config
   - PWA manifest route (`/manifest.webmanifest`) for installability
+
+## Phase 7 Commercial + Collaboration Guardrails (Completed)
+
+Implemented:
+
+- Credit preflight guardrail endpoint (`/api/credits/preflight`) with per-workspace limits, low-balance impact, and pack recommendation
+- Reserve-credit guardrails enforced in debit flow (`reserveCredits`) with guardrail metadata written to ledger entries
+- Usage anomaly detection pipeline with APIs:
+  - `/api/billing/anomalies`
+  - `/api/billing/anomalies/scan`
+  - `/api/billing/anomalies/:id/status`
+- Subscription + ledger reconciliation endpoint (`/api/billing/reconcile`) including duplicate-subscription cleanup and renewal-cycle credit checks
+- Stronger collaboration role matrix (owner/admin constraints) with immutable workspace audit trail events (`/api/workspace/audit`)
+- Quality metrics enrichment for billing anomalies in `/api/quality/metrics`
 
 ## Progress Tracker
 

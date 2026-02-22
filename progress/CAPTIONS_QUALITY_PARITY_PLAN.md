@@ -1,7 +1,7 @@
 # HookForge Captions-Quality Parity Program
 
 Owner: HookForge Core Team
-Last updated: 2026-02-22T01:32:11.315Z
+Last updated: 2026-02-22T02:36:12.914Z
 
 ## Track Status
 
@@ -12,8 +12,8 @@ Last updated: 2026-02-22T01:32:11.315Z
 | track_c_translation_dubbing_lipsync | Track C - Translation, Dubbing, Lip-Sync Quality | DONE | 2 | 1 |
 | track_d_ai_edit_chat_quality | Track D - AI Edit and Chat Quality | DONE | 3 | 1 |
 | track_e_creator_ads_shorts_quality | Track E - Creator, Ads, Shorts Quality | DONE | 4 | 1 |
-| track_f_mobile_top_workflow_parity | Track F - Mobile Top Workflow Parity | TODO | 1 | 1 |
-| track_g_commercial_collaboration_hardening | Track G - Commercial + Collaboration Hardening | IN PROGRESS | 1 | 1 |
+| track_f_mobile_top_workflow_parity | Track F - Mobile Top Workflow Parity | DONE | 3 | 1 |
+| track_g_commercial_collaboration_hardening | Track G - Commercial + Collaboration Hardening | DONE | 4 | 1 |
 
 ## KPIs By Track
 
@@ -31,8 +31,8 @@ Last updated: 2026-02-22T01:32:11.315Z
 | track_d_ai_edit_chat_quality | Undo correctness | 99.8 | >= 99.5 | % |
 | track_e_creator_ads_shorts_quality | In-product quality rating | 4.27 | >= 4.2 | /5 |
 | track_e_creator_ads_shorts_quality | Ranked candidate uplift | 0.25 | > baseline | relative |
-| track_f_mobile_top_workflow_parity | Crash-free sessions | n/a | >= 99.5 | % |
-| track_f_mobile_top_workflow_parity | Top workflow completion vs web | n/a | within 10 | % gap |
+| track_f_mobile_top_workflow_parity | Crash-free sessions | 100 | >= 99.5 | % |
+| track_f_mobile_top_workflow_parity | Top workflow completion vs web | 0 | within 10 | % gap |
 | track_g_commercial_collaboration_hardening | Ledger reconciliation | 100 | 100 | % |
 | track_g_commercial_collaboration_hardening | Critical billing integrity defects | 0 | 0 | count |
 
@@ -63,10 +63,15 @@ Last updated: 2026-02-22T01:32:11.315Z
 - [x] e4: Shorts duplicate suppression and semantic ranking (evidence: `app/api/ai-shorts/generate/route.ts`)
 
 ### Track F - Mobile Top Workflow Parity
-- [ ] f1: Resumable uploads and network recovery (evidence: `app/api/mobile/health/route.ts`)
+- [x] f1: Resumable uploads and network recovery (evidence: `app/api/mobile/uploads/resumable/initiate/route.ts`)
+- [x] f2: Mobile telemetry ingestion and observability health summaries (evidence: `app/api/mobile/telemetry/route.ts`)
+- [x] f3: Top workflow parity reporting and gap targets (evidence: `app/api/mobile/workflows/top/route.ts`)
 
 ### Track G - Commercial + Collaboration Hardening
-- [-] g1: Usage anomaly schema and API scaffolding (evidence: `app/api/quality/metrics/route.ts`)
+- [x] g1: Credit preflight estimates and spend guardrails (evidence: `app/api/credits/preflight/route.ts`)
+- [x] g2: Usage anomaly detection, status workflow, and alerts (evidence: `app/api/billing/anomalies/scan/route.ts`)
+- [x] g3: Role matrix enforcement with immutable workspace audit trail (evidence: `app/api/workspace/audit/route.ts`)
+- [x] g4: Subscription lifecycle reconciliation and integrity checks (evidence: `app/api/billing/reconcile/route.ts`)
 
 ## Risks And Mitigations
 

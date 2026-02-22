@@ -4,10 +4,18 @@ type LedgerSlice = {
   createdAt: Date;
 };
 
+type AnomalySlice = {
+  id: string;
+  feature: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  summary: string;
+  createdAt: Date;
+};
+
 export type UsageAlert = {
   id: string;
   severity: "INFO" | "WARN" | "HIGH";
-  kind: "LOW_CREDITS" | "HIGH_BURN" | "NO_ACTIVE_PLAN";
+  kind: "LOW_CREDITS" | "HIGH_BURN" | "NO_ACTIVE_PLAN" | "ANOMALY_SPIKE";
   title: string;
   detail: string;
 };
@@ -16,6 +24,7 @@ export function buildUsageAlerts(params: {
   balance: number;
   monthlyCredits: number | null;
   recentEntries: LedgerSlice[];
+  anomalies?: AnomalySlice[];
 }) {
   const alerts: UsageAlert[] = [];
   const debits = params.recentEntries.filter((entry) => entry.amount < 0).map((entry) => Math.abs(entry.amount));
@@ -54,6 +63,16 @@ export function buildUsageAlerts(params: {
       kind: "HIGH_BURN",
       title: "Usage velocity is high",
       detail: `Spent ${spent24h} credits in 24h and ${spent7d} in 7d. Consider plan upgrade.`
+    });
+  }
+
+  for (const anomaly of params.anomalies ?? []) {
+    alerts.push({
+      id: `anomaly-${anomaly.id}`,
+      severity: anomaly.severity === "CRITICAL" || anomaly.severity === "HIGH" ? "HIGH" : "WARN",
+      kind: "ANOMALY_SPIKE",
+      title: `Anomalous usage detected (${anomaly.feature})`,
+      detail: anomaly.summary
     });
   }
 

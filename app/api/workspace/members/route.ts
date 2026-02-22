@@ -2,7 +2,13 @@ import { z } from "zod";
 import { requireUserWithWorkspace } from "@/lib/api-context";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { canManageWorkspaceMembers } from "@/lib/workspace-roles";
+import {
+  canAssignWorkspaceRole,
+  canManageTargetRole,
+  canManageWorkspaceMembers,
+  isManagerRole
+} from "@/lib/workspace-roles";
+import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 
 export const runtime = "nodejs";
 
@@ -64,6 +70,9 @@ export async function POST(request: Request) {
     if (!actorMembership || !canManageWorkspaceMembers(actorMembership.role)) {
       return jsonError("Only admins can add workspace members", 403);
     }
+    if (!canAssignWorkspaceRole(actorMembership.role, body.role)) {
+      return jsonError("Your role cannot assign the requested workspace role", 403);
+    }
 
     const targetUser = await prisma.user.findUnique({
       where: {
@@ -77,6 +86,33 @@ export async function POST(request: Request) {
 
     if (!targetUser) {
       return jsonError("User not found. Ask them to register first.", 404);
+    }
+
+    const existingMembership = await prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId: workspace.id,
+          userId: targetUser.id
+        }
+      }
+    });
+
+    if (existingMembership && !canManageTargetRole(actorMembership.role, existingMembership.role)) {
+      return jsonError("Your role cannot modify this member", 403);
+    }
+
+    if (existingMembership && isManagerRole(existingMembership.role) && !isManagerRole(body.role)) {
+      const managerCount = await prisma.workspaceMember.count({
+        where: {
+          workspaceId: workspace.id,
+          role: {
+            in: ["OWNER", "ADMIN"]
+          }
+        }
+      });
+      if (managerCount <= 1) {
+        return jsonError("Workspace must retain at least one manager role", 400);
+      }
     }
 
     const member = await prisma.workspaceMember.upsert({
@@ -93,6 +129,18 @@ export async function POST(request: Request) {
       },
       update: {
         role: body.role
+      }
+    });
+
+    await recordWorkspaceAuditEvent({
+      workspaceId: workspace.id,
+      actorUserId: user.id,
+      action: "workspace_member_upsert",
+      targetType: "WorkspaceMember",
+      targetId: member.id,
+      details: {
+        targetUserId: member.userId,
+        role: member.role
       }
     });
 

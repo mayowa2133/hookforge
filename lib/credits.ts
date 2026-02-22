@@ -1,5 +1,7 @@
 import { prisma } from "./prisma";
 import { Prisma } from "@prisma/client";
+import { evaluateWorkspaceCreditGuardrails } from "./billing/guardrails";
+import { scanUsageAnomaliesForWorkspace } from "./billing/anomalies";
 
 type LedgerParams = {
   workspaceId: string;
@@ -12,7 +14,7 @@ type LedgerParams = {
 };
 
 export async function ensureCreditWallet(workspaceId: string) {
-  return prisma.creditWallet.upsert({
+  const wallet = await prisma.creditWallet.upsert({
     where: { workspaceId },
     update: {},
     create: {
@@ -20,6 +22,45 @@ export async function ensureCreditWallet(workspaceId: string) {
       balance: 0
     }
   });
+
+  if (wallet.balance > 0) {
+    const [existingBootstrap, existingAnyEntry] = await Promise.all([
+      prisma.creditLedgerEntry.findFirst({
+        where: {
+          workspaceId,
+          feature: "wallet.bootstrap",
+          referenceType: "Workspace",
+          referenceId: workspaceId
+        },
+        select: { id: true }
+      }),
+      prisma.creditLedgerEntry.findFirst({
+        where: {
+          workspaceId
+        },
+        select: { id: true }
+      })
+    ]);
+
+    if (!existingBootstrap && !existingAnyEntry) {
+      await prisma.creditLedgerEntry.create({
+        data: {
+          walletId: wallet.id,
+          workspaceId,
+          feature: "wallet.bootstrap",
+          entryType: "CREDIT",
+          amount: wallet.balance,
+          referenceType: "Workspace",
+          referenceId: workspaceId,
+          metadata: {
+            source: "seeded-wallet-balance"
+          } as Prisma.InputJsonValue
+        }
+      });
+    }
+  }
+
+  return wallet;
 }
 
 export async function addLedgerEntry(params: LedgerParams) {
@@ -69,15 +110,41 @@ export async function reserveCredits(params: {
     return null;
   }
 
-  return addLedgerEntry({
+  const absoluteAmount = Math.abs(Math.trunc(params.amount));
+  const guardrail = await evaluateWorkspaceCreditGuardrails({
     workspaceId: params.workspaceId,
     feature: params.feature,
-    amount: -Math.abs(Math.trunc(params.amount)),
+    estimatedCredits: absoluteAmount
+  });
+
+  if (!guardrail.allowed) {
+    throw new Error(`Credit guardrail blocked: ${guardrail.reasonCode}`);
+  }
+
+  const entry = await addLedgerEntry({
+    workspaceId: params.workspaceId,
+    feature: params.feature,
+    amount: -absoluteAmount,
     entryType: "DEBIT",
     referenceType: params.referenceType,
     referenceId: params.referenceId,
-    metadata: params.metadata
+    metadata: {
+      ...(params.metadata ?? {}),
+      guardrail: {
+        reasonCode: guardrail.reasonCode,
+        warnings: guardrail.warnings,
+        postDebitBalance: guardrail.postDebitBalance
+      }
+    }
   });
+
+  // Non-blocking anomaly scan to keep usage alerts and quality metrics current.
+  scanUsageAnomaliesForWorkspace({
+    workspaceId: params.workspaceId,
+    featureFilter: params.feature
+  }).catch(() => undefined);
+
+  return entry;
 }
 
 export async function getCreditBalance(workspaceId: string) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getCreditPackById, getPlanByTier, planCatalog } from "@/lib/billing/catalog";
 import { buildUsageAlerts } from "@/lib/billing/usage-alerts";
 import { canManageWorkspaceMembers, isAtLeastRole } from "@/lib/workspace-roles";
+import { mobileWorkflowCatalog, summarizeMobileTelemetry } from "@/lib/mobile/telemetry";
 
 describe("phase6 commercialization and collaboration tools", () => {
   it("resolves plan and credit pack catalog entries", () => {
@@ -38,5 +39,49 @@ describe("phase6 commercialization and collaboration tools", () => {
     expect(isAtLeastRole("EDITOR", "ADMIN")).toBe(false);
     expect(canManageWorkspaceMembers("ADMIN")).toBe(true);
     expect(canManageWorkspaceMembers("VIEWER")).toBe(false);
+  });
+
+  it("calculates mobile parity summary targets", () => {
+    const summary = summarizeMobileTelemetry({
+      global: {
+        sessionsStarted: 120,
+        sessionsEnded: 115,
+        sessionsCrashed: 0,
+        workflowStartedTotal: 60,
+        workflowCompletedTotal: 56,
+        uploadResumes: 10,
+        uploadFailures: 2,
+        exportsStarted: 40,
+        exportsCompleted: 38,
+        latencySumMs: 120_000,
+        latencyCount: 80
+      },
+      workflows: {
+        creator_to_render: {
+          started: 20,
+          completed: 18,
+          latencySumMs: 36_000,
+          latencyCount: 20
+        },
+        template_edit_render: {
+          started: 24,
+          completed: 22,
+          latencySumMs: 30_000,
+          latencyCount: 24
+        },
+        localization_dub: {
+          started: 16,
+          completed: 16,
+          latencySumMs: 54_000,
+          latencyCount: 36
+        }
+      }
+    });
+
+    expect(mobileWorkflowCatalog.length).toBeGreaterThanOrEqual(3);
+    expect(summary.crashFreeSessionsPct).toBe(100);
+    expect(summary.meetsCrashFreeTarget).toBe(true);
+    expect(summary.topWorkflowGapPct).toBeLessThanOrEqual(10);
+    expect(summary.meetsWorkflowGapTarget).toBe(true);
   });
 });
