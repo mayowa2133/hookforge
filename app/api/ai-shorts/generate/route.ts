@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { requireUserWithWorkspace } from "@/lib/api-context";
 import { enqueueAIJob, queueNameForJobType } from "@/lib/ai/jobs";
-import { buildDeterministicShortlist, estimatePhase4ShortsCredits } from "@/lib/ai/phase4";
+import { buildRankedShortlistPlan, estimatePhase4ShortsCredits } from "@/lib/ai/phase4";
 import { createSourceAttestation, detectSourceTypeFromUrl, type ComplianceSourceType } from "@/lib/compliance";
 import { reserveCredits } from "@/lib/credits";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       attestationId = attestation.rightsAttestation.id;
     }
 
-    const shortlist = buildDeterministicShortlist({
+    const shortlist = buildRankedShortlistPlan({
       sourceUrl,
       sourceType,
       clipCount: body.clipCount,
@@ -75,6 +75,9 @@ export async function POST(request: Request) {
         clipCount: body.clipCount,
         language: body.language,
         sourceDurationSec: body.sourceDurationSec,
+        rankedCandidates: shortlist.rankedCandidates,
+        shortsQualitySummary: shortlist.qualitySummary,
+        duplicatesSuppressed: shortlist.duplicatesSuppressed,
         rightsAttestationId: attestationId
       }
     });
@@ -99,7 +102,10 @@ export async function POST(request: Request) {
 
     return jsonOk(
       {
-        shortlistClips: shortlist.clips,
+        shortlistClips: shortlist.shortlistClips,
+        rankedCandidates: shortlist.rankedCandidates,
+        qualitySummary: shortlist.qualitySummary,
+        duplicatesSuppressed: shortlist.duplicatesSuppressed,
         confidence: shortlist.confidence,
         editableProjects: [],
         aiJobId: aiJob.id,

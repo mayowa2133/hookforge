@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireProjectContext } from "@/lib/api-context";
-import { consumeChatUndoEntry } from "@/lib/ai/phase2";
+import { consumeChatUndoEntryWithLineage } from "@/lib/ai/phase2";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { appendTimelineRevision } from "@/lib/project-v2";
 import { prisma } from "@/lib/prisma";
@@ -41,9 +41,21 @@ export async function POST(request: Request, { params }: Context) {
       throw new Error("Project not found");
     }
 
-    const consumed = consumeChatUndoEntry(legacyProject.config, body.undoToken);
-    if (!consumed) {
-      throw new Error("Undo token not found");
+    const currentTimeline = buildTimelineState(
+      legacyProject.config,
+      legacyProject.assets as Array<{ id: string; slotKey: string; kind: "VIDEO" | "IMAGE" | "AUDIO"; durationSec: number | null }>
+    );
+
+    const consumed = consumeChatUndoEntryWithLineage({
+      configInput: legacyProject.config,
+      undoToken: body.undoToken,
+      projectId: legacyProject.id,
+      currentRevision: currentTimeline.version,
+      currentTimelineHash: currentTimeline.revisions[0]?.timelineHash ?? null,
+      requireLatestLineage: true
+    });
+    if ("error" in consumed) {
+      throw new Error(consumed.error);
     }
 
     const nextConfig = {
@@ -69,7 +81,8 @@ export async function POST(request: Request, { params }: Context) {
       operations: {
         undoToken: body.undoToken,
         restoredAt: new Date().toISOString(),
-        prompt: consumed.entry.prompt
+        prompt: consumed.entry.prompt,
+        lineageValidated: true
       }
     });
 

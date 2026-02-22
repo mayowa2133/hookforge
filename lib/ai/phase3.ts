@@ -7,6 +7,7 @@ import { appendTimelineRevision } from "../project-v2";
 import { parseTemplateSlotSchema, projectReadinessFromAssets } from "../template-runtime";
 import { buildProjectStorageKey, uploadFileToStorage } from "../storage";
 import { probeStorageAsset } from "../ffprobe";
+import { rankCreatorCandidates } from "./phase4-quality";
 
 const VIDEO_MIME = "video/mp4";
 const IMAGE_MIME = "image/svg+xml";
@@ -217,7 +218,20 @@ async function applyAiCreatorJob(aiJob: AIJob) {
     };
   }
 
-  const actorPreset = selectActorPreset(asString(input.actorId) || asString(input.actorProfileId));
+  const script = deriveScript(input);
+  const durationSec = Math.max(6, Math.min(180, asNumber(input.durationSec, 30)));
+  const requestedActorId = asString(input.actorId) || asString(input.actorProfileId);
+  const rankedCreator = rankCreatorCandidates({
+    script,
+    durationSec,
+    actors: demoActorPresets.map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      description: preset.description
+    })),
+    requestedActorId: requestedActorId || undefined
+  });
+  const actorPreset = selectActorPreset(requestedActorId || rankedCreator.selected.actorId);
   const generated = await createGeneratedStorageAssets({
     legacyProjectId: context.legacyProject.id,
     actorPreset
@@ -291,8 +305,6 @@ async function applyAiCreatorJob(aiJob: AIJob) {
     upserted.push(persisted);
   }
 
-  const script = deriveScript(input);
-  const durationSec = Math.max(6, Math.min(180, asNumber(input.durationSec, 30)));
   const currentConfig = asRecord(context.legacyProject.config);
   const nextConfig = {
     ...currentConfig,
@@ -304,6 +316,8 @@ async function applyAiCreatorJob(aiJob: AIJob) {
     aiCreatorVoiceId: sanitizeOverlayText(asString(input.voiceId), ""),
     aiCreatorTwinId: sanitizeOverlayText(asString(input.twinId), ""),
     aiCreatorDurationSec: durationSec,
+    aiCreatorSelectedCandidate: rankedCreator.selected,
+    aiCreatorCandidateUpliftPct: rankedCreator.qualitySummary.candidateUpliftPct,
     aiCreatorLastJobId: aiJob.id
   };
 
@@ -331,6 +345,8 @@ async function applyAiCreatorJob(aiJob: AIJob) {
         op: "phase3_ai_creator_generate",
         aiJobId: aiJob.id,
         actorPresetId: actorPreset.id,
+        qualitySummary: rankedCreator.qualitySummary,
+        selectedCandidate: rankedCreator.selected,
         slots: upserted.map((asset) => ({
           slotKey: asset.slotKey,
           storageKey: asset.storageKey
@@ -384,6 +400,8 @@ async function applyAiCreatorJob(aiJob: AIJob) {
     legacyProjectId: context.legacyProject.id,
     projectV2Id: context.projectV2.id,
     actorPreset,
+    rankedCandidates: rankedCreator.candidates,
+    qualitySummary: rankedCreator.qualitySummary,
     slotsFilled: upserted.map((asset) => asset.slotKey),
     ready: readiness.ready,
     missingSlotKeys: readiness.missingSlotKeys

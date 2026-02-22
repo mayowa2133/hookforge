@@ -1,13 +1,13 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { requireProjectContext } from "@/lib/api-context";
-import { buildChatEditPlan } from "@/lib/ai/chat-edit";
-import { buildTimelineOpsFromChatPlan, pushChatUndoEntry } from "@/lib/ai/phase2";
+import { runChatEditPlannerValidatorExecutor } from "@/lib/ai/chat-edit-pipeline";
+import { pushChatUndoEntry } from "@/lib/ai/phase2";
 import { enqueueAIJob, queueNameForJobType } from "@/lib/ai/jobs";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { appendTimelineRevision } from "@/lib/project-v2";
 import { prisma } from "@/lib/prisma";
-import { TIMELINE_STATE_KEY, applyTimelineOperations, buildTimelineState, serializeTimelineState } from "@/lib/timeline-legacy";
+import { TIMELINE_STATE_KEY, buildTimelineState, serializeTimelineState } from "@/lib/timeline-legacy";
 
 export const runtime = "nodejs";
 
@@ -25,7 +25,6 @@ export async function POST(request: Request, { params }: Context) {
     const body = ChatEditSchema.parse(await request.json());
     const ctx = await requireProjectContext(params.id);
 
-    const plannedOperations = buildChatEditPlan(body.prompt);
     const legacyProject = await prisma.project.findUnique({
       where: { id: ctx.legacyProject.id },
       select: {
@@ -50,11 +49,13 @@ export async function POST(request: Request, { params }: Context) {
       legacyProject.config,
       legacyProject.assets as Array<{ id: string; slotKey: string; kind: "VIDEO" | "IMAGE" | "AUDIO"; durationSec: number | null }>
     );
-    const appliedTimelineOperations = buildTimelineOpsFromChatPlan({
-      state: timelineState,
-      plannedOperations
+
+    const execution = runChatEditPlannerValidatorExecutor({
+      prompt: body.prompt,
+      state: timelineState
     });
-    const undoToken = randomUUID();
+    const nextTimelineState = execution.executionMode === "APPLIED" ? execution.nextState : null;
+    const shouldApply = execution.executionMode === "APPLIED" && nextTimelineState !== null;
 
     let nextConfig = typeof legacyProject.config === "object" && legacyProject.config !== null
       ? (legacyProject.config as Record<string, unknown>)
@@ -65,34 +66,48 @@ export async function POST(request: Request, { params }: Context) {
         ? (nextConfig[TIMELINE_STATE_KEY] as string)
         : JSON.stringify(timelineState);
 
-    if (appliedTimelineOperations.length > 0) {
-      const applied = applyTimelineOperations(timelineState, appliedTimelineOperations);
-      nextConfig = serializeTimelineState(nextConfig, applied.state);
-    }
+    let undoToken: string | null = null;
+    let revision: { id: string } | null = null;
 
-    nextConfig = pushChatUndoEntry({
-      config: nextConfig,
-      undoToken,
-      timelineStateJson: previousTimelineJson,
-      prompt: body.prompt
-    });
-
-    await prisma.project.update({
-      where: { id: legacyProject.id },
-      data: {
-        config: nextConfig as never
-      }
-    });
-
-    const revision = await appendTimelineRevision({
-      projectId: ctx.projectV2.id,
-      createdByUserId: ctx.user.id,
-      operations: {
+    if (shouldApply) {
+      undoToken = randomUUID();
+      nextConfig = serializeTimelineState(nextConfig, nextTimelineState);
+      nextConfig = pushChatUndoEntry({
+        config: nextConfig,
+        undoToken,
+        timelineStateJson: previousTimelineJson,
         prompt: body.prompt,
-        plannedOperations,
-        appliedTimelineOperations
-      }
-    });
+        projectId: legacyProject.id,
+        lineage: {
+          projectId: legacyProject.id,
+          baseRevision: timelineState.version,
+          baseTimelineHash: timelineState.revisions[0]?.timelineHash,
+          appliedRevision: execution.nextRevision ?? undefined,
+          appliedTimelineHash: execution.nextTimelineHash ?? undefined
+        }
+      });
+
+      await prisma.project.update({
+        where: { id: legacyProject.id },
+        data: {
+          config: nextConfig as never
+        }
+      });
+
+      revision = await appendTimelineRevision({
+        projectId: ctx.projectV2.id,
+        createdByUserId: ctx.user.id,
+        operations: {
+          prompt: body.prompt,
+          plannedOperations: execution.plannedOperations,
+          validatedOperations: execution.validatedOperations,
+          appliedTimelineOperations: execution.appliedTimelineOperations,
+          planValidation: execution.planValidation,
+          invariantIssues: execution.invariantIssues,
+          executionMode: execution.executionMode
+        }
+      });
+    }
 
     const aiJob = await enqueueAIJob({
       workspaceId: ctx.workspace.id,
@@ -102,16 +117,28 @@ export async function POST(request: Request, { params }: Context) {
       input: {
         prompt: body.prompt,
         attachmentAssetIds: body.attachmentAssetIds ?? [],
-        plannedOperations,
-        appliedTimelineOperations,
+        executionMode: execution.executionMode,
+        plannedOperations: execution.plannedOperations,
+        validatedOperations: execution.validatedOperations,
+        planValidation: execution.planValidation,
+        appliedTimelineOperations: execution.appliedTimelineOperations,
+        constrainedSuggestions: execution.constrainedSuggestions,
+        invariantIssues: execution.invariantIssues,
+        fallbackReason: execution.fallbackReason,
         undoToken
       }
     });
 
     return jsonOk({
-      plannedOperations,
-      appliedTimelineOperations,
-      appliedRevisionId: revision.id,
+      executionMode: execution.executionMode,
+      plannedOperations: execution.plannedOperations,
+      validatedOperations: execution.validatedOperations,
+      appliedTimelineOperations: execution.appliedTimelineOperations,
+      planValidation: execution.planValidation,
+      constrainedSuggestions: execution.constrainedSuggestions,
+      fallbackReason: execution.fallbackReason,
+      invariantIssues: execution.invariantIssues,
+      appliedRevisionId: revision?.id ?? null,
       undoToken,
       aiJobId: aiJob.id
     });

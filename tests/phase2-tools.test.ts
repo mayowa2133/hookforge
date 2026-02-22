@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildTimelineOpsFromChatPlan, consumeChatUndoEntry, pushChatUndoEntry } from "@/lib/ai/phase2";
+import {
+  buildTimelineOpsFromChatPlan,
+  consumeChatUndoEntry,
+  consumeChatUndoEntryWithLineage,
+  pushChatUndoEntry
+} from "@/lib/ai/phase2";
 import type { TimelineState } from "@/lib/timeline-types";
 
 function makeState(): TimelineState {
@@ -97,5 +102,40 @@ describe("phase2 timeline/chat tools", () => {
     expect(consumed?.entry.prompt).toBe("tighten pacing");
     expect(Array.isArray((consumed?.config as Record<string, unknown>).chatEditUndoStack)).toBe(true);
     expect(((consumed?.config as Record<string, unknown>).chatEditUndoStack as unknown[]).length).toBe(0);
+  });
+
+  it("enforces strict undo lineage checks", () => {
+    const withUndo = pushChatUndoEntry({
+      config: {},
+      undoToken: "undo-token-2",
+      timelineStateJson: "{\"version\":2}",
+      prompt: "split intro",
+      projectId: "project-1",
+      lineage: {
+        projectId: "project-1",
+        appliedRevision: 3,
+        appliedTimelineHash: "hash-3"
+      }
+    });
+
+    const mismatch = consumeChatUndoEntryWithLineage({
+      configInput: withUndo,
+      undoToken: "undo-token-2",
+      projectId: "project-1",
+      currentRevision: 4,
+      currentTimelineHash: "hash-4",
+      requireLatestLineage: true
+    });
+    expect("error" in mismatch).toBe(true);
+
+    const valid = consumeChatUndoEntryWithLineage({
+      configInput: withUndo,
+      undoToken: "undo-token-2",
+      projectId: "project-1",
+      currentRevision: 3,
+      currentTimelineHash: "hash-3",
+      requireLatestLineage: true
+    });
+    expect("error" in valid).toBe(false);
   });
 });

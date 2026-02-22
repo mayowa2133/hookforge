@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { requireUserWithWorkspace } from "@/lib/api-context";
 import { enqueueAIJob, queueNameForJobType } from "@/lib/ai/jobs";
-import { buildDeterministicShortlist, estimatePhase4ShortsCredits, extractRedditContext } from "@/lib/ai/phase4";
+import { buildRankedShortlistPlan, estimatePhase4ShortsCredits, extractRedditContext } from "@/lib/ai/phase4";
 import { createSourceAttestation } from "@/lib/compliance";
 import { reserveCredits } from "@/lib/credits";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       postBody: body.postBody
     });
 
-    const shortlist = buildDeterministicShortlist({
+    const shortlist = buildRankedShortlistPlan({
       sourceUrl: parsed.toString(),
       sourceType: "REDDIT",
       clipCount: body.clipCount,
@@ -74,6 +74,9 @@ export async function POST(request: Request) {
         language: body.language,
         sourceDurationSec: body.sourceDurationSec,
         redditContext: context,
+        rankedCandidates: shortlist.rankedCandidates,
+        shortsQualitySummary: shortlist.qualitySummary,
+        duplicatesSuppressed: shortlist.duplicatesSuppressed,
         rightsAttestationId: attestation.rightsAttestation.id,
         flow: "reddit-to-video"
       }
@@ -103,7 +106,10 @@ export async function POST(request: Request) {
         status: aiJob.status,
         creditEstimate: credits,
         context,
-        shortlistClips: shortlist.clips,
+        shortlistClips: shortlist.shortlistClips,
+        rankedCandidates: shortlist.rankedCandidates,
+        qualitySummary: shortlist.qualitySummary,
+        duplicatesSuppressed: shortlist.duplicatesSuppressed,
         confidence: shortlist.confidence,
         editableProjects: []
       },

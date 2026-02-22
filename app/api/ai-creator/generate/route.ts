@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { requireUserWithWorkspace } from "@/lib/api-context";
 import { enqueueAIJob, queueNameForJobType } from "@/lib/ai/jobs";
-import { estimatePhase3Credits } from "@/lib/ai/phase3";
+import { demoActorPresets, estimatePhase3Credits } from "@/lib/ai/phase3";
+import { rankCreatorCandidates } from "@/lib/ai/phase4-quality";
 import { reserveCredits } from "@/lib/credits";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { ensureProjectV2FromLegacy } from "@/lib/project-v2";
 import { prisma } from "@/lib/prisma";
 import { getDefaultConfigFromTemplate } from "@/lib/template-runtime";
+import { sanitizeOverlayText } from "@/lib/sanitize";
 
 export const runtime = "nodejs";
 
@@ -31,6 +33,20 @@ export async function POST(request: Request) {
   try {
     const body = GenerateSchema.parse(await request.json());
     const { user, workspace } = await requireUserWithWorkspace();
+    const creatorScript = sanitizeOverlayText(
+      body.script?.trim() || body.prompt?.trim() || "HookForge AI Creator draft",
+      "HookForge AI Creator draft"
+    );
+    const creatorRanking = rankCreatorCandidates({
+      script: creatorScript,
+      durationSec: body.durationSec,
+      actors: demoActorPresets.map((preset) => ({
+        id: preset.id,
+        name: preset.name,
+        description: preset.description
+      })),
+      requestedActorId: body.actorId
+    });
 
     const template = await prisma.template.findUnique({
       where: {
@@ -108,6 +124,8 @@ export async function POST(request: Request) {
       queueName: queueNameForJobType("AI_CREATOR"),
       input: {
         ...body,
+        actorId: body.actorId ?? creatorRanking.selected.actorId,
+        creatorCandidateRanking: creatorRanking,
         legacyProjectId: legacyProject.id
       }
     });
@@ -141,6 +159,9 @@ export async function POST(request: Request) {
         artifacts: [],
         aiJobId: aiJob.id,
         status: aiJob.status,
+        selectedCandidate: creatorRanking.selected,
+        rankedCandidates: creatorRanking.candidates,
+        qualitySummary: creatorRanking.qualitySummary,
         creditEstimate: estimatedCredits
       },
       202

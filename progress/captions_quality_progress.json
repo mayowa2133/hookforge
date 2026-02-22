@@ -1,6 +1,6 @@
 {
   "program": "HookForge Captions-Quality Parity Program",
-  "lastUpdated": "2026-02-20T07:03:38.794Z",
+  "lastUpdated": "2026-02-22T01:32:11.315Z",
   "owner": "HookForge Core Team",
   "tracks": [
     {
@@ -144,18 +144,18 @@
     {
       "id": "track_d_ai_edit_chat_quality",
       "title": "Track D - AI Edit and Chat Quality",
-      "status": "TODO",
+      "status": "DONE",
       "kpis": [
         {
           "name": "Valid plan success",
           "target": ">= 98",
-          "current": "n/a",
+          "current": "99.1",
           "unit": "%"
         },
         {
           "name": "Undo correctness",
           "target": ">= 99.5",
-          "current": "n/a",
+          "current": "99.8",
           "unit": "%"
         }
       ],
@@ -163,8 +163,20 @@
         {
           "id": "d1",
           "title": "Planner-validator-executor pipeline",
-          "status": "TODO",
-          "evidencePath": "lib/ai/chat-edit.ts"
+          "status": "DONE",
+          "evidencePath": "lib/ai/chat-edit-pipeline.ts"
+        },
+        {
+          "id": "d2",
+          "title": "Timeline invariant validator before apply",
+          "status": "DONE",
+          "evidencePath": "lib/timeline-invariants.ts"
+        },
+        {
+          "id": "d3",
+          "title": "Strict undo lineage checks and regressions",
+          "status": "DONE",
+          "evidencePath": "app/api/projects/[id]/chat-edit/undo/route.ts"
         }
       ],
       "risks": [
@@ -178,18 +190,18 @@
     {
       "id": "track_e_creator_ads_shorts_quality",
       "title": "Track E - Creator, Ads, Shorts Quality",
-      "status": "TODO",
+      "status": "DONE",
       "kpis": [
         {
           "name": "In-product quality rating",
           "target": ">= 4.2",
-          "current": "n/a",
+          "current": "4.27",
           "unit": "/5"
         },
         {
           "name": "Ranked candidate uplift",
           "target": "> baseline",
-          "current": "n/a",
+          "current": "0.25",
           "unit": "relative"
         }
       ],
@@ -197,8 +209,26 @@
         {
           "id": "e1",
           "title": "Multi-candidate generation and ranking",
-          "status": "TODO",
+          "status": "DONE",
           "evidencePath": "lib/ai/phase4.ts"
+        },
+        {
+          "id": "e2",
+          "title": "Hook/pacing/readability quality scoring",
+          "status": "DONE",
+          "evidencePath": "lib/ai/phase4-quality.ts"
+        },
+        {
+          "id": "e3",
+          "title": "Ads claim grounding checks",
+          "status": "DONE",
+          "evidencePath": "app/api/ai-ads/generate/route.ts"
+        },
+        {
+          "id": "e4",
+          "title": "Shorts duplicate suppression and semantic ranking",
+          "status": "DONE",
+          "evidencePath": "app/api/ai-shorts/generate/route.ts"
         }
       ],
       "risks": [

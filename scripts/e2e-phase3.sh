@@ -123,10 +123,23 @@ creator_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
 
 creator_job_id=$(echo "$creator_resp" | jq -r ".aiJobId")
 legacy_project_id=$(echo "$creator_resp" | jq -r ".legacyProjectId")
+creator_rating=$(echo "$creator_resp" | jq -r ".qualitySummary.ratingScore")
+creator_uplift=$(echo "$creator_resp" | jq -r ".qualitySummary.candidateUpliftPct")
+creator_candidates=$(echo "$creator_resp" | jq -r ".rankedCandidates | length")
 [ -n "$creator_job_id" ] && [ "$creator_job_id" != "null" ]
 [ -n "$legacy_project_id" ] && [ "$legacy_project_id" != "null" ]
+[ "$creator_candidates" -gt 1 ]
+awk "BEGIN {exit !($creator_rating >= 4.2)}"
+awk "BEGIN {exit !($creator_uplift > 0)}"
 wait_for_ai_job "$creator_job_id"
 echo "generated_project=$legacy_project_id"
+
+creator_job_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/ai-jobs/$creator_job_id")
+phase3_rating=$(echo "$creator_job_resp" | jq -r ".aiJob.output.sideEffects.phase3.qualitySummary.ratingScore")
+phase3_uplift=$(echo "$creator_job_resp" | jq -r ".aiJob.output.sideEffects.phase3.qualitySummary.candidateUpliftPct")
+awk "BEGIN {exit !($phase3_rating >= 4.2)}"
+awk "BEGIN {exit !($phase3_uplift > 0)}"
+echo "creator_quality_rating=$phase3_rating uplift=$phase3_uplift"
 
 project_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects/$legacy_project_id")
 project_status=$(echo "$project_resp" | jq -r ".project.status")

@@ -382,7 +382,13 @@ export function CreatorStudio() {
         });
       }
 
-      setSuccess(`AI Creator job queued. Estimated credits: ${data.creditEstimate}.`);
+      const rating = typeof data?.qualitySummary?.ratingScore === "number" ? data.qualitySummary.ratingScore : null;
+      const uplift = typeof data?.qualitySummary?.candidateUpliftPct === "number" ? data.qualitySummary.candidateUpliftPct : null;
+      if (rating !== null && uplift !== null) {
+        setSuccess(`AI Creator job queued. Estimated credits: ${data.creditEstimate}. Ranked quality ${rating}/5, uplift ${uplift}%.`);
+      } else {
+        setSuccess(`AI Creator job queued. Estimated credits: ${data.creditEstimate}.`);
+      }
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : "AI Creator generation failed");
     } finally {

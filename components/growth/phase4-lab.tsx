@@ -211,7 +211,13 @@ export function Phase4Lab() {
         }
       });
 
-      setSuccess(`AI Ads queued. Credits reserved: ${payload.creditEstimate}.`);
+      if (typeof payload?.qualitySummary?.ratingScore === "number") {
+        setSuccess(
+          `AI Ads queued. Credits reserved: ${payload.creditEstimate}. Ranked quality ${payload.qualitySummary.ratingScore}/5 with ${payload.qualitySummary.candidateUpliftPct}% uplift.`
+        );
+      } else {
+        setSuccess(`AI Ads queued. Credits reserved: ${payload.creditEstimate}.`);
+      }
       await refreshAudit();
     } catch (adsError) {
       setError(adsError instanceof Error ? adsError.message : "AI Ads request failed");
@@ -252,7 +258,13 @@ export function Phase4Lab() {
         progress: 0
       });
 
-      setSuccess(`AI Shorts queued. Credits reserved: ${payload.creditEstimate}.`);
+      if (typeof payload?.qualitySummary?.ratingScore === "number") {
+        setSuccess(
+          `AI Shorts queued. Credits reserved: ${payload.creditEstimate}. Ranked quality ${payload.qualitySummary.ratingScore}/5; duplicates suppressed: ${payload.duplicatesSuppressed}.`
+        );
+      } else {
+        setSuccess(`AI Shorts queued. Credits reserved: ${payload.creditEstimate}.`);
+      }
       await refreshAudit();
     } catch (shortsError) {
       setError(shortsError instanceof Error ? shortsError.message : "AI Shorts request failed");
@@ -294,7 +306,13 @@ export function Phase4Lab() {
         progress: 0
       });
 
-      setSuccess(`Reddit-to-video queued. Credits reserved: ${payload.creditEstimate}.`);
+      if (typeof payload?.qualitySummary?.ratingScore === "number") {
+        setSuccess(
+          `Reddit-to-video queued. Credits reserved: ${payload.creditEstimate}. Ranked quality ${payload.qualitySummary.ratingScore}/5 with ${payload.qualitySummary.candidateUpliftPct}% uplift.`
+        );
+      } else {
+        setSuccess(`Reddit-to-video queued. Credits reserved: ${payload.creditEstimate}.`);
+      }
       await refreshAudit();
     } catch (redditError) {
       setError(redditError instanceof Error ? redditError.message : "Reddit-to-video request failed");

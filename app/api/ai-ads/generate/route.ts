@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { requireUserWithWorkspace } from "@/lib/api-context";
 import { enqueueAIJob, queueNameForJobType } from "@/lib/ai/jobs";
-import { buildDeterministicAdScript, estimatePhase4AdsCredits } from "@/lib/ai/phase4";
+import { buildRankedAdPlan, estimatePhase4AdsCredits } from "@/lib/ai/phase4";
 import { createSourceAttestation } from "@/lib/compliance";
 import { reserveCredits } from "@/lib/credits";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
@@ -42,11 +42,13 @@ export async function POST(request: Request) {
       throw new Error("Template not found: green-screen-commentator");
     }
 
-    const script = buildDeterministicAdScript({
+    const rankedAdPlan = buildRankedAdPlan({
       websiteUrl: parsedUrl.toString(),
       productName: body.productName,
-      tone: body.tone
+      tone: body.tone,
+      durationSec: body.durationSec
     });
+    const script = rankedAdPlan.selectedScript;
 
     const legacyProject = await prisma.project.create({
       data: {
@@ -88,6 +90,9 @@ export async function POST(request: Request) {
         ...body,
         websiteUrl: parsedUrl.toString(),
         sourceType: "WEBSITE",
+        selectedAdCandidateId: rankedAdPlan.selectedCandidate.id,
+        rankedAdCandidates: rankedAdPlan.rankedCandidates,
+        adQualitySummary: rankedAdPlan.qualitySummary,
         rightsAttestationId: attestation.rightsAttestation.id,
         ingestionSourceLinkId: attestation.sourceLink.id,
         legacyProjectId: legacyProject.id
@@ -119,6 +124,9 @@ export async function POST(request: Request) {
         aiJobId: aiJob.id,
         status: aiJob.status,
         editableScript: script,
+        rankedCandidates: rankedAdPlan.rankedCandidates,
+        qualitySummary: rankedAdPlan.qualitySummary,
+        claimGrounding: rankedAdPlan.selectedCandidate.grounding,
         editableMedia: [],
         creditEstimate: credits
       },

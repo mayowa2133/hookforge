@@ -8,6 +8,7 @@ import {
   buildTimelineState, serializeTimelineState
 } from "@/lib/timeline-legacy";
 import type { TimelineOperation } from "@/lib/timeline-types";
+import { validateTimelineStateInvariants } from "@/lib/timeline-invariants";
 
 export const runtime = "nodejs";
 
@@ -186,6 +187,16 @@ export async function POST(request: Request, { params }: Context) {
 
     const state = buildTimelineState(project.config, project.assets as never);
     const applied = applyTimelineOperations(state, body.operations as TimelineOperation[]);
+    const invariantIssues = validateTimelineStateInvariants(applied.state);
+    if (invariantIssues.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Timeline invariant validation failed",
+          issues: invariantIssues
+        },
+        { status: 400 }
+      );
+    }
 
     const currentConfig = typeof project.config === "object" && project.config !== null
       ? (project.config as Record<string, unknown>)

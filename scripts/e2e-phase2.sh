@@ -178,8 +178,12 @@ chat_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -d '{"prompt":"split the intro and make captions bolder"}')
 chat_job_id=$(echo "$chat_resp" | jq -r ".aiJobId")
 undo_token=$(echo "$chat_resp" | jq -r ".undoToken")
+chat_mode=$(echo "$chat_resp" | jq -r ".executionMode")
+chat_plan_valid=$(echo "$chat_resp" | jq -r ".planValidation.isValid")
 [ -n "$chat_job_id" ] && [ "$chat_job_id" != "null" ]
 [ -n "$undo_token" ] && [ "$undo_token" != "null" ]
+[ "$chat_mode" = "APPLIED" ]
+[ "$chat_plan_valid" = "true" ]
 wait_for_ai_job "$chat_job_id"
 
 undo_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
@@ -189,6 +193,21 @@ undo_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
 restored=$(echo "$undo_resp" | jq -r ".restored")
 [ "$restored" = "true" ]
 echo "chat_undo_restored=$restored"
+
+fallback_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects/$project_id/chat-edit" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"make this magical and awesome vibes"}')
+fallback_job_id=$(echo "$fallback_resp" | jq -r ".aiJobId")
+fallback_mode=$(echo "$fallback_resp" | jq -r ".executionMode")
+fallback_suggestions=$(echo "$fallback_resp" | jq -r ".constrainedSuggestions | length")
+fallback_undo=$(echo "$fallback_resp" | jq -r ".undoToken")
+[ -n "$fallback_job_id" ] && [ "$fallback_job_id" != "null" ]
+[ "$fallback_mode" = "SUGGESTIONS_ONLY" ]
+[ "$fallback_suggestions" -gt 0 ]
+[ "$fallback_undo" = "null" ]
+wait_for_ai_job "$fallback_job_id"
+echo "chat_fallback_mode=$fallback_mode suggestions=$fallback_suggestions"
 
 render_job_id=$(enqueue_render "$project_id")
 [ -n "$render_job_id" ] && [ "$render_job_id" != "null" ]

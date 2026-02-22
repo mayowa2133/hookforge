@@ -1,7 +1,7 @@
 # HookForge Captions-Quality Parity Program
 
 Owner: HookForge Core Team
-Last updated: 2026-02-20T07:03:38.794Z
+Last updated: 2026-02-22T01:32:11.315Z
 
 ## Track Status
 
@@ -10,8 +10,8 @@ Last updated: 2026-02-20T07:03:38.794Z
 | track_a_quality_eval_backbone | Track A - Quality Evaluation Backbone | DONE | 3 | 1 |
 | track_b_asr_captions_quality | Track B - ASR + Captions Quality | DONE | 2 | 1 |
 | track_c_translation_dubbing_lipsync | Track C - Translation, Dubbing, Lip-Sync Quality | DONE | 2 | 1 |
-| track_d_ai_edit_chat_quality | Track D - AI Edit and Chat Quality | TODO | 1 | 1 |
-| track_e_creator_ads_shorts_quality | Track E - Creator, Ads, Shorts Quality | TODO | 1 | 1 |
+| track_d_ai_edit_chat_quality | Track D - AI Edit and Chat Quality | DONE | 3 | 1 |
+| track_e_creator_ads_shorts_quality | Track E - Creator, Ads, Shorts Quality | DONE | 4 | 1 |
 | track_f_mobile_top_workflow_parity | Track F - Mobile Top Workflow Parity | TODO | 1 | 1 |
 | track_g_commercial_collaboration_hardening | Track G - Commercial + Collaboration Hardening | IN PROGRESS | 1 | 1 |
 
@@ -27,10 +27,10 @@ Last updated: 2026-02-20T07:03:38.794Z
 | track_c_translation_dubbing_lipsync | Dubbing MOS | 4.31 | >= 4.2 | /5 |
 | track_c_translation_dubbing_lipsync | Lip-sync drift median | 58 | <= 60 | ms |
 | track_c_translation_dubbing_lipsync | Public translate API success | 99.1 | >= 98.5 | % |
-| track_d_ai_edit_chat_quality | Valid plan success | n/a | >= 98 | % |
-| track_d_ai_edit_chat_quality | Undo correctness | n/a | >= 99.5 | % |
-| track_e_creator_ads_shorts_quality | In-product quality rating | n/a | >= 4.2 | /5 |
-| track_e_creator_ads_shorts_quality | Ranked candidate uplift | n/a | > baseline | relative |
+| track_d_ai_edit_chat_quality | Valid plan success | 99.1 | >= 98 | % |
+| track_d_ai_edit_chat_quality | Undo correctness | 99.8 | >= 99.5 | % |
+| track_e_creator_ads_shorts_quality | In-product quality rating | 4.27 | >= 4.2 | /5 |
+| track_e_creator_ads_shorts_quality | Ranked candidate uplift | 0.25 | > baseline | relative |
 | track_f_mobile_top_workflow_parity | Crash-free sessions | n/a | >= 99.5 | % |
 | track_f_mobile_top_workflow_parity | Top workflow completion vs web | n/a | within 10 | % gap |
 | track_g_commercial_collaboration_hardening | Ledger reconciliation | 100 | 100 | % |
@@ -52,10 +52,15 @@ Last updated: 2026-02-20T07:03:38.794Z
 - [x] c2: Lip-sync scorer and regenerate on fail (evidence: `lib/ai/phase5-quality.ts`)
 
 ### Track D - AI Edit and Chat Quality
-- [ ] d1: Planner-validator-executor pipeline (evidence: `lib/ai/chat-edit.ts`)
+- [x] d1: Planner-validator-executor pipeline (evidence: `lib/ai/chat-edit-pipeline.ts`)
+- [x] d2: Timeline invariant validator before apply (evidence: `lib/timeline-invariants.ts`)
+- [x] d3: Strict undo lineage checks and regressions (evidence: `app/api/projects/[id]/chat-edit/undo/route.ts`)
 
 ### Track E - Creator, Ads, Shorts Quality
-- [ ] e1: Multi-candidate generation and ranking (evidence: `lib/ai/phase4.ts`)
+- [x] e1: Multi-candidate generation and ranking (evidence: `lib/ai/phase4.ts`)
+- [x] e2: Hook/pacing/readability quality scoring (evidence: `lib/ai/phase4-quality.ts`)
+- [x] e3: Ads claim grounding checks (evidence: `app/api/ai-ads/generate/route.ts`)
+- [x] e4: Shorts duplicate suppression and semantic ranking (evidence: `app/api/ai-shorts/generate/route.ts`)
 
 ### Track F - Mobile Top Workflow Parity
 - [ ] f1: Resumable uploads and network recovery (evidence: `app/api/mobile/health/route.ts`)

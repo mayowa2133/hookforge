@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildDeterministicAdScript,
   buildDeterministicShortlist,
+  buildRankedAdPlan,
+  buildRankedShortlistPlan,
   estimatePhase4AdsCredits,
   estimatePhase4ShortsCredits,
   extractRedditContext
@@ -58,5 +60,35 @@ describe("phase4 growth/compliance tools", () => {
 
     expect(adCredits).toBeGreaterThan(100);
     expect(shortsCredits).toBeGreaterThan(150);
+  });
+
+  it("ranks ad candidates and returns claim grounding metadata", () => {
+    const ranked = buildRankedAdPlan({
+      websiteUrl: "https://example.com/pricing",
+      productName: "HookForge",
+      tone: "ugc",
+      durationSec: 30
+    });
+
+    expect(ranked.rankedCandidates.length).toBeGreaterThan(1);
+    expect(ranked.qualitySummary.ratingScore).toBeGreaterThanOrEqual(4.2);
+    expect(ranked.qualitySummary.candidateUpliftPct).toBeGreaterThan(0);
+    expect(typeof ranked.selectedCandidate.grounding.passed).toBe("boolean");
+  });
+
+  it("ranks shorts candidates and suppresses duplicates", () => {
+    const ranked = buildRankedShortlistPlan({
+      sourceUrl: "https://www.youtube.com/watch?v=test",
+      sourceType: "YOUTUBE",
+      clipCount: 3,
+      language: "en",
+      durationSec: 260
+    });
+
+    expect(ranked.shortlistClips.length).toBe(3);
+    expect(ranked.rankedCandidates.length).toBeGreaterThan(3);
+    expect(ranked.qualitySummary.ratingScore).toBeGreaterThanOrEqual(4.2);
+    expect(ranked.qualitySummary.candidateUpliftPct).toBeGreaterThan(0);
+    expect(ranked.duplicatesSuppressed).toBeGreaterThanOrEqual(0);
   });
 });

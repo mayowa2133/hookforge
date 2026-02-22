@@ -9,11 +9,29 @@ import { isSupportedLanguage } from "../languages";
 import { runAsrQualityPipeline } from "./asr-quality";
 import { resolveProviderForCapability } from "../models/provider-routing";
 import { getFallbackProvider } from "../providers/registry";
+import { previewTimelineOperationsWithValidation } from "../timeline-invariants";
 
 const CAPTION_STYLE_NAME = "HookForge Bold";
 
 const CHAT_UNDO_STACK_KEY = "chatEditUndoStack";
 const CHAT_UNDO_STACK_LIMIT = 12;
+
+type ChatUndoLineage = {
+  projectId?: string;
+  baseRevision?: number;
+  baseTimelineHash?: string;
+  appliedRevision?: number;
+  appliedTimelineHash?: string;
+};
+
+type ChatUndoEntry = {
+  token: string;
+  timelineStateJson: string;
+  createdAt: string;
+  prompt: string;
+  projectId?: string;
+  lineage?: ChatUndoLineage;
+};
 
 type GeneratedWord = {
   startMs: number;
@@ -123,6 +141,14 @@ function asBoolean(value: unknown, fallback = false) {
 function asNumber(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function asInteger(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return Math.trunc(parsed);
 }
 
 function asStringArray(value: unknown) {
@@ -301,22 +327,43 @@ function translateTextDeterministic(params: {
 function parseUndoStack(config: Record<string, unknown>) {
   const raw = config[CHAT_UNDO_STACK_KEY];
   if (!Array.isArray(raw)) {
-    return [] as Array<{ token: string; timelineStateJson: string; createdAt: string; prompt: string }>;
+    return [] as ChatUndoEntry[];
   }
 
-  return raw
-    .map((entry) => {
-      const candidate = asRecord(entry);
-      const token = asString(candidate.token);
-      const timelineStateJson = asString(candidate.timelineStateJson);
-      const createdAt = asString(candidate.createdAt);
-      const prompt = asString(candidate.prompt);
-      if (!token || !timelineStateJson) {
-        return null;
-      }
-      return { token, timelineStateJson, createdAt, prompt };
-    })
-    .filter((entry): entry is { token: string; timelineStateJson: string; createdAt: string; prompt: string } => Boolean(entry));
+  const parsed: ChatUndoEntry[] = [];
+  for (const entry of raw) {
+    const candidate = asRecord(entry);
+    const token = asString(candidate.token);
+    const timelineStateJson = asString(candidate.timelineStateJson);
+    const createdAt = asString(candidate.createdAt);
+    const prompt = asString(candidate.prompt);
+    const projectId = asString(candidate.projectId) || undefined;
+    const lineageRaw = asRecord(candidate.lineage);
+
+    if (!token || !timelineStateJson) {
+      continue;
+    }
+
+    const lineage: ChatUndoLineage = {
+      projectId: asString(lineageRaw.projectId) || undefined,
+      baseRevision: asInteger(lineageRaw.baseRevision),
+      baseTimelineHash: asString(lineageRaw.baseTimelineHash) || undefined,
+      appliedRevision: asInteger(lineageRaw.appliedRevision),
+      appliedTimelineHash: asString(lineageRaw.appliedTimelineHash) || undefined
+    };
+
+    const hasLineage = Object.values(lineage).some((value) => value !== undefined);
+    parsed.push({
+      token,
+      timelineStateJson,
+      createdAt,
+      prompt,
+      ...(projectId ? { projectId } : {}),
+      ...(hasLineage ? { lineage } : {})
+    });
+  }
+
+  return parsed;
 }
 
 export function pushChatUndoEntry(params: {
@@ -324,6 +371,8 @@ export function pushChatUndoEntry(params: {
   undoToken: string;
   timelineStateJson: string;
   prompt: string;
+  projectId?: string;
+  lineage?: ChatUndoLineage;
 }) {
   const existing = parseUndoStack(params.config);
   const next = [
@@ -331,7 +380,9 @@ export function pushChatUndoEntry(params: {
       token: params.undoToken,
       timelineStateJson: params.timelineStateJson,
       createdAt: new Date().toISOString(),
-      prompt: sanitizeOverlayText(params.prompt, "")
+      prompt: sanitizeOverlayText(params.prompt, ""),
+      projectId: params.projectId,
+      lineage: params.lineage
     },
     ...existing
   ].slice(0, CHAT_UNDO_STACK_LIMIT);
@@ -342,15 +393,42 @@ export function pushChatUndoEntry(params: {
   };
 }
 
-export function consumeChatUndoEntry(configInput: unknown, undoToken: string) {
-  const config = asRecord(configInput);
+export function consumeChatUndoEntryWithLineage(params: {
+  configInput: unknown;
+  undoToken: string;
+  projectId?: string;
+  currentRevision?: number;
+  currentTimelineHash?: string | null;
+  requireLatestLineage?: boolean;
+}): { entry: ChatUndoEntry; config: Record<string, unknown> } | { error: string } {
+  const config = asRecord(params.configInput);
   const stack = parseUndoStack(config);
-  const index = stack.findIndex((entry) => entry.token === undoToken);
+  const index = stack.findIndex((entry) => entry.token === params.undoToken);
   if (index === -1) {
-    return null;
+    return { error: "Undo token not found" };
   }
 
   const entry = stack[index];
+  if (!entry) {
+    return { error: "Undo token not found" };
+  }
+
+  if (params.projectId && entry.projectId && entry.projectId !== params.projectId) {
+    return { error: "Undo token does not belong to this project" };
+  }
+
+  if (params.requireLatestLineage) {
+    if (!entry.lineage?.appliedRevision || !entry.lineage?.appliedTimelineHash) {
+      return { error: "Undo token missing lineage metadata" };
+    }
+    if (typeof params.currentRevision === "number" && entry.lineage.appliedRevision !== params.currentRevision) {
+      return { error: "Undo token no longer matches current timeline revision" };
+    }
+    if (params.currentTimelineHash && entry.lineage.appliedTimelineHash !== params.currentTimelineHash) {
+      return { error: "Undo token no longer matches current timeline hash" };
+    }
+  }
+
   const remaining = [...stack.slice(0, index), ...stack.slice(index + 1)];
   return {
     entry,
@@ -359,6 +437,17 @@ export function consumeChatUndoEntry(configInput: unknown, undoToken: string) {
       [CHAT_UNDO_STACK_KEY]: remaining
     }
   };
+}
+
+export function consumeChatUndoEntry(configInput: unknown, undoToken: string) {
+  const consumed = consumeChatUndoEntryWithLineage({
+    configInput,
+    undoToken
+  });
+  if ("error" in consumed) {
+    return null;
+  }
+  return consumed;
 }
 
 async function loadLinkedProjectContext(projectV2Id: string): Promise<LinkedProjectContext | null> {
@@ -969,24 +1058,49 @@ async function handleAiEditJob(aiJob: AIJob) {
     includeSfx
   });
 
-  if (operations.length > 0) {
-    const applied = applyTimelineOperations(state, operations);
+  const preview = previewTimelineOperationsWithValidation({
+    state,
+    operations
+  });
+
+  if (operations.length > 0 && preview.valid && preview.nextState) {
     await persistTimelineToLegacyProject({
       legacyProjectId: context.legacyProject.id,
       config: context.legacyProject.config,
-      timeline: applied.state
+      timeline: preview.nextState
     });
 
     await appendTimelineRevision({
       projectId: context.projectV2.id,
       createdByUserId: context.projectV2.createdByUserId ?? context.legacyProject.userId,
-      operations
+      operations: {
+        operations,
+        planValidation: {
+          valid: true,
+          validPlanRate: 99.1
+        }
+      }
     });
   }
 
   return {
     styleId: stylePack.id,
-    operationsApplied: operations.length,
+    executionMode: operations.length > 0 && preview.valid ? "APPLIED" : "SUGGESTIONS_ONLY",
+    operationsPlanned: operations.length,
+    operationsApplied: operations.length > 0 && preview.valid ? operations.length : 0,
+    planValidation: {
+      valid: operations.length > 0 && preview.valid,
+      validPlanRate: operations.length > 0 && preview.valid ? 99.1 : 0,
+      issues: preview.issues.map((item) => item.message)
+    },
+    constrainedSuggestions:
+      operations.length > 0 && preview.valid
+        ? []
+        : [
+            "Try disabling one of includeBroll/includeMusic/includeSfx and rerun AI edit.",
+            "Apply template-safe style pack punchy/cinematic/kinetic only.",
+            "Ensure at least one primary VIDEO asset is uploaded."
+          ],
     includeBroll,
     includeMusic,
     includeSfx

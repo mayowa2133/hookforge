@@ -92,11 +92,26 @@ ads_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
 
 ads_job_id=$(echo "$ads_resp" | jq -r ".aiJobId")
 ads_project_id=$(echo "$ads_resp" | jq -r ".legacyProjectId")
+ads_preflight_rating=$(echo "$ads_resp" | jq -r ".qualitySummary.ratingScore")
+ads_preflight_uplift=$(echo "$ads_resp" | jq -r ".qualitySummary.candidateUpliftPct")
+ads_preflight_candidates=$(echo "$ads_resp" | jq -r ".rankedCandidates | length")
 [ -n "$ads_job_id" ] && [ "$ads_job_id" != "null" ]
 [ -n "$ads_project_id" ] && [ "$ads_project_id" != "null" ]
+[ "$ads_preflight_candidates" -gt 1 ]
+awk "BEGIN {exit !($ads_preflight_rating >= 4.2)}"
+awk "BEGIN {exit !($ads_preflight_uplift > 0)}"
 wait_for_ai_job "$ads_job_id"
 
 echo "ads_project=$ads_project_id"
+
+ads_job_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/ai-jobs/$ads_job_id")
+ads_rating=$(echo "$ads_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.qualitySummary.ratingScore")
+ads_uplift=$(echo "$ads_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.qualitySummary.candidateUpliftPct")
+ads_grounding=$(echo "$ads_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.claimGrounding.passed")
+awk "BEGIN {exit !($ads_rating >= 4.2)}"
+awk "BEGIN {exit !($ads_uplift > 0)}"
+[ "$ads_grounding" = "true" ]
+echo "ads_quality_rating=$ads_rating uplift=$ads_uplift grounding=$ads_grounding"
 
 ads_project_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects/$ads_project_id")
 ads_status=$(echo "$ads_project_resp" | jq -r ".project.status")
@@ -125,8 +140,15 @@ wait_for_ai_job "$shorts_job_id"
 
 shorts_job_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/ai-jobs/$shorts_job_id")
 shorts_project_id=$(echo "$shorts_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.editableProjects[0].legacyProjectId")
+shorts_rating=$(echo "$shorts_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.qualitySummary.ratingScore")
+shorts_uplift=$(echo "$shorts_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.qualitySummary.candidateUpliftPct")
+shorts_duplicates=$(echo "$shorts_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.duplicatesSuppressed")
 [ -n "$shorts_project_id" ] && [ "$shorts_project_id" != "null" ]
+awk "BEGIN {exit !($shorts_rating >= 4.2)}"
+awk "BEGIN {exit !($shorts_uplift > 0)}"
+[ "$shorts_duplicates" -ge 0 ]
 echo "shorts_project=$shorts_project_id"
+echo "shorts_quality_rating=$shorts_rating uplift=$shorts_uplift duplicates=$shorts_duplicates"
 
 shorts_render_job=$(enqueue_render "$shorts_project_id")
 [ -n "$shorts_render_job" ] && [ "$shorts_render_job" != "null" ]
@@ -153,8 +175,13 @@ wait_for_ai_job "$reddit_job_id"
 
 reddit_job_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/ai-jobs/$reddit_job_id")
 reddit_project_id=$(echo "$reddit_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.editableProjects[0].legacyProjectId")
+reddit_rating=$(echo "$reddit_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.qualitySummary.ratingScore")
+reddit_uplift=$(echo "$reddit_job_resp" | jq -r ".aiJob.output.sideEffects.phase4.qualitySummary.candidateUpliftPct")
 [ -n "$reddit_project_id" ] && [ "$reddit_project_id" != "null" ]
+awk "BEGIN {exit !($reddit_rating >= 4.2)}"
+awk "BEGIN {exit !($reddit_uplift > 0)}"
 echo "reddit_project=$reddit_project_id"
+echo "reddit_quality_rating=$reddit_rating uplift=$reddit_uplift"
 
 # Compliance audit + takedown
 

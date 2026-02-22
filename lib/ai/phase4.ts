@@ -7,6 +7,7 @@ import { getDefaultConfigFromTemplate, parseTemplateSlotSchema, projectReadiness
 import { buildProjectStorageKey, uploadFileToStorage } from "../storage";
 import { probeStorageAsset } from "../ffprobe";
 import { detectSourceTypeFromUrl, type ComplianceSourceType } from "../compliance";
+import { rankAdCandidates, rankShortsCandidates } from "./phase4-quality";
 
 const VIDEO_MIME = "video/mp4";
 const PNG_MIME = "image/png";
@@ -51,6 +52,11 @@ type ShortlistClip = {
   endSec: number;
   title: string;
   reason: string;
+  quality?: {
+    overall: number;
+    rating: number;
+    semantic: number;
+  };
 };
 
 const demoBackgrounds = [
@@ -127,6 +133,49 @@ export function buildDeterministicAdScript(params: {
   };
 }
 
+function uniqueToneList(requestedTone: string) {
+  const normalized = sanitizeOverlayText(requestedTone, "ugc").toLowerCase();
+  const tones = [normalized, "ugc", "direct", "energetic", "cinematic"];
+  return [...new Set(tones.map((tone) => tone.trim()).filter(Boolean))].slice(0, 4);
+}
+
+export function buildRankedAdPlan(params: {
+  websiteUrl: string;
+  productName?: string;
+  tone: string;
+  durationSec: number;
+}) {
+  const tones = uniqueToneList(params.tone);
+  const scripts = tones.map((tone, index) => ({
+    id: `ad-candidate-${index + 1}`,
+    tone,
+    script: buildDeterministicAdScript({
+      websiteUrl: params.websiteUrl,
+      productName: params.productName,
+      tone
+    })
+  }));
+
+  const sourceFacts = [
+    params.websiteUrl,
+    params.productName ?? "",
+    parseDomain(params.websiteUrl)
+  ].filter(Boolean);
+
+  const ranked = rankAdCandidates({
+    candidates: scripts,
+    durationSec: Math.max(10, Math.min(120, Math.floor(params.durationSec))),
+    sourceFacts
+  });
+
+  return {
+    selectedScript: ranked.selected.script,
+    selectedCandidate: ranked.selected,
+    rankedCandidates: ranked.candidates,
+    qualitySummary: ranked.qualitySummary
+  };
+}
+
 function seedFromString(value: string) {
   return [...value].reduce((acc, char) => acc + char.charCodeAt(0), 0);
 }
@@ -139,13 +188,14 @@ export function buildDeterministicShortlist(params: {
   durationSec?: number;
 }) {
   const count = clamp(Math.trunc(params.clipCount), 1, 5);
+  const candidateCount = clamp(count + 2, count, 8);
   const sourceLabel = params.sourceUrl ? parseDomain(params.sourceUrl) : "uploaded source";
   const sourceSeed = seedFromString(`${sourceLabel}:${params.language}:${params.sourceType}`);
   const span = clamp(asNumber(params.durationSec, 120), 30, 1800);
   const windowSec = clamp(Math.floor(span / (count + 1)), 12, 45);
 
   const clips: ShortlistClip[] = [];
-  for (let index = 0; index < count; index += 1) {
+  for (let index = 0; index < candidateCount; index += 1) {
     const offsetSeed = (sourceSeed + index * 31) % Math.max(20, Math.floor(span - windowSec));
     const startSec = clamp(offsetSeed, 0, Math.max(1, Math.floor(span - windowSec)));
     const endSec = clamp(startSec + windowSec, startSec + 8, Math.floor(span));
@@ -156,15 +206,86 @@ export function buildDeterministicShortlist(params: {
       title: `Highlight ${index + 1}: ${sourceLabel}`,
       reason:
         params.sourceType === "REDDIT"
-          ? "High engagement phrasing and opinion pivot."
-          : "Strong hook-to-proof segment with concise pacing."
+          ? "High hook potential with a clear proof pivot and CTA opportunity."
+          : "Strong hook-to-proof segment with concise pacing and CTA setup."
     });
   }
 
+  const ranked = rankShortsCandidates({
+    candidates: clips,
+    clipCount: count,
+    durationSec: span
+  });
+  const selectedClips = ranked.selected.map((entry) => ({
+    ...entry.clip,
+    quality: {
+      overall: entry.quality.overall,
+      rating: entry.quality.rating,
+      semantic: entry.quality.semantic
+    }
+  }));
+
   return {
     sourceLabel,
-    confidence: Number((0.73 + (count - 1) * 0.03).toFixed(2)),
-    clips
+    confidence: ranked.confidence,
+    clips: selectedClips
+  };
+}
+
+export function buildRankedShortlistPlan(params: {
+  sourceUrl?: string;
+  sourceType: ComplianceSourceType;
+  clipCount: number;
+  language: string;
+  durationSec?: number;
+}) {
+  const count = clamp(Math.trunc(params.clipCount), 1, 5);
+  const candidateCount = clamp(count + 3, count, 9);
+  const sourceLabel = params.sourceUrl ? parseDomain(params.sourceUrl) : "uploaded source";
+  const sourceSeed = seedFromString(`${sourceLabel}:${params.language}:${params.sourceType}`);
+  const span = clamp(asNumber(params.durationSec, 120), 30, 1800);
+  const windowSec = clamp(Math.floor(span / (count + 1)), 12, 45);
+
+  const candidates: ShortlistClip[] = [];
+  for (let index = 0; index < candidateCount; index += 1) {
+    const offsetSeed = (sourceSeed + index * 29) % Math.max(20, Math.floor(span - windowSec));
+    const startSec = clamp(offsetSeed, 0, Math.max(1, Math.floor(span - windowSec)));
+    const endSec = clamp(startSec + windowSec + (index % 2 === 0 ? 0 : 2), startSec + 8, Math.floor(span));
+    candidates.push({
+      id: `ranked-clip-${index + 1}`,
+      startSec,
+      endSec,
+      title: `Highlight ${index + 1}: ${sourceLabel}`,
+      reason:
+        params.sourceType === "REDDIT"
+          ? "Strong hook sentiment pivot with clear proof framing and CTA angle."
+          : "High hook potential with concise proof segment."
+    });
+  }
+
+  const ranked = rankShortsCandidates({
+    candidates,
+    clipCount: count,
+    durationSec: span
+  });
+
+  return {
+    sourceLabel,
+    confidence: ranked.confidence,
+    shortlistClips: ranked.selected.map((entry) => ({
+      ...entry.clip,
+      quality: {
+        overall: entry.quality.overall,
+        rating: entry.quality.rating,
+        semantic: entry.quality.semantic
+      }
+    })),
+    rankedCandidates: ranked.allRanked.map((entry) => ({
+      clip: entry.clip,
+      quality: entry.quality
+    })),
+    duplicatesSuppressed: ranked.duplicatesSuppressed,
+    qualitySummary: ranked.qualitySummary
   };
 }
 
@@ -384,12 +505,15 @@ async function applyAiAdsJob(aiJob: AIJob) {
   const websiteUrl = asString(input.websiteUrl);
   const productName = asString(input.productName);
   const tone = asString(input.tone, "ugc");
+  const durationSec = clamp(Math.trunc(asNumber(input.durationSec, 30)), 10, 120);
 
-  const script = buildDeterministicAdScript({
+  const rankedAdPlan = buildRankedAdPlan({
     websiteUrl,
     productName,
-    tone
+    tone,
+    durationSec
   });
+  const script = rankedAdPlan.selectedScript;
 
   const generated = await createGeneratedAssetPack({
     legacyProjectId: context.legacyProject.id,
@@ -411,6 +535,10 @@ async function applyAiAdsJob(aiJob: AIJob) {
     aiAdsProduct: script.product,
     aiAdsTone: script.tone,
     aiAdsScript: script.lines,
+    aiAdsCandidateId: rankedAdPlan.selectedCandidate.id,
+    aiAdsCandidateQuality: rankedAdPlan.selectedCandidate.quality,
+    aiAdsCandidateGrounding: rankedAdPlan.selectedCandidate.grounding,
+    aiAdsCandidateUpliftPct: rankedAdPlan.qualitySummary.candidateUpliftPct,
     aiAdsLastJobId: aiJob.id
   };
 
@@ -462,7 +590,9 @@ async function applyAiAdsJob(aiJob: AIJob) {
         op: "phase4_ai_ads_generate",
         aiJobId: aiJob.id,
         websiteUrl,
-        script
+        script,
+        selectedCandidate: rankedAdPlan.selectedCandidate,
+        qualitySummary: rankedAdPlan.qualitySummary
       }
     ]
   });
@@ -478,7 +608,9 @@ async function applyAiAdsJob(aiJob: AIJob) {
         aiJobId: aiJob.id,
         legacyProjectId: context.legacyProject.id,
         projectV2Id: context.projectV2.id,
-        script
+        script,
+        qualitySummary: rankedAdPlan.qualitySummary,
+        selectedCandidate: rankedAdPlan.selectedCandidate
       }
     }
   });
@@ -488,7 +620,10 @@ async function applyAiAdsJob(aiJob: AIJob) {
     legacyProjectId: context.legacyProject.id,
     projectV2Id: context.projectV2.id,
     editableScript: script,
+    rankedCandidates: rankedAdPlan.rankedCandidates,
     editableMedia: upserted,
+    qualitySummary: rankedAdPlan.qualitySummary,
+    claimGrounding: rankedAdPlan.selectedCandidate.grounding,
     ready: readiness.ready,
     missingSlotKeys: readiness.missingSlotKeys
   };
@@ -514,7 +649,7 @@ async function applyAiShortsJob(aiJob: AIJob) {
   const language = asString(input.language, "en");
   const sourceDurationSec = asNumber(input.sourceDurationSec, 120);
 
-  const shortlist = buildDeterministicShortlist({
+  const shortlist = buildRankedShortlistPlan({
     sourceUrl: sourceUrl || undefined,
     sourceType,
     clipCount,
@@ -551,8 +686,8 @@ async function applyAiShortsJob(aiJob: AIJob) {
     endSec: number;
   }> = [];
 
-  for (let index = 0; index < shortlist.clips.length; index += 1) {
-    const clip = shortlist.clips[index];
+  for (let index = 0; index < shortlist.shortlistClips.length; index += 1) {
+    const clip = shortlist.shortlistClips[index];
     const legacyProject = await prisma.project.create({
       data: {
         userId: workspace.ownerId,
@@ -566,6 +701,7 @@ async function applyAiShortsJob(aiJob: AIJob) {
           aiShortClipId: clip.id,
           aiShortStartSec: clip.startSec,
           aiShortEndSec: clip.endSec,
+          aiShortQuality: clip.quality ?? null,
           aiShortSourceType: sourceType,
           aiShortLanguage: language,
           aiShortParentJobId: aiJob.id
@@ -669,6 +805,8 @@ async function applyAiShortsJob(aiJob: AIJob) {
         aiJobId: aiJob.id,
         sourceType,
         sourceUrl: sourceUrl || null,
+        qualitySummary: shortlist.qualitySummary,
+        duplicatesSuppressed: shortlist.duplicatesSuppressed,
         generatedProjects
       }
     }
@@ -679,7 +817,10 @@ async function applyAiShortsJob(aiJob: AIJob) {
     sourceType,
     sourceUrl: sourceUrl || null,
     confidence: shortlist.confidence,
-    shortlistClips: shortlist.clips,
+    shortlistClips: shortlist.shortlistClips,
+    rankedCandidates: shortlist.rankedCandidates,
+    duplicatesSuppressed: shortlist.duplicatesSuppressed,
+    qualitySummary: shortlist.qualitySummary,
     editableProjects: generatedProjects
   };
 }
