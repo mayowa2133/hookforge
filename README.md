@@ -345,6 +345,29 @@ Implemented:
   - `pnpm test`
   - `pnpm test:e2e:slice12`
 
+## OpenCut Adoption Phase 3 (Implemented)
+
+Implemented:
+
+- Added AI chat-edit integration into the OpenCut shell using bridgeable project APIs:
+  - `POST /api/projects/:id/chat-edit`
+  - `POST /api/projects/:id/chat-edit/undo`
+- Added typed OpenCut adapter methods for chat apply/undo:
+  - `runChatEdit()`
+  - `undoChatEdit()`
+- Added OpenCut shell Co-Editor panel with:
+  - natural-language prompt input
+  - optional attachment asset IDs input
+  - execution-mode output (`APPLIED` vs `SUGGESTIONS_ONLY`)
+  - confidence, fallback reason, invariant issue reporting
+  - planned operation summaries
+  - undo-token driven restore flow
+  - AI job progress polling for chat-edit jobs
+- Validation coverage updated:
+  - `tests/opencut-client.test.ts`
+  - `pnpm test`
+  - `pnpm test:e2e:slice12`
+
 ## Phase 1 Manual Editor (Completed)
 
 Implemented and wired into preview + cloud render:

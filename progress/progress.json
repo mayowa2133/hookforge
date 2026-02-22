@@ -98,6 +98,12 @@
       "details": "Implemented timeline edit controls (split/trim/move/reorder/merge/remove), JKL+Space+S shortcuts, and validated with full tests + e2e slice12 runtime regression"
     },
     {
+      "id": "opencut_phase3_chat_editor",
+      "title": "OpenCut adoption Phase 3 AI chat-editor integration",
+      "status": "DONE",
+      "details": "Integrated chat-edit apply/undo into OpenCut shell with execution mode feedback, fallback/safety issues, operation summaries, AI job polling, and validated via unit + e2e slice12 regression"
+    },
+    {
       "id": "phase1_timeline_editor",
       "title": "Phase 1 manual timeline editor parity",
       "status": "DONE",

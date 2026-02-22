@@ -159,6 +159,57 @@ type TranscriptAutoRequest = {
   maxLinesPerSegment: number;
 };
 
+type ChatEditRequest = {
+  prompt: string;
+  attachmentAssetIds?: string[];
+};
+
+type ChatEditUndoRequest = {
+  undoToken: string;
+};
+
+export type ChatEditResponse = {
+  executionMode: "APPLIED" | "SUGGESTIONS_ONLY";
+  plannedOperations: Array<{
+    op: string;
+    trackId?: string;
+    clipId?: string;
+    [key: string]: unknown;
+  }>;
+  validatedOperations: Array<{
+    op: string;
+    trackId?: string;
+    clipId?: string;
+    [key: string]: unknown;
+  }>;
+  appliedTimelineOperations: Array<{
+    op: string;
+    trackId?: string;
+    clipId?: string;
+    [key: string]: unknown;
+  }>;
+  planValidation: {
+    valid: boolean;
+    reason?: string;
+    confidence: number;
+  };
+  constrainedSuggestions: string[];
+  fallbackReason?: string;
+  invariantIssues: Array<{
+    code: string;
+    message: string;
+    severity: "INFO" | "WARN" | "ERROR";
+  }>;
+  appliedRevisionId: string | null;
+  undoToken: string | null;
+  aiJobId: string;
+};
+
+export type ChatEditUndoResponse = {
+  restored: boolean;
+  appliedRevisionId: string;
+};
+
 async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
   const payload = (await response.json()) as T & ApiErrorPayload;
@@ -212,6 +263,22 @@ export async function patchTranscript(projectV2Id: string, body: TranscriptPatch
     }>;
   }>(`/api/projects-v2/${projectV2Id}/transcript`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function runChatEdit(projectIdOrV2Id: string, body: ChatEditRequest) {
+  return requestJson<ChatEditResponse>(`/api/projects/${projectIdOrV2Id}/chat-edit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function undoChatEdit(projectIdOrV2Id: string, body: ChatEditUndoRequest) {
+  return requestJson<ChatEditUndoResponse>(`/api/projects/${projectIdOrV2Id}/chat-edit/undo`, {
+    method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });

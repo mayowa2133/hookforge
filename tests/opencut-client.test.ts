@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { autoTranscript, getProjectV2, patchTimeline, patchTranscript, startRender } from "@/lib/opencut/hookforge-client";
+import {
+  autoTranscript,
+  getProjectV2,
+  patchTimeline,
+  patchTranscript,
+  runChatEdit,
+  startRender,
+  undoChatEdit
+} from "@/lib/opencut/hookforge-client";
 
 function mockResponse(body: unknown, ok = true, status = 200) {
   return {
@@ -110,6 +118,52 @@ describe("opencut hookforge client", () => {
 
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/projects/pv2_4/timeline",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  it("runs chat edit through bridgeable projects endpoint and returns mode metadata", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        executionMode: "SUGGESTIONS_ONLY",
+        plannedOperations: [],
+        validatedOperations: [],
+        appliedTimelineOperations: [],
+        planValidation: { valid: false, confidence: 0.4, reason: "Low confidence" },
+        constrainedSuggestions: ["Try: split clip 1 at 500ms"],
+        invariantIssues: [],
+        appliedRevisionId: null,
+        undoToken: null,
+        aiJobId: "ai_1"
+      })
+    );
+
+    const payload = await runChatEdit("pv2_7", {
+      prompt: "tighten this section and remove dead air"
+    });
+    expect(payload.executionMode).toBe("SUGGESTIONS_ONLY");
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/projects/pv2_7/chat-edit",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  it("runs chat undo through bridgeable projects endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        restored: true,
+        appliedRevisionId: "rev_undo_1"
+      })
+    );
+
+    const payload = await undoChatEdit("pv2_8", { undoToken: "token_12345678" });
+    expect(payload.restored).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/projects/pv2_8/chat-edit/undo",
       expect.objectContaining({
         method: "POST"
       })

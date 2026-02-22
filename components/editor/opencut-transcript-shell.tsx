@@ -17,7 +17,10 @@ import {
   getTranscript,
   patchTimeline,
   patchTranscript,
+  runChatEdit,
   startRender,
+  undoChatEdit,
+  type ChatEditResponse,
   type LegacyProjectPayload,
   type TimelineOperation,
   type TimelinePayload,
@@ -63,6 +66,20 @@ function isTypingTarget(eventTarget: EventTarget | null) {
   return tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
 }
 
+function summarizeOps(ops: ChatEditResponse["plannedOperations"], max = 4) {
+  const lines = ops.slice(0, max).map((op, index) => {
+    const payload = Object.entries(op)
+      .filter(([key]) => key !== "op")
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(" ");
+    return `${index + 1}. ${op.op}${payload ? ` ${payload}` : ""}`;
+  });
+  if (ops.length > max) {
+    lines.push(`+${ops.length - max} more operation(s)`);
+  }
+  return lines;
+}
+
 export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, status }: OpenCutTranscriptShellProps) {
   const [project, setProject] = useState<LegacyProjectPayload["project"] | null>(null);
   const [timeline, setTimeline] = useState<TimelinePayload | null>(null);
@@ -96,6 +113,13 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     outputUrl: string | null;
     errorMessage: string | null;
   } | null>(null);
+  const [chatPrompt, setChatPrompt] = useState("");
+  const [chatAttachmentIds, setChatAttachmentIds] = useState("");
+  const [chatResult, setChatResult] = useState<ChatEditResponse | null>(null);
+  const [chatUndoToken, setChatUndoToken] = useState<string | null>(null);
+  const [chatUndoResult, setChatUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
+  const [chatJobId, setChatJobId] = useState<string | null>(null);
+  const [chatJobStatus, setChatJobStatus] = useState<{ status: string; progress: number } | null>(null);
   const [deleteStartMs, setDeleteStartMs] = useState("0");
   const [deleteEndMs, setDeleteEndMs] = useState("220");
   const [clipMoveInMs, setClipMoveInMs] = useState("0");
@@ -269,6 +293,35 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
 
     return () => clearInterval(interval);
   }, [renderJobId]);
+
+  useEffect(() => {
+    if (!chatJobId) {
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      try {
+        const payload = await getAiJob(chatJobId);
+        setChatJobStatus({
+          status: payload.aiJob.status,
+          progress: payload.aiJob.progress
+        });
+        if (payload.aiJob.status === "DONE") {
+          await Promise.all([loadProjectSurface(), loadTranscript()]);
+          setChatJobId(null);
+        }
+        if (payload.aiJob.status === "ERROR" || payload.aiJob.status === "CANCELED") {
+          setPanelError(payload.aiJob.errorMessage ?? `Chat edit job ${payload.aiJob.status.toLowerCase()}`);
+          setChatJobId(null);
+        }
+      } catch (error) {
+        setPanelError(error instanceof Error ? error.message : "Failed to poll chat edit job");
+        setChatJobId(null);
+      }
+    }, 2200);
+
+    return () => clearInterval(interval);
+  }, [chatJobId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -658,6 +711,67 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     );
   };
 
+  const applyChatEdit = async () => {
+    if (chatPrompt.trim().length < 4) {
+      setPanelError("Chat prompt must be at least 4 characters.");
+      return;
+    }
+
+    const attachmentAssetIds = chatAttachmentIds
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    setBusy("chat_edit");
+    setPanelError(null);
+    setChatUndoResult(null);
+
+    try {
+      const payload = await runChatEdit(projectV2Id, {
+        prompt: chatPrompt.trim(),
+        attachmentAssetIds: attachmentAssetIds.length > 0 ? attachmentAssetIds : undefined
+      });
+
+      setChatResult(payload);
+      setChatUndoToken(payload.undoToken);
+      setChatJobId(payload.aiJobId);
+      setChatJobStatus({ status: "QUEUED", progress: 0 });
+
+      if (payload.executionMode === "APPLIED") {
+        await Promise.all([loadProjectSurface(), loadTranscript()]);
+      }
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Chat edit failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyChatUndo = async () => {
+    if (!chatUndoToken) {
+      setPanelError("No undo token is available for chat undo.");
+      return;
+    }
+
+    setBusy("chat_undo");
+    setPanelError(null);
+
+    try {
+      const payload = await undoChatEdit(projectV2Id, {
+        undoToken: chatUndoToken
+      });
+      setChatUndoResult({
+        restored: payload.restored,
+        appliedRevisionId: payload.appliedRevisionId
+      });
+      await Promise.all([loadProjectSurface(), loadTranscript()]);
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Chat undo failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const enqueueRender = async () => {
     setBusy("render");
     setPanelError(null);
@@ -685,7 +799,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       <div className="rounded-xl border bg-background/95 p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">OpenCut Shell (Phase 2)</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">OpenCut Shell (Phase 3)</p>
             <h1 className="text-2xl font-black" style={{ fontFamily: "var(--font-heading)" }}>
               {title}
             </h1>
@@ -694,7 +808,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">Transcript-first + timeline controls</Badge>
+            <Badge variant="outline">Transcript-first + timeline + AI chat editor</Badge>
             <Badge variant="secondary">V2 ID: {projectV2Id.slice(0, 8)}</Badge>
           </div>
         </div>
@@ -822,6 +936,92 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 value={minConfidenceForRipple}
                 onChange={(event) => setMinConfidenceForRipple(Number(event.target.value))}
               />
+            </div>
+
+            <div className="space-y-2 border-t pt-3">
+              <div>
+                <p className="text-sm font-semibold">AI Co-Editor (Phase 3)</p>
+                <p className="text-xs text-muted-foreground">
+                  Ask for timeline edits in natural language. Unsafe plans fall back to suggestions-only mode.
+                </p>
+              </div>
+              <Textarea
+                value={chatPrompt}
+                onChange={(event) => setChatPrompt(event.target.value)}
+                rows={3}
+                placeholder="Example: tighten pauses, cut first second, then move the first caption clip 300ms earlier"
+              />
+              <Input
+                value={chatAttachmentIds}
+                onChange={(event) => setChatAttachmentIds(event.target.value)}
+                placeholder="Optional attachment asset IDs (comma-separated)"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <Button size="sm" disabled={busy !== null} onClick={applyChatEdit}>
+                  Apply Chat Edit
+                </Button>
+                <Button size="sm" variant="outline" disabled={busy !== null || !chatUndoToken} onClick={applyChatUndo}>
+                  Undo Last Chat Apply
+                </Button>
+              </div>
+
+              {chatJobStatus ? (
+                <div className="rounded-md border p-2 text-xs">
+                  <p className="text-muted-foreground">
+                    Chat job {chatJobStatus.status} ({chatJobStatus.progress}%)
+                  </p>
+                  <Progress value={chatJobStatus.progress} />
+                </div>
+              ) : null}
+
+              {chatResult ? (
+                <div className="rounded-md border p-2 text-xs">
+                  <p className="font-semibold">
+                    {chatResult.executionMode === "APPLIED" ? "Applied" : "Suggestions only"} • confidence{" "}
+                    {Math.round(chatResult.planValidation.confidence * 100)}%
+                  </p>
+                  <p className="text-muted-foreground">
+                    {chatResult.appliedRevisionId ? `Revision ${chatResult.appliedRevisionId.slice(0, 8)}` : "No revision applied"} •{" "}
+                    {chatResult.undoToken ? `undo token ${chatResult.undoToken.slice(0, 8)}` : "no undo token"}
+                  </p>
+                  {chatResult.fallbackReason ? <p className="mt-1 text-amber-600">Fallback: {chatResult.fallbackReason}</p> : null}
+                  {chatResult.planValidation.reason ? (
+                    <p className="mt-1 text-muted-foreground">Validation: {chatResult.planValidation.reason}</p>
+                  ) : null}
+                  {chatResult.invariantIssues.length > 0 ? (
+                    <ul className="mt-1 space-y-1 text-muted-foreground">
+                      {chatResult.invariantIssues.map((issue, index) => (
+                        <li key={`${issue.code}-${index}`}>
+                          [{issue.severity}] {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {chatResult.plannedOperations.length > 0 ? (
+                    <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
+                      {summarizeOps(chatResult.plannedOperations).map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1 text-muted-foreground">No operations planned.</p>
+                  )}
+                  {chatResult.constrainedSuggestions.length > 0 ? (
+                    <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
+                      {chatResult.constrainedSuggestions.slice(0, 4).map((suggestion) => (
+                        <li key={suggestion}>{suggestion}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {chatUndoResult ? (
+                <div className="rounded-md border p-2 text-xs">
+                  <p className="font-semibold">Chat undo restored timeline</p>
+                  <p className="text-muted-foreground">Revision {chatUndoResult.appliedRevisionId.slice(0, 8)}</p>
+                </div>
+              ) : null}
             </div>
 
             {opResult ? (
