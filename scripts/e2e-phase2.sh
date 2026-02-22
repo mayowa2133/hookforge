@@ -135,19 +135,67 @@ status=$(upload_slot "$project_id" "overlay" "public/demo-assets/mock-comment.pn
 echo "status_after_assets=$status"
 
 auto_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
-  -X POST "$BASE/api/projects/$project_id/captions/auto" \
+  -X POST "$BASE/api/projects/$project_id/transcript/auto" \
   -H "Content-Type: application/json" \
   -d '{"language":"en","diarization":false,"punctuationStyle":"auto","confidenceThreshold":0.86,"reDecodeEnabled":true,"maxWordsPerSegment":7,"maxCharsPerLine":24,"maxLinesPerSegment":2}')
 auto_job_id=$(echo "$auto_resp" | jq -r ".aiJobId")
 [ -n "$auto_job_id" ] && [ "$auto_job_id" != "null" ]
 wait_for_ai_job "$auto_job_id"
 
+transcript_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects/$project_id/transcript?language=en")
+segment_count=$(echo "$transcript_resp" | jq -r '.segments | length')
+words_count=$(echo "$transcript_resp" | jq -r '.words | length')
+[ "$segment_count" -gt 0 ]
+[ "$words_count" -gt 0 ]
+echo "transcript_segments=$segment_count transcript_words=$words_count"
+
+first_segment_id=$(echo "$transcript_resp" | jq -r '.segments[0].id')
+first_segment_start=$(echo "$transcript_resp" | jq -r '.segments[0].startMs')
+first_segment_end=$(echo "$transcript_resp" | jq -r '.segments[0].endMs')
+[ -n "$first_segment_id" ] && [ "$first_segment_id" != "null" ]
+
+split_ms=$(( first_segment_start + ((first_segment_end-first_segment_start)/2) ))
+if [ "$split_ms" -le "$first_segment_start" ]; then
+  split_ms=$((first_segment_start + 120))
+fi
+
+patch_replace_split=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X PATCH "$BASE/api/projects/$project_id/transcript" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"language":"en","operations":[{"op":"replace_text","segmentId":"%s","text":"This is a tighter hook statement."},{"op":"split_segment","segmentId":"%s","splitMs":%s},{"op":"normalize_punctuation"}],"minConfidenceForRipple":0.86}' "$first_segment_id" "$first_segment_id" "$split_ms")")
+patch_replace_applied=$(echo "$patch_replace_split" | jq -r ".applied")
+[ "$patch_replace_applied" = "true" ]
+
+transcript_after_patch=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects/$project_id/transcript?language=en")
+updated_segment_count=$(echo "$transcript_after_patch" | jq -r '.segments | length')
+[ "$updated_segment_count" -ge "$segment_count" ]
+
+delete_start=$(echo "$transcript_after_patch" | jq -r '.segments[0].startMs')
+delete_end=$(echo "$transcript_after_patch" | jq -r '.segments[0].endMs')
+safe_delete_end=$((delete_start + 200))
+if [ "$safe_delete_end" -ge "$delete_end" ]; then
+  safe_delete_end=$((delete_start + 100))
+fi
+
+fallback_patch=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X PATCH "$BASE/api/projects/$project_id/transcript" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"language":"en","operations":[{"op":"delete_range","startMs":%s,"endMs":%s}],"minConfidenceForRipple":0.99}' "$delete_start" "$safe_delete_end")")
+fallback_suggestions=$(echo "$fallback_patch" | jq -r ".suggestionsOnly")
+[ "$fallback_suggestions" = "true" ]
+echo "transcript_delete_fallback=$fallback_suggestions"
+
+delete_patch=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X PATCH "$BASE/api/projects/$project_id/transcript" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"language":"en","operations":[{"op":"delete_range","startMs":%s,"endMs":%s}],"minConfidenceForRipple":0.86}' "$delete_start" "$safe_delete_end")")
+delete_applied=$(echo "$delete_patch" | jq -r ".applied")
+[ "$delete_applied" = "true" ]
+
 captions_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects/$project_id/captions")
 en_count=$(echo "$captions_resp" | jq -r '.byLanguage.en | length')
-words_count=$(echo "$captions_resp" | jq -r '.transcriptWords | length')
 [ "$en_count" -gt 0 ]
-[ "$words_count" -gt 0 ]
-echo "captions_en=$en_count transcript_words=$words_count"
+echo "captions_en=$en_count"
 
 translate_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects/$project_id/captions/translate" \

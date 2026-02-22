@@ -34,6 +34,30 @@ type CaptionSummary = {
   }>;
 };
 
+type TranscriptSummary = {
+  language: string;
+  segments: Array<{
+    id: string;
+    text: string;
+    startMs: number;
+    endMs: number;
+    speakerLabel: string | null;
+    confidenceAvg: number | null;
+  }>;
+  words: Array<{
+    id: string;
+    text: string;
+    startMs: number;
+    endMs: number;
+    confidence: number | null;
+  }>;
+  qualitySummary: {
+    wordCount: number;
+    segmentCount: number;
+    averageConfidence: number;
+  };
+};
+
 type PhaseTwoPanelProps = {
   projectId: string;
   onTimelineRefresh: () => Promise<void>;
@@ -62,9 +86,22 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
   const [lastUndoToken, setLastUndoToken] = useState("");
   const [lastPlannedOps, setLastPlannedOps] = useState<ChatEditOperation[]>([]);
   const [captionSummary, setCaptionSummary] = useState<CaptionSummary | null>(null);
+  const [transcriptSummary, setTranscriptSummary] = useState<TranscriptSummary | null>(null);
   const [aiJobs, setAiJobs] = useState<Record<string, AiJobLite>>({});
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
+  const [transcriptOpResult, setTranscriptOpResult] = useState<{
+    applied: boolean;
+    suggestionsOnly: boolean;
+    issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
+    revisionId: string | null;
+  } | null>(null);
+  const [activeSegmentId, setActiveSegmentId] = useState<string>("");
+  const [segmentDraftText, setSegmentDraftText] = useState<string>("");
+  const [speakerDraft, setSpeakerDraft] = useState<string>("");
+  const [deleteStartMs, setDeleteStartMs] = useState<string>("0");
+  const [deleteEndMs, setDeleteEndMs] = useState<string>("220");
+  const [previewOnlyPatch, setPreviewOnlyPatch] = useState(false);
 
   const pendingJobs = useMemo(
     () => Object.values(aiJobs).filter((job) => job.status === "QUEUED" || job.status === "RUNNING"),
@@ -95,14 +132,36 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
     });
   };
 
+  const fetchTranscript = async () => {
+    const response = await fetch(`/api/projects/${projectId}/transcript?language=${encodeURIComponent(autoLanguage)}`);
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Failed to fetch transcript");
+    }
+
+    const summary = payload as TranscriptSummary;
+    setTranscriptSummary(summary);
+
+    const firstSegment = summary.segments[0];
+    if (firstSegment && !activeSegmentId) {
+      setActiveSegmentId(firstSegment.id);
+      setSegmentDraftText(firstSegment.text);
+      setSpeakerDraft(firstSegment.speakerLabel ?? "");
+      setDeleteStartMs(String(firstSegment.startMs));
+      setDeleteEndMs(String(Math.min(firstSegment.endMs, firstSegment.startMs + 220)));
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
         await fetchCaptions();
+        await fetchTranscript();
       } catch {
         if (!cancelled) {
           setCaptionSummary(null);
+          setTranscriptSummary(null);
         }
       }
     };
@@ -110,7 +169,17 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, autoLanguage]);
+
+  useEffect(() => {
+    if (!transcriptSummary || transcriptSummary.segments.length === 0) {
+      return;
+    }
+    const stillExists = transcriptSummary.segments.some((segment) => segment.id === activeSegmentId);
+    if (!stillExists) {
+      selectSegment(transcriptSummary.segments[0].id);
+    }
+  }, [activeSegmentId, transcriptSummary]);
 
   useEffect(() => {
     if (pendingJobs.length === 0) {
@@ -133,6 +202,7 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
 
           if (next.status === "DONE") {
             await fetchCaptions();
+            await fetchTranscript();
             await onTimelineRefresh();
           }
         } catch (error) {
@@ -148,7 +218,7 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
     setBusyAction("auto");
     setPanelError(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/captions/auto`, {
+      const response = await fetch(`/api/projects/${projectId}/transcript/auto`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -166,13 +236,53 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
       });
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.error ?? "Auto caption request failed");
+        throw new Error(payload.error ?? "Auto transcript request failed");
       }
       if (payload.aiJobId) {
         registerJob(payload.aiJobId, "TRANSCRIBE");
       }
     } catch (error) {
-      setPanelError(error instanceof Error ? error.message : "Auto caption request failed");
+      setPanelError(error instanceof Error ? error.message : "Auto transcript request failed");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const patchTranscript = async (operations: Array<Record<string, unknown>>, actionName: string) => {
+    setBusyAction(actionName);
+    setPanelError(null);
+    setTranscriptOpResult(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/transcript`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          language: autoLanguage,
+          operations,
+          minConfidenceForRipple: Number.isFinite(confidenceThreshold) ? confidenceThreshold : 0.86,
+          previewOnly: previewOnlyPatch
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Transcript patch failed");
+      }
+
+      setTranscriptOpResult({
+        applied: Boolean(payload.applied),
+        suggestionsOnly: Boolean(payload.suggestionsOnly),
+        issues: (payload.issues ?? []) as Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>,
+        revisionId: (payload.revisionId as string | null) ?? null
+      });
+
+      await fetchTranscript();
+      await fetchCaptions();
+      await onTimelineRefresh();
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Transcript patch failed");
     } finally {
       setBusyAction(null);
     }
@@ -300,6 +410,92 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const activeSegment = transcriptSummary?.segments.find((segment) => segment.id === activeSegmentId) ?? null;
+
+  const selectSegment = (segmentId: string) => {
+    const segment = transcriptSummary?.segments.find((entry) => entry.id === segmentId);
+    setActiveSegmentId(segmentId);
+    if (segment) {
+      setSegmentDraftText(segment.text);
+      setSpeakerDraft(segment.speakerLabel ?? "");
+      setDeleteStartMs(String(segment.startMs));
+      setDeleteEndMs(String(Math.min(segment.endMs, segment.startMs + 220)));
+    }
+  };
+
+  const applyReplaceText = async () => {
+    if (!activeSegmentId || !segmentDraftText.trim()) {
+      setPanelError("Select a transcript segment and provide replacement text.");
+      return;
+    }
+    await patchTranscript(
+      [{ op: "replace_text", segmentId: activeSegmentId, text: segmentDraftText.trim() }],
+      "tx-replace"
+    );
+  };
+
+  const applySplitSegment = async () => {
+    if (!activeSegment) {
+      setPanelError("Select a transcript segment to split.");
+      return;
+    }
+    const midpoint = activeSegment.startMs + Math.floor((activeSegment.endMs - activeSegment.startMs) / 2);
+    await patchTranscript(
+      [{ op: "split_segment", segmentId: activeSegment.id, splitMs: midpoint }],
+      "tx-split"
+    );
+  };
+
+  const applyMergeWithNext = async () => {
+    if (!activeSegment || !transcriptSummary) {
+      setPanelError("Select a transcript segment to merge.");
+      return;
+    }
+    const index = transcriptSummary.segments.findIndex((segment) => segment.id === activeSegment.id);
+    const next = index >= 0 ? transcriptSummary.segments[index + 1] : null;
+    if (!next) {
+      setPanelError("Selected segment has no next segment to merge.");
+      return;
+    }
+    await patchTranscript(
+      [{ op: "merge_segments", firstSegmentId: activeSegment.id, secondSegmentId: next.id }],
+      "tx-merge"
+    );
+  };
+
+  const applySetSpeaker = async () => {
+    if (!activeSegmentId) {
+      setPanelError("Select a transcript segment first.");
+      return;
+    }
+    await patchTranscript(
+      [{ op: "set_speaker", segmentId: activeSegmentId, speakerLabel: speakerDraft.trim() || null }],
+      "tx-speaker"
+    );
+  };
+
+  const applyDeleteRange = async () => {
+    const startMs = Number(deleteStartMs);
+    const endMs = Number(deleteEndMs);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      setPanelError("Delete range is invalid.");
+      return;
+    }
+    await patchTranscript(
+      [{ op: "delete_range", startMs, endMs }],
+      "tx-delete"
+    );
+  };
+
+  const applyNormalizePunctuation = async () => {
+    await patchTranscript(
+      activeSegmentId
+        ? [{ op: "normalize_punctuation", segmentIds: [activeSegmentId] }]
+        : [{ op: "normalize_punctuation" }],
+      "tx-normalize"
+    );
   };
 
   return (
@@ -460,6 +656,116 @@ export function PhaseTwoPanel({ projectId, onTimelineRefresh }: PhaseTwoPanelPro
               </div>
             </div>
           ) : null}
+        </div>
+
+        <div className="space-y-2 rounded-md border p-3">
+          <p className="text-sm font-medium">Transcript Editing</p>
+          {!transcriptSummary ? (
+            <p className="text-xs text-muted-foreground">No transcript loaded yet. Generate transcript first.</p>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                {transcriptSummary.language} • {transcriptSummary.qualitySummary.segmentCount} segments •{" "}
+                {transcriptSummary.qualitySummary.wordCount} words • avg confidence{" "}
+                {(transcriptSummary.qualitySummary.averageConfidence * 100).toFixed(1)}%
+              </p>
+              <div className="max-h-36 space-y-1 overflow-y-auto rounded border p-2">
+                {transcriptSummary.segments.map((segment) => (
+                  <button
+                    key={segment.id}
+                    type="button"
+                    className={`w-full rounded border px-2 py-1 text-left text-xs ${
+                      activeSegmentId === segment.id ? "border-primary bg-primary/10" : "border-border"
+                    }`}
+                    onClick={() => selectSegment(segment.id)}
+                  >
+                    <p className="font-medium">
+                      {segment.startMs}ms - {segment.endMs}ms {segment.speakerLabel ? `• ${segment.speakerLabel}` : ""}
+                    </p>
+                    <p className="truncate text-muted-foreground">{segment.text}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Segment Text</Label>
+                  <Input
+                    value={segmentDraftText}
+                    onChange={(event) => setSegmentDraftText(event.target.value)}
+                    placeholder="Edit transcript text"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Speaker</Label>
+                  <Input
+                    value={speakerDraft}
+                    onChange={(event) => setSpeakerDraft(event.target.value)}
+                    placeholder="Speaker 1"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Input
+                  value={deleteStartMs}
+                  onChange={(event) => setDeleteStartMs(event.target.value)}
+                  type="number"
+                  placeholder="Delete start (ms)"
+                />
+                <Input
+                  value={deleteEndMs}
+                  onChange={(event) => setDeleteEndMs(event.target.value)}
+                  type="number"
+                  placeholder="Delete end (ms)"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={previewOnlyPatch} onChange={(event) => setPreviewOnlyPatch(event.target.checked)} />
+                Preview only (do not persist changes)
+              </label>
+
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Button size="sm" variant="outline" onClick={() => void applyReplaceText()} disabled={busyAction !== null}>
+                  {busyAction === "tx-replace" ? "Applying..." : "Replace Text"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void applySplitSegment()} disabled={busyAction !== null}>
+                  {busyAction === "tx-split" ? "Applying..." : "Split Segment"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void applyMergeWithNext()} disabled={busyAction !== null}>
+                  {busyAction === "tx-merge" ? "Applying..." : "Merge With Next"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void applySetSpeaker()} disabled={busyAction !== null}>
+                  {busyAction === "tx-speaker" ? "Applying..." : "Set Speaker"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void applyDeleteRange()} disabled={busyAction !== null}>
+                  {busyAction === "tx-delete" ? "Applying..." : "Delete Range"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void applyNormalizePunctuation()} disabled={busyAction !== null}>
+                  {busyAction === "tx-normalize" ? "Applying..." : "Normalize Punctuation"}
+                </Button>
+              </div>
+
+              {transcriptOpResult ? (
+                <div className="rounded border p-2 text-xs">
+                  <p>
+                    {transcriptOpResult.applied ? "Applied" : "Not applied"} • suggestionsOnly:{" "}
+                    {String(transcriptOpResult.suggestionsOnly)} • revision: {transcriptOpResult.revisionId ?? "none"}
+                  </p>
+                  {transcriptOpResult.issues.length > 0 ? (
+                    <div className="mt-1 space-y-1">
+                      {transcriptOpResult.issues.map((issue, index) => (
+                        <p key={`${issue.code}-${index}`} className="text-muted-foreground">
+                          [{issue.severity}] {issue.code}: {issue.message}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
 
         <div className="space-y-2 rounded-md border p-3">

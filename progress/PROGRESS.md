@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-20T05:46:37.944Z
+Last updated: 2026-02-22T06:51:19.492Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -32,6 +32,8 @@ Last updated: 2026-02-20T05:46:37.944Z
   - Timeline editor now ships split/merge/reorder/trim/transitions/keyframes, multi-track audio (voiceover/music/sfx + bundled library), media overlay transforms, export presets, and project revision history with timeline-aware preview/render wiring
 - [x] Phase 2 captions, AI edit, and chat edit
   - Auto-captions, caption translation, AI edit style packs, chat-edit apply/undo, editor UI controls, AI job polling API, and end-to-end validation are operational
+- [x] Slice 2 transcript engine and editor integration
+  - TranscriptSegment model, transcript auto/get/patch APIs (legacy + v2 aliases), in-editor transcript operations, conservative ripple safety, and full gate validation via tsc + pnpm test + test:e2e:slice12
 - [x] Phase 3 AI creator stack
   - Web Creator Studio now includes prompt/script generation jobs, actor presets, voice clone + AI Echo onboarding, AI twin onboarding, teleprompter assist, camera capture/upload, and end-to-end AI_CREATOR render path coverage
 - [x] Phase 4 ads, shorts, Reddit workflows, and compliance controls

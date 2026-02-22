@@ -50,6 +50,12 @@ cp .env.example .env
 
 Required variables are documented in `.env.example`.
 
+Slice 1 cutover flags:
+- `ENABLE_PROJECTS_V2=true` enables `/api/projects-v2` namespace.
+- `NEXT_PUBLIC_AI_EDITOR_DEFAULT=true` makes AI editor creation the dashboard default CTA.
+- `NEXT_PUBLIC_SHOW_TEMPLATES_NAV=false` relabels top-nav template entry to Quick Start.
+- `AI_EDITOR_DEFAULT_TEMPLATE_SLUG=green-screen-commentator` fallback template for seeded AI-editor project creation.
+
 ### 3) Install dependencies
 
 ```bash
@@ -64,6 +70,8 @@ pnpm install
 pnpm db:generate
 pnpm db:deploy
 pnpm db:seed
+pnpm db:backfill:projects-v2
+pnpm db:backfill:transcript-segments
 ```
 
 If you plan to edit the schema locally, use `pnpm db:migrate` for iterative migration creation.
@@ -73,6 +81,20 @@ If you pulled the parity scaffold update into an existing local DB, run migratio
 
 ```bash
 pnpm db:deploy
+```
+
+To backfill only active legacy projects (default statuses: `DRAFT,READY,RENDERING`) into `ProjectV2`:
+
+```bash
+pnpm db:backfill:projects-v2
+# optional explicit status set:
+# pnpm db:backfill:projects-v2 -- --statuses DRAFT,READY,RENDERING,DONE
+```
+
+To materialize transcript segments for existing projects/caption rows:
+
+```bash
+pnpm db:backfill:transcript-segments
 ```
 
 ### 5) Run app and worker
@@ -114,6 +136,9 @@ Implemented route handlers:
 
 - `POST /api/projects` create project
 - `GET /api/projects` list current user projects
+- `POST /api/projects-v2` create AI-editor project in projects-v2 namespace
+- `GET /api/projects-v2` list projects-v2 for current workspace
+- `GET /api/projects-v2/:id` fetch projects-v2 details + legacy bridge metadata
 - `GET /api/projects/:id` fetch project + assets
 - `PATCH /api/projects/:id` update config/title
 - `POST /api/projects/:id/assets/presign` create presigned upload URL
@@ -126,6 +151,12 @@ Implemented route handlers:
 - `POST /api/projects/:id/timeline` append timeline patch revision
 - `POST /api/projects/:id/captions/auto` queue auto-caption generation
 - `POST /api/projects/:id/captions/translate` queue caption translation
+- `GET /api/projects/:id/transcript` fetch transcript segments + words + quality summary
+- `POST /api/projects/:id/transcript/auto` queue transcript generation/materialization (caption-compatible)
+- `PATCH /api/projects/:id/transcript` apply deterministic transcript edit operations with conservative ripple gating
+- `GET /api/projects-v2/:id/transcript` projects-v2 alias of transcript fetch
+- `POST /api/projects-v2/:id/transcript/auto` projects-v2 alias of transcript auto
+- `PATCH /api/projects-v2/:id/transcript` projects-v2 alias of transcript patch
 - `POST /api/projects/:id/ai-edit` queue one-click AI edit pipeline
 - `POST /api/projects/:id/chat-edit` deterministic chat-edit planner + revision append
 - `POST /api/ai-creator/generate` queue creator generation flow
@@ -272,6 +303,8 @@ The Phase 1 editor is now operational end-to-end on web.
 Implemented:
 
 - Auto-caption generation with ASR orchestration, confidence-gated fallback re-decode, forced alignment refinement, and style-safe segmentation
+- First-class transcript engine (`TranscriptSegment`) with project transcript retrieval, auto-generation, and deterministic edit operations (`replace_text`, `split_segment`, `merge_segments`, `delete_range`, `set_speaker`, `normalize_punctuation`)
+- Transcript editor controls in `/projects/[id]` with apply/preview modes, issues surface, and conservative ripple safety fallback to suggestions-only when unsafe
 - Caption translation jobs for supported top languages
 - AI Edit style packs applied as timeline operations
 - Chat-based edit planning with apply + undo stack
@@ -382,6 +415,7 @@ pnpm test
 Run phase e2e checks:
 
 ```bash
+pnpm test:e2e:slice12
 pnpm test:e2e:phase012
 pnpm test:e2e:phase3
 pnpm test:e2e:phase4

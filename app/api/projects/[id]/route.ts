@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveLegacyProjectIdForUser } from "@/lib/project-id-bridge";
 import { getDownloadPresignedUrl } from "@/lib/storage";
 import { validateAndMergeConfig } from "@/lib/template-runtime";
 import { routeErrorToResponse } from "@/lib/http";
@@ -23,10 +24,17 @@ export async function GET(_request: Request, { params }: Context) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const legacyProjectId = await resolveLegacyProjectIdForUser({
+    projectIdOrV2Id: params.id,
+    userId: user.id
+  });
+  if (!legacyProjectId) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
   const project = await prisma.project.findFirst({
     where: {
-      id: params.id,
-      userId: user.id
+      id: legacyProjectId
     },
     include: {
       template: true,
@@ -72,12 +80,19 @@ export async function PATCH(request: Request, { params }: Context) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const legacyProjectId = await resolveLegacyProjectIdForUser({
+      projectIdOrV2Id: params.id,
+      userId: user.id
+    });
+    if (!legacyProjectId) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
     const body = UpdateProjectSchema.parse(await request.json());
 
     const project = await prisma.project.findFirst({
       where: {
-        id: params.id,
-        userId: user.id
+        id: legacyProjectId
       },
       include: {
         template: true

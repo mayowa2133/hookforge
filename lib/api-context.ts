@@ -1,5 +1,6 @@
 import { getCurrentUser } from "./auth";
 import { requireOwnedProject } from "./projects";
+import { resolveLegacyProjectIdForUser } from "./project-id-bridge";
 import { ensurePersonalWorkspace } from "./workspaces";
 import { ensureProjectV2FromLegacy } from "./project-v2";
 import { prisma } from "./prisma";
@@ -17,7 +18,16 @@ export async function requireUserWithWorkspace() {
 
 export async function requireProjectContext(projectId: string) {
   const { user, workspace } = await requireUserWithWorkspace();
-  const legacyProject = await requireOwnedProject(projectId, user.id);
+  const resolvedLegacyProjectId = await resolveLegacyProjectIdForUser({
+    projectIdOrV2Id: projectId,
+    userId: user.id
+  });
+
+  if (!resolvedLegacyProjectId) {
+    throw new Error("Project not found");
+  }
+
+  const legacyProject = await requireOwnedProject(resolvedLegacyProjectId, user.id);
 
   if (!legacyProject.workspaceId) {
     await prisma.project.update({

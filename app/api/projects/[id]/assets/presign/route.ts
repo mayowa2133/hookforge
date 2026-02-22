@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
+import { resolveLegacyProjectIdForUser } from "@/lib/project-id-bridge";
 import { buildProjectStorageKey, getUploadPresignedUrl } from "@/lib/storage";
 import { inferAssetKindFromMime, parseTemplateSlotSchema, validateAssetAgainstSlot } from "@/lib/template-runtime";
 import { routeErrorToResponse } from "@/lib/http";
@@ -33,8 +34,16 @@ export async function POST(request: Request, { params }: Context) {
       return NextResponse.json({ error: `File exceeds ${env.MAX_UPLOAD_MB}MB upload limit` }, { status: 413 });
     }
 
+    const legacyProjectId = await resolveLegacyProjectIdForUser({
+      projectIdOrV2Id: params.id,
+      userId: user.id
+    });
+    if (!legacyProjectId) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
     const project = await prisma.project.findFirst({
-      where: { id: params.id, userId: user.id },
+      where: { id: legacyProjectId, userId: user.id },
       include: { template: true }
     });
 

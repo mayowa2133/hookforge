@@ -1,6 +1,57 @@
 import { createHash } from "crypto";
 import { prisma } from "./prisma";
 
+async function createInitialRevision(params: {
+  projectId: string;
+  createdByUserId: string;
+  operations?: unknown;
+}) {
+  return prisma.timelineRevision.create({
+    data: {
+      projectId: params.projectId,
+      revisionNumber: 1,
+      operations: (params.operations ?? []) as never,
+      timelineHash: createHash("sha256").update(`${params.projectId}:1`).digest("hex"),
+      createdByUserId: params.createdByUserId
+    }
+  });
+}
+
+export async function createProjectV2WithInitialRevision(params: {
+  workspaceId: string;
+  createdByUserId: string;
+  title: string;
+  status: "DRAFT" | "READY" | "RENDERING" | "DONE" | "ERROR";
+  legacyProjectId?: string | null;
+  initialOperations?: unknown;
+}) {
+  const created = await prisma.projectV2.create({
+    data: {
+      workspaceId: params.workspaceId,
+      legacyProjectId: params.legacyProjectId ?? null,
+      createdByUserId: params.createdByUserId,
+      title: params.title,
+      status: params.status
+    }
+  });
+
+  const revision = await createInitialRevision({
+    projectId: created.id,
+    createdByUserId: params.createdByUserId,
+    operations: params.initialOperations
+  });
+
+  return prisma.projectV2.update({
+    where: { id: created.id },
+    data: {
+      currentRevisionId: revision.id
+    },
+    include: {
+      currentRevision: true
+    }
+  });
+}
+
 export async function ensureProjectV2FromLegacy(params: {
   legacyProjectId: string;
   workspaceId: string;
@@ -19,34 +70,12 @@ export async function ensureProjectV2FromLegacy(params: {
     return existing;
   }
 
-  const created = await prisma.projectV2.create({
-    data: {
-      workspaceId: params.workspaceId,
-      legacyProjectId: params.legacyProjectId,
-      createdByUserId: params.createdByUserId,
-      title: params.title,
-      status: params.status
-    }
-  });
-
-  const revision = await prisma.timelineRevision.create({
-    data: {
-      projectId: created.id,
-      revisionNumber: 1,
-      operations: [],
-      timelineHash: createHash("sha256").update(`${created.id}:1`).digest("hex"),
-      createdByUserId: params.createdByUserId
-    }
-  });
-
-  return prisma.projectV2.update({
-    where: { id: created.id },
-    data: {
-      currentRevisionId: revision.id
-    },
-    include: {
-      currentRevision: true
-    }
+  return createProjectV2WithInitialRevision({
+    workspaceId: params.workspaceId,
+    legacyProjectId: params.legacyProjectId,
+    createdByUserId: params.createdByUserId,
+    title: params.title,
+    status: params.status
   });
 }
 

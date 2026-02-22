@@ -2,11 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CreateAiProjectButton } from "@/components/dashboard/create-ai-project-button";
 import { CreateProjectButton } from "@/components/dashboard/create-project-button";
 import { ReferenceAnalyzer } from "@/components/dashboard/reference-analyzer";
 import { getCurrentUser } from "@/lib/auth";
+import { projectsV2FeatureFlags } from "@/lib/editor-cutover";
 import { prisma } from "@/lib/prisma";
 import { parseTemplateSlotSchema } from "@/lib/template-runtime";
+import { ensurePersonalWorkspace } from "@/lib/workspaces";
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
@@ -14,7 +17,8 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const [templates, projects] = await Promise.all([
+  const workspace = await ensurePersonalWorkspace(user.id, user.email);
+  const [templates, projects, projectsV2Raw] = await Promise.all([
     prisma.template.findMany({
       orderBy: { createdAt: "asc" }
     }),
@@ -28,17 +32,78 @@ export default async function DashboardPage() {
         }
       },
       orderBy: { updatedAt: "desc" }
-    })
+    }),
+    projectsV2FeatureFlags.projectsV2Enabled
+      ? prisma.projectV2.findMany({
+          where: { workspaceId: workspace.id },
+          include: {
+            currentRevision: {
+              select: {
+                id: true,
+                revisionNumber: true,
+                timelineHash: true,
+                createdAt: true
+              }
+            }
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 40
+        })
+      : Promise.resolve([])
   ]);
+
+  const legacyIds = projectsV2Raw
+    .map((projectV2) => projectV2.legacyProjectId)
+    .filter((id): id is string => Boolean(id));
+
+  const legacyProjects = legacyIds.length > 0
+    ? await prisma.project.findMany({
+        where: {
+          id: { in: legacyIds }
+        },
+        include: {
+          template: {
+            select: {
+              id: true,
+              slug: true,
+              name: true
+            }
+          }
+        }
+      })
+    : [];
+
+  const legacyById = new Map(legacyProjects.map((project) => [project.id, project]));
+
+  const projectsV2 = projectsV2Raw.map((projectV2) => {
+    const legacy = projectV2.legacyProjectId ? legacyById.get(projectV2.legacyProjectId) ?? null : null;
+    return {
+      id: projectV2.id,
+      title: projectV2.title,
+      status: projectV2.status,
+      updatedAt: projectV2.updatedAt,
+      currentRevision: projectV2.currentRevision,
+      legacyTemplateName: legacy?.template?.name ?? null,
+      entrypointPath: legacy ? `/projects/${legacy.id}` : `/projects-v2/${projectV2.id}`
+    };
+  });
+
+  const quickStartTemplates = templates.slice(0, 5);
 
   return (
     <div className="space-y-8">
-      <div>
+      <div className="space-y-3">
         <h1 className="text-3xl font-black" style={{ fontFamily: "var(--font-heading)" }}>
           Dashboard
         </h1>
-        <p className="text-sm text-muted-foreground">Build with structure-first templates and cloud renders.</p>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground">AI editor first with quick-start templates when you want a head start.</p>
+        <div className="flex flex-wrap gap-2">
+          {projectsV2FeatureFlags.projectsV2Enabled ? <CreateAiProjectButton /> : null}
+          <Link href="/templates" className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-accent">
+            Open Quick Start
+          </Link>
+        </div>
+        <p className="text-sm text-muted-foreground">
           Need script-to-video, teleprompter, or camera capture?{" "}
           <Link href="/creator" className="underline">
             Open Creator Studio
@@ -61,10 +126,54 @@ export default async function DashboardPage() {
 
       <ReferenceAnalyzer />
 
+      {projectsV2FeatureFlags.projectsV2Enabled ? (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold">AI Editor Projects</h2>
+            <p className="text-xs text-muted-foreground">Projects-v2 namespace with legacy editor bridge.</p>
+          </div>
+          {projectsV2.length === 0 ? (
+            <Card>
+              <CardContent className="pt-6 text-sm text-muted-foreground">
+                No AI editor projects yet. Create one above to start in the new namespace.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {projectsV2.map((project) => (
+                <Card key={project.id}>
+                  <CardHeader>
+                    <CardTitle className="text-lg">{project.title}</CardTitle>
+                    <CardDescription>
+                      {project.legacyTemplateName ? `Seeded from ${project.legacyTemplateName}` : "Unseeded AI editor project"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span>Status</span>
+                      <Badge>{project.status}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Revision {project.currentRevision?.revisionNumber ?? 0} • Updated {project.updatedAt.toLocaleString()}
+                    </p>
+                    <Link
+                      href={project.entrypointPath}
+                      className="block rounded-md border px-3 py-2 text-center text-sm font-medium hover:bg-accent"
+                    >
+                      Open AI editor
+                    </Link>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
       <section className="space-y-3">
-        <h2 className="text-xl font-bold">Popular Choices</h2>
+        <h2 className="text-xl font-bold">Quick Start Templates</h2>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {templates.map((template) => {
+          {quickStartTemplates.map((template) => {
             const schema = parseTemplateSlotSchema(template.slotSchema);
             return (
               <Card key={template.id}>
@@ -90,7 +199,7 @@ export default async function DashboardPage() {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <CreateProjectButton templateId={template.id} className="flex-1" />
+                    <CreateProjectButton templateId={template.id} className="flex-1" label="Use quick start" />
                     <Link className="flex-1 rounded-md border px-3 py-2 text-center text-sm font-medium hover:bg-accent" href={`/templates/${template.slug}`}>
                       Details
                     </Link>
@@ -100,14 +209,19 @@ export default async function DashboardPage() {
             );
           })}
         </div>
+        <div>
+          <Link href="/templates" className="text-sm font-medium underline">
+            Browse all templates
+          </Link>
+        </div>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-bold">Your projects</h2>
+        <h2 className="text-xl font-bold">Legacy projects</h2>
         {projects.length === 0 ? (
           <Card>
             <CardContent className="pt-6 text-sm text-muted-foreground">
-              No projects yet. Create one from a template above.
+              No legacy projects yet. Use Quick Start templates to create one.
             </CardContent>
           </Card>
         ) : (

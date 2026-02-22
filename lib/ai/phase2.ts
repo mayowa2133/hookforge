@@ -10,6 +10,7 @@ import { runAsrQualityPipeline } from "./asr-quality";
 import { resolveProviderForCapability } from "../models/provider-routing";
 import { getFallbackProvider } from "../providers/registry";
 import { previewTimelineOperationsWithValidation } from "../timeline-invariants";
+import { assignSegmentIdsToWords, buildTranscriptSegmentsFromWords } from "../transcript/segmentation";
 
 const CAPTION_STYLE_NAME = "HookForge Bold";
 
@@ -827,6 +828,13 @@ async function handleTranscribeJob(aiJob: AIJob) {
     }
   });
 
+  await prisma.transcriptSegment.deleteMany({
+    where: {
+      projectId: context.projectV2.id,
+      language
+    }
+  });
+
   await prisma.captionSegment.deleteMany({
     where: {
       projectId: context.projectV2.id,
@@ -834,10 +842,55 @@ async function handleTranscribeJob(aiJob: AIJob) {
     }
   });
 
+  const transcriptSegments = (asr.segments.length > 0
+    ? asr.segments
+    : buildTranscriptSegmentsFromWords(asr.words, {
+        maxWordsPerSegment,
+        maxCharsPerLine,
+        maxLinesPerSegment
+      })).map((segment) => {
+    const confidenceValues = asr.words
+      .filter((word) => word.startMs >= segment.startMs && word.endMs <= segment.endMs)
+      .map((word) => word.confidence)
+      .filter((value): value is number => typeof value === "number");
+
+    const confidenceAvg = confidenceValues.length > 0
+      ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+      : null;
+
+    return {
+      id: randomUUID(),
+      projectId: context.projectV2.id,
+      language,
+      text: sanitizeOverlayText(segment.text, "caption"),
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      speakerLabel: null,
+      confidenceAvg,
+      source: "ASR"
+    };
+  });
+
+  if (transcriptSegments.length > 0) {
+    await prisma.transcriptSegment.createMany({
+      data: transcriptSegments
+    });
+  }
+
+  const wordsWithSegmentId = assignSegmentIdsToWords(asr.words, transcriptSegments.map((segment) => ({
+    id: segment.id,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    text: segment.text,
+    speakerLabel: segment.speakerLabel,
+    confidenceAvg: segment.confidenceAvg
+  })));
+
   if (asr.words.length > 0) {
     await prisma.transcriptWord.createMany({
-      data: asr.words.map((word) => ({
+      data: wordsWithSegmentId.map((word) => ({
         projectId: context.projectV2.id,
+        segmentId: word.segmentId,
         startMs: word.startMs,
         endMs: word.endMs,
         text: word.text,
@@ -847,9 +900,9 @@ async function handleTranscribeJob(aiJob: AIJob) {
     });
   }
 
-  if (asr.segments.length > 0) {
+  if (transcriptSegments.length > 0) {
     await prisma.captionSegment.createMany({
-      data: asr.segments.map((segment) => ({
+      data: transcriptSegments.map((segment) => ({
         projectId: context.projectV2.id,
         trackId: captionTrackId,
         language,
@@ -865,7 +918,11 @@ async function handleTranscribeJob(aiJob: AIJob) {
   const trackPlan = buildReplaceCaptionTrackOperations({
     state,
     trackName: `Auto captions (${language})`,
-    segments: asr.segments
+    segments: transcriptSegments.map((segment) => ({
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: segment.text
+    }))
   });
 
   if (trackPlan.operations.length > 0) {
@@ -886,7 +943,7 @@ async function handleTranscribeJob(aiJob: AIJob) {
   return {
     language,
     wordCount: asr.words.length,
-    segmentCount: asr.segments.length,
+    segmentCount: transcriptSegments.length,
     captionTrackId,
     asrAverageConfidence: asr.averageConfidence,
     asrFallbackUsed: asr.usedFallback,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { routeErrorToResponse } from "@/lib/http";
+import { resolveLegacyProjectIdForUser } from "@/lib/project-id-bridge";
 import { registerProjectAssetForUser, RegisterAssetInputSchema } from "@/lib/assets/register";
 
 export const runtime = "nodejs";
@@ -17,9 +18,18 @@ export async function POST(request: Request, { params }: Context) {
     }
 
     const body = RegisterAssetInputSchema.parse(await request.json());
+    const legacyProjectId = await resolveLegacyProjectIdForUser({
+      projectIdOrV2Id: params.id,
+      userId: user.id
+    });
+
+    if (!legacyProjectId) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
     const result = await registerProjectAssetForUser({
       userId: user.id,
-      projectId: params.id,
+      projectId: legacyProjectId,
       input: body
     });
 

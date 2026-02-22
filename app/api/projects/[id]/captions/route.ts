@@ -47,7 +47,8 @@ export async function GET(request: Request, { params }: Context) {
     }
 
     return jsonOk({
-      projectId: params.id,
+      requestProjectId: params.id,
+      projectId: ctx.projectV2.id,
       captions,
       byLanguage,
       transcriptWords: transcript

@@ -392,6 +392,7 @@ model ProjectV2 {
   tracks           TimelineTrack[]
   mediaAssets      MediaAsset[]
   transcriptWords  TranscriptWord[]
+  transcriptSegments TranscriptSegment[]
   captionSegments  CaptionSegment[]
   aiJobs           AIJob[]
   qualityFeedback  QualityFeedback[]
@@ -546,6 +547,7 @@ model IngestionSourceLink {
 model TranscriptWord {
   id           String      @id @default(cuid())
   projectId    String
+  segmentId    String?
   startMs      Int
   endMs        Int
   text         String
@@ -554,8 +556,29 @@ model TranscriptWord {
   createdAt    DateTime    @default(now())
 
   project      ProjectV2   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  segment      TranscriptSegment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
 
   @@index([projectId, startMs])
+  @@index([segmentId])
+}
+
+model TranscriptSegment {
+  id            String      @id @default(cuid())
+  projectId     String
+  language      String
+  text          String
+  startMs       Int
+  endMs         Int
+  speakerLabel  String?
+  confidenceAvg Float?
+  source        String      @default("ASR")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  project       ProjectV2   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  words         TranscriptWord[]
+
+  @@index([projectId, language, startMs])
 }
 
 model CaptionStylePreset {

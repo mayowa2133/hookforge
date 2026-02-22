@@ -92,6 +92,12 @@
       "details": "Auto-captions, caption translation, AI edit style packs, chat-edit apply/undo, editor UI controls, AI job polling API, and end-to-end validation are operational"
     },
     {
+      "id": "slice2_transcript_engine",
+      "title": "Slice 2 transcript engine and editor integration",
+      "status": "DONE",
+      "details": "TranscriptSegment model, transcript auto/get/patch APIs (legacy + v2 aliases), in-editor transcript operations, conservative ripple safety, and full gate validation via tsc + pnpm test + test:e2e:slice12"
+    },
+    {
       "id": "phase3_ai_creator_stack",
       "title": "Phase 3 AI creator stack",
       "status": "DONE",

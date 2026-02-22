@@ -10,9 +10,11 @@ export default async function TemplatesPage() {
   return (
     <div className="space-y-5">
       <h1 className="text-3xl font-black" style={{ fontFamily: "var(--font-heading)" }}>
-        Popular Visual Hook Templates
+        Quick Start Templates
       </h1>
-      <p className="text-sm text-muted-foreground">Structural blueprints only. Upload assets you own or are licensed to use.</p>
+      <p className="text-sm text-muted-foreground">
+        Start fast with structural blueprints, then continue editing in the full AI workflow.
+      </p>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {templates.map((template) => {

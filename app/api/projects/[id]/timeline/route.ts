@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import { routeErrorToResponse } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+import { resolveLegacyProjectIdForUser } from "@/lib/project-id-bridge";
 import {
   applyTimelineOperations,
   buildTimelineState, serializeTimelineState
@@ -125,9 +126,18 @@ const TimelinePatchSchema = z.object({
   operations: z.array(TimelineOperationSchema).min(1)
 });
 
-async function requireProject(projectId: string, userId: string) {
+async function requireProject(projectIdOrV2Id: string, userId: string) {
+  const legacyProjectId = await resolveLegacyProjectIdForUser({
+    projectIdOrV2Id,
+    userId
+  });
+
+  if (!legacyProjectId) {
+    throw new Error("Project not found");
+  }
+
   const project = await prisma.project.findFirst({
-    where: { id: projectId, userId },
+    where: { id: legacyProjectId },
     include: {
       assets: {
         select: {

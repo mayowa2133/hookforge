@@ -46,7 +46,7 @@ export default async function TemplateDetailPage({ params }: PageProps) {
           </div>
 
           {user ? (
-            <CreateProjectButton templateId={template.id} label="Use this template" />
+            <CreateProjectButton templateId={template.id} label="Use quick start template" />
           ) : (
             <Button asChild>
               <Link href="/login">Login to create project</Link>

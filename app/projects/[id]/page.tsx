@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { resolveLegacyProjectIdForUser } from "@/lib/project-id-bridge";
 import { prisma } from "@/lib/prisma";
 import { getDownloadPresignedUrl } from "@/lib/storage";
 import { parseTemplateSlotSchema } from "@/lib/template-runtime";
@@ -15,9 +16,22 @@ export default async function ProjectPage({ params }: PageProps) {
     redirect("/login");
   }
 
+  const legacyProjectId = await resolveLegacyProjectIdForUser({
+    projectIdOrV2Id: params.id,
+    userId: user.id
+  });
+
+  if (!legacyProjectId) {
+    notFound();
+  }
+
+  if (legacyProjectId !== params.id) {
+    redirect(`/projects/${legacyProjectId}`);
+  }
+
   const project = await prisma.project.findFirst({
     where: {
-      id: params.id,
+      id: legacyProjectId,
       userId: user.id
     },
     include: {

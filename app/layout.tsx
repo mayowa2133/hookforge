@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "@/app/globals.css";
 import { getCurrentUser } from "@/lib/auth";
+import { projectsV2FeatureFlags } from "@/lib/editor-cutover";
 import { LogoutButton } from "@/components/navigation/logout-button";
 
 const headingFont = Space_Grotesk({ subsets: ["latin"], variable: "--font-heading" });
@@ -26,9 +27,15 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               HookForge
             </Link>
             <nav className="flex items-center gap-3 text-sm">
-              <Link href="/templates" className="font-medium hover:text-primary">
-                Templates
-              </Link>
+              {projectsV2FeatureFlags.showTemplatesNav ? (
+                <Link href="/templates" className="font-medium hover:text-primary">
+                  Templates
+                </Link>
+              ) : (
+                <Link href="/templates" className="font-medium hover:text-primary">
+                  Quick Start
+                </Link>
+              )}
               {user ? (
                 <>
                   <Link href="/dashboard" className="font-medium hover:text-primary">

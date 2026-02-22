@@ -1,0 +1,87 @@
+import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
+import { projectsV2FeatureFlags } from "@/lib/editor-cutover";
+import { routeErrorToResponse } from "@/lib/http";
+import { prisma } from "@/lib/prisma";
+
+export const runtime = "nodejs";
+
+type Context = {
+  params: { id: string };
+};
+
+function projectV2DisabledResponse() {
+  return NextResponse.json({ error: "Projects v2 is disabled" }, { status: 404 });
+}
+
+export async function GET(_request: Request, { params }: Context) {
+  try {
+    if (!projectsV2FeatureFlags.projectsV2Enabled) {
+      return projectV2DisabledResponse();
+    }
+
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const project = await prisma.projectV2.findFirst({
+      where: {
+        id: params.id,
+        workspace: {
+          members: {
+            some: {
+              userId: user.id
+            }
+          }
+        }
+      },
+      include: {
+        currentRevision: true
+      }
+    });
+
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const legacyProject = project.legacyProjectId
+      ? await prisma.project.findFirst({
+          where: {
+            id: project.legacyProjectId,
+            OR: [
+              { userId: user.id },
+              {
+                workspace: {
+                  members: {
+                    some: {
+                      userId: user.id
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          include: {
+            template: {
+              select: {
+                id: true,
+                slug: true,
+                name: true
+              }
+            }
+          }
+        })
+      : null;
+
+    return NextResponse.json({
+      project: {
+        ...project,
+        entrypointPath: legacyProject ? `/projects/${legacyProject.id}` : `/projects-v2/${project.id}`,
+        legacyProject
+      }
+    });
+  } catch (error) {
+    return routeErrorToResponse(error);
+  }
+}
