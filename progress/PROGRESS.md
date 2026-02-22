@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-22T23:27:06.774Z
+Last updated: 2026-02-22T23:39:00.005Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -32,6 +32,8 @@ Last updated: 2026-02-22T23:27:06.774Z
   - Added OpenCut rollout flags/cohort gates, legal compliance docs, and upstream sync script scaffolding
 - [x] OpenCut adoption Phase 1 shell + transcript-first integration
   - Implemented /opencut/projects-v2/[id] transcript-first shell, projects-v2 cohort routing, HookForge OpenCut API adapter, and validated with unit + e2e slice12 regression
+- [x] OpenCut adoption Phase 2 timeline controls + shortcut parity
+  - Implemented timeline edit controls (split/trim/move/reorder/merge/remove), JKL+Space+S shortcuts, and validated with full tests + e2e slice12 runtime regression
 - [x] Phase 1 manual timeline editor parity
   - Timeline editor now ships split/merge/reorder/trim/transitions/keyframes, multi-track audio (voiceover/music/sfx + bundled library), media overlay transforms, export presets, and project revision history with timeline-aware preview/render wiring
 - [x] Phase 2 captions, AI edit, and chat edit

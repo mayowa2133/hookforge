@@ -49,9 +49,12 @@ export type TimelinePayload = {
       id: string;
       kind: "VIDEO" | "AUDIO" | "CAPTION";
       name: string;
+      order: number;
+      muted: boolean;
+      volume: number;
       clips: Array<{
         id: string;
-        label: string;
+        label?: string;
         timelineInMs: number;
         timelineOutMs: number;
       }>;
@@ -60,6 +63,49 @@ export type TimelinePayload = {
   revisionId: string | null;
   revision: number;
 };
+
+export type TimelineOperation =
+  | {
+      op: "split_clip";
+      trackId: string;
+      clipId: string;
+      splitMs: number;
+    }
+  | {
+      op: "trim_clip";
+      trackId: string;
+      clipId: string;
+      trimStartMs?: number;
+      trimEndMs?: number;
+    }
+  | {
+      op: "move_clip";
+      trackId: string;
+      clipId: string;
+      timelineInMs: number;
+    }
+  | {
+      op: "set_clip_timing";
+      trackId: string;
+      clipId: string;
+      timelineInMs: number;
+      durationMs: number;
+    }
+  | {
+      op: "merge_clip_with_next";
+      trackId: string;
+      clipId: string;
+    }
+  | {
+      op: "remove_clip";
+      trackId: string;
+      clipId: string;
+    }
+  | {
+      op: "reorder_track";
+      trackId: string;
+      order: number;
+    };
 
 export type TranscriptPayload = {
   projectId: string;
@@ -132,6 +178,14 @@ export async function getLegacyProject(projectIdOrV2Id: string) {
 
 export async function getTimeline(projectIdOrV2Id: string) {
   return requestJson<TimelinePayload>(`/api/projects/${projectIdOrV2Id}/timeline`);
+}
+
+export async function patchTimeline(projectIdOrV2Id: string, operations: TimelineOperation[]) {
+  return requestJson<TimelinePayload>(`/api/projects/${projectIdOrV2Id}/timeline`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operations })
+  });
 }
 
 export async function getTranscript(projectV2Id: string, language: string) {

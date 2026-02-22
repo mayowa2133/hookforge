@@ -318,6 +318,33 @@ Implemented:
   - `tests/opencut-client.test.ts`
   - `tests/editor-cutover.test.ts`
 
+## OpenCut Adoption Phase 2 (Implemented)
+
+Implemented:
+
+- Timeline operation support in OpenCut adapter client:
+  - `split_clip`
+  - `trim_clip`
+  - `move_clip`
+  - `set_clip_timing`
+  - `merge_clip_with_next`
+  - `remove_clip`
+  - `reorder_track`
+- Interactive timeline controls in OpenCut shell:
+  - track reorder up/down
+  - clip selection + move/timing/trim/split/merge/remove controls
+  - timeline revision feedback after apply
+- Keyboard shortcuts in OpenCut shell:
+  - `Space` play/pause
+  - `J/K/L` seek/pause controls
+  - `S` split selected clip at playhead
+- Utility helpers and tests for split, seek clamping, and reorder bounds:
+  - `lib/opencut/timeline-helpers.ts`
+  - `tests/opencut-timeline-helpers.test.ts`
+- Regression validation:
+  - `pnpm test`
+  - `pnpm test:e2e:slice12`
+
 ## Phase 1 Manual Editor (Completed)
 
 Implemented and wired into preview + cloud render:

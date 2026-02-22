@@ -92,6 +92,12 @@
       "details": "Implemented /opencut/projects-v2/[id] transcript-first shell, projects-v2 cohort routing, HookForge OpenCut API adapter, and validated with unit + e2e slice12 regression"
     },
     {
+      "id": "opencut_phase2_timeline_controls",
+      "title": "OpenCut adoption Phase 2 timeline controls + shortcut parity",
+      "status": "DONE",
+      "details": "Implemented timeline edit controls (split/trim/move/reorder/merge/remove), JKL+Space+S shortcuts, and validated with full tests + e2e slice12 runtime regression"
+    },
+    {
       "id": "phase1_timeline_editor",
       "title": "Phase 1 manual timeline editor parity",
       "status": "DONE",

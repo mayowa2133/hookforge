@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { autoTranscript, getProjectV2, patchTranscript, startRender } from "@/lib/opencut/hookforge-client";
+import { autoTranscript, getProjectV2, patchTimeline, patchTranscript, startRender } from "@/lib/opencut/hookforge-client";
 
 function mockResponse(body: unknown, ok = true, status = 200) {
   return {
@@ -82,6 +82,34 @@ describe("opencut hookforge client", () => {
     expect(payload.renderJob.id).toBe("render_1");
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/projects/pv2_3/render",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  it("posts timeline operations through bridgeable projects endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        timeline: {
+          tracks: []
+        },
+        revisionId: "rev_1",
+        revision: 2
+      })
+    );
+
+    await patchTimeline("pv2_4", [
+      {
+        op: "move_clip",
+        trackId: "track_1",
+        clipId: "clip_1",
+        timelineInMs: 600
+      }
+    ]);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/projects/pv2_4/timeline",
       expect.objectContaining({
         method: "POST"
       })

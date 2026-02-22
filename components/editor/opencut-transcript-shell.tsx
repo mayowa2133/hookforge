@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,12 +15,15 @@ import {
   getRenderJob,
   getTimeline,
   getTranscript,
+  patchTimeline,
   patchTranscript,
   startRender,
   type LegacyProjectPayload,
+  type TimelineOperation,
   type TimelinePayload,
   type TranscriptPayload
 } from "@/lib/opencut/hookforge-client";
+import { clampPlaybackSeekSeconds, computeSplitPointMs, computeTrackReorderTarget } from "@/lib/opencut/timeline-helpers";
 
 type OpenCutTranscriptShellProps = {
   projectV2Id: string;
@@ -51,12 +54,23 @@ function pickPreviewAsset(project: LegacyProjectPayload["project"] | null) {
   );
 }
 
+function isTypingTarget(eventTarget: EventTarget | null) {
+  const element = eventTarget as HTMLElement | null;
+  if (!element) {
+    return false;
+  }
+  const tag = element.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
+}
+
 export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, status }: OpenCutTranscriptShellProps) {
   const [project, setProject] = useState<LegacyProjectPayload["project"] | null>(null);
   const [timeline, setTimeline] = useState<TimelinePayload | null>(null);
   const [transcript, setTranscript] = useState<TranscriptPayload | null>(null);
   const [language, setLanguage] = useState("en");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
+  const [selectedTrackId, setSelectedTrackId] = useState("");
+  const [selectedClipId, setSelectedClipId] = useState("");
   const [segmentDraft, setSegmentDraft] = useState("");
   const [speakerDraft, setSpeakerDraft] = useState("");
   const [previewOnly, setPreviewOnly] = useState(false);
@@ -69,6 +83,10 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
     revisionId: string | null;
   } | null>(null);
+  const [timelineResult, setTimelineResult] = useState<{
+    revisionId: string | null;
+    revision: number;
+  } | null>(null);
   const [autoJobId, setAutoJobId] = useState<string | null>(null);
   const [autoJobStatus, setAutoJobStatus] = useState<{ status: string; progress: number } | null>(null);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
@@ -80,11 +98,35 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   } | null>(null);
   const [deleteStartMs, setDeleteStartMs] = useState("0");
   const [deleteEndMs, setDeleteEndMs] = useState("220");
+  const [clipMoveInMs, setClipMoveInMs] = useState("0");
+  const [clipDurationMs, setClipDurationMs] = useState("1200");
+  const [trimStartMs, setTrimStartMs] = useState("0");
+  const [trimEndMs, setTrimEndMs] = useState("0");
+  const [playheadMs, setPlayheadMs] = useState(0);
+
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const selectedSegment = useMemo(
     () => transcript?.segments.find((segment) => segment.id === selectedSegmentId) ?? null,
     [selectedSegmentId, transcript?.segments]
   );
+
+  const orderedTracks = useMemo(() => {
+    const tracks = timeline?.timeline.tracks ?? [];
+    return [...tracks].sort((a, b) => a.order - b.order);
+  }, [timeline?.timeline.tracks]);
+
+  const selectedTrack = useMemo(
+    () => orderedTracks.find((track) => track.id === selectedTrackId) ?? null,
+    [orderedTracks, selectedTrackId]
+  );
+
+  const selectedClip = useMemo(() => {
+    if (!selectedTrack) {
+      return null;
+    }
+    return selectedTrack.clips.find((clip) => clip.id === selectedClipId) ?? null;
+  }, [selectedTrack, selectedClipId]);
 
   const previewAsset = useMemo(() => pickPreviewAsset(project), [project]);
 
@@ -114,6 +156,25 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setDeleteEndMs(String(Math.min(active.endMs, active.startMs + 220)));
   };
 
+  const syncSelectedClipDraft = (trackId: string, clipId: string, nextTimeline?: TimelinePayload | null) => {
+    const sourceTimeline = nextTimeline ?? timeline;
+    if (!sourceTimeline) {
+      return;
+    }
+    const track = sourceTimeline.timeline.tracks.find((entry) => entry.id === trackId);
+    const clip = track?.clips.find((entry) => entry.id === clipId);
+    if (!track || !clip) {
+      return;
+    }
+
+    setSelectedTrackId(track.id);
+    setSelectedClipId(clip.id);
+    setClipMoveInMs(String(clip.timelineInMs));
+    setClipDurationMs(String(Math.max(120, clip.timelineOutMs - clip.timelineInMs)));
+    setTrimStartMs("0");
+    setTrimEndMs("0");
+  };
+
   useEffect(() => {
     let canceled = false;
     const load = async () => {
@@ -131,6 +192,31 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       canceled = true;
     };
   }, [projectV2Id, language]);
+
+  useEffect(() => {
+    if (!orderedTracks.length) {
+      setSelectedTrackId("");
+      setSelectedClipId("");
+      return;
+    }
+
+    const hasTrack = orderedTracks.some((track) => track.id === selectedTrackId);
+    const fallbackTrack = hasTrack ? orderedTracks.find((track) => track.id === selectedTrackId) ?? orderedTracks[0] : orderedTracks[0];
+    const fallbackClip = fallbackTrack.clips[0] ?? null;
+
+    if (!hasTrack) {
+      setSelectedTrackId(fallbackTrack.id);
+    }
+
+    const hasClip = fallbackTrack.clips.some((clip) => clip.id === selectedClipId);
+    if (!hasClip) {
+      if (fallbackClip) {
+        syncSelectedClipDraft(fallbackTrack.id, fallbackClip.id);
+      } else {
+        setSelectedClipId("");
+      }
+    }
+  }, [orderedTracks, selectedClipId, selectedTrackId]);
 
   useEffect(() => {
     if (!autoJobId) {
@@ -183,6 +269,85 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
 
     return () => clearInterval(interval);
   }, [renderJobId]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTypingTarget(event.target) || busy !== null) {
+        return;
+      }
+
+      const video = previewVideoRef.current;
+      if (!video) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === " ") {
+        event.preventDefault();
+        if (video.paused) {
+          void video.play();
+        } else {
+          video.pause();
+        }
+        return;
+      }
+
+      if (key === "j") {
+        event.preventDefault();
+        const next = clampPlaybackSeekSeconds({
+          currentSeconds: video.currentTime,
+          deltaSeconds: -2,
+          durationSeconds: Number.isFinite(video.duration) ? video.duration : undefined
+        });
+        video.currentTime = next;
+        setPlayheadMs(Math.floor(next * 1000));
+        return;
+      }
+
+      if (key === "k") {
+        event.preventDefault();
+        video.pause();
+        return;
+      }
+
+      if (key === "l") {
+        event.preventDefault();
+        const next = clampPlaybackSeekSeconds({
+          currentSeconds: video.currentTime,
+          deltaSeconds: 2,
+          durationSeconds: Number.isFinite(video.duration) ? video.duration : undefined
+        });
+        video.currentTime = next;
+        setPlayheadMs(Math.floor(next * 1000));
+        return;
+      }
+
+      if (key === "s" && selectedTrack && selectedClip) {
+        event.preventDefault();
+        const splitMs = computeSplitPointMs(
+          {
+            timelineInMs: selectedClip.timelineInMs,
+            timelineOutMs: selectedClip.timelineOutMs
+          },
+          playheadMs
+        );
+        void applyTimelineOperations(
+          [
+            {
+              op: "split_clip",
+              trackId: selectedTrack.id,
+              clipId: selectedClip.id,
+              splitMs
+            }
+          ],
+          "timeline_split"
+        );
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, playheadMs, selectedClip, selectedTrack]);
 
   const runAutoTranscript = async () => {
     setBusy("auto");
@@ -238,6 +403,25 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       await Promise.all([loadTranscript(), loadProjectSurface()]);
     } catch (error) {
       setPanelError(error instanceof Error ? error.message : "Transcript operation failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyTimelineOperations = async (operations: TimelineOperation[], action: string) => {
+    setBusy(action);
+    setPanelError(null);
+    setTimelineResult(null);
+    try {
+      const payload = await patchTimeline(projectV2Id, operations);
+      setTimeline(payload);
+      setTimelineResult({
+        revisionId: payload.revisionId,
+        revision: payload.revision
+      });
+      await loadTranscript();
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Timeline operation failed");
     } finally {
       setBusy(null);
     }
@@ -343,6 +527,137 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     );
   };
 
+  const runTimelineSplit = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    const splitMs = computeSplitPointMs(
+      {
+        timelineInMs: selectedClip.timelineInMs,
+        timelineOutMs: selectedClip.timelineOutMs
+      },
+      playheadMs
+    );
+    await applyTimelineOperations(
+      [
+        {
+          op: "split_clip",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          splitMs
+        }
+      ],
+      "timeline_split"
+    );
+  };
+
+  const runTimelineTrim = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    const start = Math.max(0, Math.floor(Number(trimStartMs) || 0));
+    const end = Math.max(0, Math.floor(Number(trimEndMs) || 0));
+    await applyTimelineOperations(
+      [
+        {
+          op: "trim_clip",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          trimStartMs: start,
+          trimEndMs: end
+        }
+      ],
+      "timeline_trim"
+    );
+  };
+
+  const runTimelineMove = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    const nextIn = Math.max(0, Math.floor(Number(clipMoveInMs) || 0));
+    await applyTimelineOperations(
+      [
+        {
+          op: "move_clip",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          timelineInMs: nextIn
+        }
+      ],
+      "timeline_move"
+    );
+  };
+
+  const runTimelineSetTiming = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    const nextIn = Math.max(0, Math.floor(Number(clipMoveInMs) || 0));
+    const nextDuration = Math.max(120, Math.floor(Number(clipDurationMs) || 1200));
+    await applyTimelineOperations(
+      [
+        {
+          op: "set_clip_timing",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          timelineInMs: nextIn,
+          durationMs: nextDuration
+        }
+      ],
+      "timeline_set_timing"
+    );
+  };
+
+  const runTimelineMerge = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    await applyTimelineOperations(
+      [
+        {
+          op: "merge_clip_with_next",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id
+        }
+      ],
+      "timeline_merge"
+    );
+  };
+
+  const runTimelineRemove = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    await applyTimelineOperations(
+      [
+        {
+          op: "remove_clip",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id
+        }
+      ],
+      "timeline_remove"
+    );
+  };
+
+  const reorderTrack = async (trackId: string, currentOrder: number, direction: -1 | 1) => {
+    const nextOrder = computeTrackReorderTarget(currentOrder, direction, orderedTracks.length);
+    if (nextOrder === currentOrder) {
+      return;
+    }
+    await applyTimelineOperations(
+      [
+        {
+          op: "reorder_track",
+          trackId,
+          order: nextOrder
+        }
+      ],
+      "timeline_reorder"
+    );
+  };
+
   const enqueueRender = async () => {
     setBusy("render");
     setPanelError(null);
@@ -362,15 +677,15 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }
   };
 
-  const trackCount = timeline?.timeline.tracks.length ?? 0;
-  const clipCount = timeline?.timeline.tracks.reduce((sum, track) => sum + track.clips.length, 0) ?? 0;
+  const trackCount = orderedTracks.length;
+  const clipCount = orderedTracks.reduce((sum, track) => sum + track.clips.length, 0);
 
   return (
     <div className="-mx-2 space-y-4 md:-mx-4 lg:-mx-8">
       <div className="rounded-xl border bg-background/95 p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">OpenCut Shell (Phase 1)</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">OpenCut Shell (Phase 2)</p>
             <h1 className="text-2xl font-black" style={{ fontFamily: "var(--font-heading)" }}>
               {title}
             </h1>
@@ -379,14 +694,14 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">Transcript-first</Badge>
+            <Badge variant="outline">Transcript-first + timeline controls</Badge>
             <Badge variant="secondary">V2 ID: {projectV2Id.slice(0, 8)}</Badge>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.1fr_1.2fr_0.9fr]">
-        <Card className="min-h-[540px]">
+      <div className="grid gap-4 xl:grid-cols-[1.05fr_1.25fr_1fr]">
+        <Card className="min-h-[580px]">
           <CardHeader>
             <CardTitle className="text-lg">Transcript</CardTitle>
             <CardDescription>Edit text first, timeline updates through safe patch operations.</CardDescription>
@@ -407,7 +722,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               ) : null}
             </div>
 
-            <div className="max-h-[410px] space-y-2 overflow-y-auto rounded-md border p-2">
+            <div className="max-h-[440px] space-y-2 overflow-y-auto rounded-md border p-2">
               {transcript?.segments.length ? (
                 transcript.segments.map((segment) => (
                   <button
@@ -424,7 +739,9 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                       segment.id === selectedSegmentId ? "border-primary bg-primary/10" : "hover:bg-muted"
                     }`}
                   >
-                    <p className="font-semibold">{formatMs(segment.startMs)} - {formatMs(segment.endMs)}</p>
+                    <p className="font-semibold">
+                      {formatMs(segment.startMs)} - {formatMs(segment.endMs)}
+                    </p>
                     <p className="line-clamp-2 text-muted-foreground">{segment.text}</p>
                   </button>
                 ))
@@ -435,10 +752,10 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
           </CardContent>
         </Card>
 
-        <Card className="min-h-[540px]">
+        <Card className="min-h-[580px]">
           <CardHeader>
-            <CardTitle className="text-lg">Editor</CardTitle>
-            <CardDescription>Transcript actions are deterministic and ripple-safe.</CardDescription>
+            <CardTitle className="text-lg">Transcript Ops</CardTitle>
+            <CardDescription>Deterministic transcript patch operations with conservative ripple safety.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-2">
@@ -510,7 +827,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             {opResult ? (
               <div className="rounded-md border p-2 text-xs">
                 <p className="font-semibold">
-                  {opResult.suggestionsOnly ? "Suggestions only" : "Applied"} {opResult.revisionId ? `(rev ${opResult.revisionId.slice(0, 8)})` : ""}
+                  {opResult.suggestionsOnly ? "Suggestions only" : "Applied"}{" "}
+                  {opResult.revisionId ? `(rev ${opResult.revisionId.slice(0, 8)})` : ""}
                 </p>
                 {opResult.issues.length > 0 ? (
                   <ul className="mt-1 space-y-1 text-muted-foreground">
@@ -526,21 +844,43 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               </div>
             ) : null}
 
+            {timelineResult ? (
+              <div className="rounded-md border p-2 text-xs">
+                <p className="font-semibold">Timeline updated</p>
+                <p className="text-muted-foreground">
+                  Revision {timelineResult.revision}
+                  {timelineResult.revisionId ? ` (${timelineResult.revisionId.slice(0, 8)})` : ""}
+                </p>
+              </div>
+            ) : null}
+
             {panelError ? <p className="text-xs text-destructive">{panelError}</p> : null}
           </CardContent>
         </Card>
 
-        <Card className="min-h-[540px]">
+        <Card className="min-h-[580px]">
           <CardHeader>
             <CardTitle className="text-lg">Preview + Timeline</CardTitle>
-            <CardDescription>Read-only timeline rail in Phase 1 with render support.</CardDescription>
+            <CardDescription>Interactive timeline controls (split/trim/move/reorder) with keyboard shortcuts.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {previewAsset ? (
-              <video src={previewAsset.signedUrl} controls playsInline className="aspect-[9/16] w-full rounded-md border object-cover" />
+              <video
+                ref={previewVideoRef}
+                src={previewAsset.signedUrl}
+                controls
+                playsInline
+                onTimeUpdate={(event) => setPlayheadMs(Math.floor(event.currentTarget.currentTime * 1000))}
+                className="aspect-[9/16] w-full rounded-md border object-cover"
+              />
             ) : (
               <div className="rounded-md border p-4 text-xs text-muted-foreground">No preview video asset yet.</div>
             )}
+
+            <div className="rounded-md border p-2 text-xs text-muted-foreground">
+              Shortcuts: <span className="font-semibold text-foreground">Space</span> play/pause, <span className="font-semibold text-foreground">J/K/L</span>{" "}
+              seek/pause, <span className="font-semibold text-foreground">S</span> split selected clip at playhead ({formatMs(playheadMs)}).
+            </div>
 
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={() => void loadProjectSurface()} disabled={busy !== null}>
@@ -570,21 +910,93 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               <p className="font-semibold">
                 Tracks {trackCount} • Clips {clipCount}
               </p>
-              <div className="mt-2 max-h-[180px] space-y-1 overflow-y-auto">
-                {timeline?.timeline.tracks.map((track) => (
-                  <div key={track.id} className="rounded border p-1">
-                    <p className="font-medium">
-                      {track.name} ({track.kind}) • {track.clips.length} clips
-                    </p>
-                    {track.clips.slice(0, 4).map((clip) => (
-                      <p key={clip.id} className="text-muted-foreground">
-                        {clip.label} [{formatMs(clip.timelineInMs)} - {formatMs(clip.timelineOutMs)}]
-                      </p>
-                    ))}
+
+              <div className="mt-2 max-h-[260px] space-y-1 overflow-y-auto">
+                {orderedTracks.map((track) => (
+                  <div key={track.id} className={`rounded border p-1 ${track.id === selectedTrackId ? "border-primary" : ""}`}>
+                    <div className="flex items-center justify-between gap-1">
+                      <button
+                        type="button"
+                        className="text-left font-medium"
+                        onClick={() => {
+                          setSelectedTrackId(track.id);
+                          if (track.clips[0]) {
+                            syncSelectedClipDraft(track.id, track.clips[0].id);
+                          }
+                        }}
+                      >
+                        {track.name} ({track.kind}) • {track.clips.length} clips
+                      </button>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => void reorderTrack(track.id, track.order, -1)}>
+                          ↑
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => void reorderTrack(track.id, track.order, 1)}>
+                          ↓
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="mt-1 space-y-1">
+                      {track.clips.slice(0, 8).map((clip) => (
+                        <button
+                          key={clip.id}
+                          type="button"
+                          className={`w-full rounded border px-1 py-0.5 text-left ${clip.id === selectedClipId ? "border-primary bg-primary/10" : ""}`}
+                          onClick={() => syncSelectedClipDraft(track.id, clip.id)}
+                        >
+                          {(clip.label ?? "Untitled clip").slice(0, 36)} [{formatMs(clip.timelineInMs)} - {formatMs(clip.timelineOutMs)}]
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ))}
-                {!timeline?.timeline.tracks.length ? <p className="text-muted-foreground">Timeline is empty.</p> : null}
+                {!orderedTracks.length ? <p className="text-muted-foreground">Timeline is empty.</p> : null}
               </div>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Selected clip controls</p>
+              {selectedTrack && selectedClip ? (
+                <div className="mt-2 space-y-2">
+                  <p className="text-muted-foreground">
+                    {selectedTrack.name} • {(selectedClip.label ?? "Untitled clip").slice(0, 40)}
+                  </p>
+
+                  <div className="grid gap-2 grid-cols-2">
+                    <Input value={clipMoveInMs} onChange={(event) => setClipMoveInMs(event.target.value)} placeholder="timelineInMs" />
+                    <Input value={clipDurationMs} onChange={(event) => setClipDurationMs(event.target.value)} placeholder="durationMs" />
+                  </div>
+
+                  <div className="grid gap-2 grid-cols-2">
+                    <Input value={trimStartMs} onChange={(event) => setTrimStartMs(event.target.value)} placeholder="trimStartMs" />
+                    <Input value={trimEndMs} onChange={(event) => setTrimEndMs(event.target.value)} placeholder="trimEndMs" />
+                  </div>
+
+                  <div className="grid gap-2 grid-cols-2">
+                    <Button size="sm" onClick={runTimelineMove} disabled={busy !== null}>
+                      Move Clip
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={runTimelineSetTiming} disabled={busy !== null}>
+                      Set Timing
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={runTimelineTrim} disabled={busy !== null}>
+                      Trim Clip
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={runTimelineSplit} disabled={busy !== null}>
+                      Split at Playhead
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={runTimelineMerge} disabled={busy !== null}>
+                      Merge Next
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={runTimelineRemove} disabled={busy !== null}>
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-1 text-muted-foreground">Select a clip to enable timeline controls.</p>
+              )}
             </div>
           </CardContent>
         </Card>
