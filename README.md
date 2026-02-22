@@ -52,6 +52,10 @@ Required variables are documented in `.env.example`.
 
 Slice 1 cutover flags:
 - `ENABLE_PROJECTS_V2=true` enables `/api/projects-v2` namespace.
+- `ENABLE_OPENCUT_EDITOR=false` toggles OpenCut-shell cohort routing scaffolding.
+- `OPENCUT_EDITOR_COHORT=internal|beta|all` controls who gets the OpenCut shell path.
+- `OPENCUT_EDITOR_INTERNAL_DOMAIN=hookforge.local` marks internal cohort email-domain gate.
+- `OPENCUT_EDITOR_BETA_ALLOWLIST=` comma-separated beta allowlist emails.
 - `NEXT_PUBLIC_AI_EDITOR_DEFAULT=true` makes AI editor creation the dashboard default CTA.
 - `NEXT_PUBLIC_SHOW_TEMPLATES_NAV=false` relabels top-nav template entry to Quick Start.
 - `AI_EDITOR_DEFAULT_TEMPLATE_SLUG=green-screen-commentator` fallback template for seeded AI-editor project creation.
@@ -118,6 +122,7 @@ Growth Lab: `http://localhost:3000/growth`
 Localization Lab: `http://localhost:3000/localization`
 Launch Console: `http://localhost:3000/launch`
 Mobile Beta Guide: `http://localhost:3000/mobile`
+OpenCut shell entrypoint (cohort gated): `http://localhost:3000/opencut/projects-v2/<projectV2Id>`
 
 ## End-to-End Render Flow
 
@@ -284,6 +289,34 @@ The repository now includes parity-ready foundations for the 12-month roadmap:
 Important:
 - URL ingestion endpoints are implemented as rights-attested scaffolding and queue jobs.
 - No direct ripping/downloading logic from social platforms is implemented in this repo.
+
+## OpenCut Adoption Phase 0 (Implemented)
+
+Implemented for the OpenCut adoption track:
+
+- OpenCut editor feature-flag scaffolding in env + cutover logic (`ENABLE_OPENCUT_EDITOR`, `OPENCUT_EDITOR_COHORT`, internal/beta gates)
+- Project-v2 shell resolution helper (`LEGACY` vs `OPENCUT`) with cohort evaluation by user email
+- Public compliance docs for OpenCut fork/legal baseline tracking:
+  - `docs/legal/OPENCUT_LICENSE_COMPLIANCE.md`
+  - `docs/legal/OPENCUT_UPSTREAM_BASELINE.md`
+- Upstream sync automation script:
+  - `scripts/sync-opencut-upstream.sh`
+  - `pnpm opencut:sync-upstream`
+
+## OpenCut Adoption Phase 1 (Implemented)
+
+Implemented:
+
+- Added cohort-aware projects-v2 entrypoint resolver for `LEGACY` vs `OPENCUT` shell routing.
+- Added transcript-first OpenCut editor shell route:
+  - `/opencut/projects-v2/[id]`
+- Added OpenCut client adapter for HookForge APIs:
+  - `lib/opencut/hookforge-client.ts`
+- Wired `/projects-v2/[id]` to redirect users by shell cohort and legacy bridge availability.
+- Updated projects-v2 API payloads with `editorShell` + cohort-resolved `entrypointPath`.
+- Added OpenCut adapter and cutover tests:
+  - `tests/opencut-client.test.ts`
+  - `tests/editor-cutover.test.ts`
 
 ## Phase 1 Manual Editor (Completed)
 

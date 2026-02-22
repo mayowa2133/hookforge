@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
-import { projectsV2FeatureFlags, normalizeEditorCreationMode } from "@/lib/editor-cutover";
+import { buildProjectsV2EntrypointPath, projectsV2FeatureFlags, resolveProjectsV2EditorShell, normalizeEditorCreationMode } from "@/lib/editor-cutover";
 import { routeErrorToResponse } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { createProjectV2WithInitialRevision, ensureProjectV2FromLegacy } from "@/lib/project-v2";
@@ -95,6 +95,7 @@ export async function GET() {
 
     const projects = projectV2List.map((project) => {
       const legacy = project.legacyProjectId ? legacyById.get(project.legacyProjectId) : null;
+      const editorShell = resolveProjectsV2EditorShell(user.email, projectsV2FeatureFlags);
       return {
         id: project.id,
         title: project.title,
@@ -104,7 +105,13 @@ export async function GET() {
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
         currentRevision: project.currentRevision,
-        entrypointPath: legacy ? `/projects/${legacy.id}` : `/projects-v2/${project.id}`,
+        editorShell,
+        entrypointPath: buildProjectsV2EntrypointPath({
+          projectV2Id: project.id,
+          legacyProjectId: legacy?.id ?? null,
+          userEmail: user.email,
+          flags: projectsV2FeatureFlags
+        }),
         legacy
       };
     });
@@ -162,15 +169,16 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json({
-        project: {
-          id: projectV2.id,
-          title: projectV2.title,
-          status: projectV2.status,
-          mode,
-          legacyProjectId: null,
-          entrypointPath: `/projects-v2/${projectV2.id}`,
-          seededFromTemplate: null
-        }
+      project: {
+        id: projectV2.id,
+        title: projectV2.title,
+        status: projectV2.status,
+        mode,
+        legacyProjectId: null,
+        editorShell: resolveProjectsV2EditorShell(user.email, projectsV2FeatureFlags),
+        entrypointPath: `/projects-v2/${projectV2.id}`,
+        seededFromTemplate: null
+      }
       }, { status: 201 });
     }
 
@@ -209,7 +217,13 @@ export async function POST(request: Request) {
         status: projectV2.status,
         mode,
         legacyProjectId: legacyProject.id,
-        entrypointPath: `/projects/${legacyProject.id}`,
+        editorShell: resolveProjectsV2EditorShell(user.email, projectsV2FeatureFlags),
+        entrypointPath: buildProjectsV2EntrypointPath({
+          projectV2Id: projectV2.id,
+          legacyProjectId: legacyProject.id,
+          userEmail: user.email,
+          flags: projectsV2FeatureFlags
+        }),
         seededFromTemplate: {
           id: template.id,
           slug: template.slug,

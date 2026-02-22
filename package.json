@@ -18,6 +18,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:backfill:projects-v2": "tsx scripts/backfill-projects-v2.ts",
     "db:backfill:transcript-segments": "tsx scripts/backfill-transcript-segments.ts",
+    "opencut:sync-upstream": "bash scripts/sync-opencut-upstream.sh",
     "api:key": "tsx scripts/create-api-key.ts",
     "test": "vitest run --maxWorkers=1 --minWorkers=1",
     "test:watch": "vitest",

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
-import { projectsV2FeatureFlags } from "@/lib/editor-cutover";
+import { buildProjectsV2EntrypointPath, projectsV2FeatureFlags, resolveProjectsV2EditorShell } from "@/lib/editor-cutover";
 import { prisma } from "@/lib/prisma";
 
 type PageProps = {
@@ -36,8 +36,16 @@ export default async function ProjectV2Page({ params }: PageProps) {
     notFound();
   }
 
-  if (project.legacyProjectId) {
-    redirect(`/projects/${project.legacyProjectId}`);
+  const editorShell = resolveProjectsV2EditorShell(user.email, projectsV2FeatureFlags);
+  const entrypointPath = buildProjectsV2EntrypointPath({
+    projectV2Id: project.id,
+    legacyProjectId: project.legacyProjectId,
+    userEmail: user.email,
+    flags: projectsV2FeatureFlags
+  });
+
+  if (entrypointPath !== `/projects-v2/${project.id}`) {
+    redirect(entrypointPath);
   }
 
   return (
@@ -53,6 +61,10 @@ export default async function ProjectV2Page({ params }: PageProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            Active editor shell: <span className="font-semibold text-foreground">{editorShell}</span> (cohort:{" "}
+            <span className="font-semibold text-foreground">{projectsV2FeatureFlags.opencutEditorCohort}</span>)
+          </p>
           <p>
             The full freeform timeline UI will land in the next slice. For now, use Quick Start templates to jump directly into the
             current editor stack.

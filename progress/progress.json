@@ -80,6 +80,18 @@
       "details": "Named queues, AI job abstraction, provider registry, and worker execution loop integrated"
     },
     {
+      "id": "opencut_phase0_foundation",
+      "title": "OpenCut adoption Phase 0 foundation",
+      "status": "DONE",
+      "details": "Added OpenCut rollout flags/cohort gates, legal compliance docs, and upstream sync script scaffolding"
+    },
+    {
+      "id": "opencut_phase1_shell_transcript",
+      "title": "OpenCut adoption Phase 1 shell + transcript-first integration",
+      "status": "DONE",
+      "details": "Implemented /opencut/projects-v2/[id] transcript-first shell, projects-v2 cohort routing, HookForge OpenCut API adapter, and validated with unit + e2e slice12 regression"
+    },
+    {
       "id": "phase1_timeline_editor",
       "title": "Phase 1 manual timeline editor parity",
       "status": "DONE",

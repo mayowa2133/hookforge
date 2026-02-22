@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { projectsV2FeatureFlags } from "@/lib/editor-cutover";
+import { buildProjectsV2EntrypointPath, projectsV2FeatureFlags, resolveProjectsV2EditorShell } from "@/lib/editor-cutover";
 import { routeErrorToResponse } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 
@@ -77,7 +77,13 @@ export async function GET(_request: Request, { params }: Context) {
     return NextResponse.json({
       project: {
         ...project,
-        entrypointPath: legacyProject ? `/projects/${legacyProject.id}` : `/projects-v2/${project.id}`,
+        editorShell: resolveProjectsV2EditorShell(user.email, projectsV2FeatureFlags),
+        entrypointPath: buildProjectsV2EntrypointPath({
+          projectV2Id: project.id,
+          legacyProjectId: legacyProject?.id ?? null,
+          userEmail: user.email,
+          flags: projectsV2FeatureFlags
+        }),
         legacyProject
       }
     });

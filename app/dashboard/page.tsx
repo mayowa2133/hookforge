@@ -6,7 +6,7 @@ import { CreateAiProjectButton } from "@/components/dashboard/create-ai-project-
 import { CreateProjectButton } from "@/components/dashboard/create-project-button";
 import { ReferenceAnalyzer } from "@/components/dashboard/reference-analyzer";
 import { getCurrentUser } from "@/lib/auth";
-import { projectsV2FeatureFlags } from "@/lib/editor-cutover";
+import { buildProjectsV2EntrypointPath, projectsV2FeatureFlags, resolveProjectsV2EditorShell } from "@/lib/editor-cutover";
 import { prisma } from "@/lib/prisma";
 import { parseTemplateSlotSchema } from "@/lib/template-runtime";
 import { ensurePersonalWorkspace } from "@/lib/workspaces";
@@ -77,14 +77,21 @@ export default async function DashboardPage() {
 
   const projectsV2 = projectsV2Raw.map((projectV2) => {
     const legacy = projectV2.legacyProjectId ? legacyById.get(projectV2.legacyProjectId) ?? null : null;
+    const editorShell = resolveProjectsV2EditorShell(user.email, projectsV2FeatureFlags);
     return {
       id: projectV2.id,
       title: projectV2.title,
       status: projectV2.status,
       updatedAt: projectV2.updatedAt,
       currentRevision: projectV2.currentRevision,
+      editorShell,
       legacyTemplateName: legacy?.template?.name ?? null,
-      entrypointPath: legacy ? `/projects/${legacy.id}` : `/projects-v2/${projectV2.id}`
+      entrypointPath: buildProjectsV2EntrypointPath({
+        projectV2Id: projectV2.id,
+        legacyProjectId: legacy?.id ?? null,
+        userEmail: user.email,
+        flags: projectsV2FeatureFlags
+      })
     };
   });
 
@@ -130,7 +137,10 @@ export default async function DashboardPage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold">AI Editor Projects</h2>
-            <p className="text-xs text-muted-foreground">Projects-v2 namespace with legacy editor bridge.</p>
+            <p className="text-xs text-muted-foreground">
+              Projects-v2 namespace with legacy bridge. OpenCut flag:{" "}
+              {projectsV2FeatureFlags.opencutEditorEnabled ? "ON" : "OFF"} ({projectsV2FeatureFlags.opencutEditorCohort})
+            </p>
           </div>
           {projectsV2.length === 0 ? (
             <Card>
@@ -154,7 +164,8 @@ export default async function DashboardPage() {
                       <Badge>{project.status}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Revision {project.currentRevision?.revisionNumber ?? 0} • Updated {project.updatedAt.toLocaleString()}
+                      Revision {project.currentRevision?.revisionNumber ?? 0} • Updated {project.updatedAt.toLocaleString()} •
+                      Shell {project.editorShell}
                     </p>
                     <Link
                       href={project.entrypointPath}
