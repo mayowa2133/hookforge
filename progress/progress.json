@@ -110,6 +110,12 @@
       "details": "Added slot-aware media import in OpenCut shell (presign/upload/register), required-slot readiness gating for render, and finalized export panel with end-to-end validation via tests + e2e slice12"
     },
     {
+      "id": "opencut_phase5_rollout_metrics",
+      "title": "OpenCut adoption Phase 5 rollout telemetry + success/error metrics",
+      "status": "DONE",
+      "details": "Implemented OpenCut telemetry and metrics APIs, wired shell event tracking for editor/transcript/chat/render flows, surfaced 24h rollout snapshot in UI, and validated via unit + e2e slice12 regression"
+    },
+    {
       "id": "phase1_timeline_editor",
       "title": "Phase 1 manual timeline editor parity",
       "status": "DONE",

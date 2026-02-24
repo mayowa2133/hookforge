@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   autoTranscript,
   getProjectV2,
+  getOpenCutMetrics,
   patchTimeline,
   patchTranscript,
   presignProjectAsset,
   registerProjectAsset,
   runChatEdit,
   startRender,
+  trackOpenCutTelemetry,
   undoChatEdit
 } from "@/lib/opencut/hookforge-client";
 
@@ -231,5 +233,44 @@ describe("opencut hookforge client", () => {
         method: "POST"
       })
     );
+  });
+
+  it("tracks opencut telemetry events", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        tracked: true,
+        eventId: "evt_1",
+        createdAt: new Date().toISOString()
+      })
+    );
+
+    await trackOpenCutTelemetry({
+      projectId: "pv2_9",
+      event: "render_start",
+      outcome: "INFO",
+      metadata: { source: "test" }
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/opencut/telemetry",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  it("fetches opencut metrics snapshot", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        windowHours: 24,
+        totalEvents: 2,
+        generatedAt: new Date().toISOString(),
+        metrics: []
+      })
+    );
+
+    const payload = await getOpenCutMetrics(24);
+    expect(payload.windowHours).toBe(24);
+    expect(fetchSpy).toHaveBeenCalledWith("/api/opencut/metrics?windowHours=24", undefined);
   });
 });

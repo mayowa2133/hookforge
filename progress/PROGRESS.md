@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-24T07:17:54.405Z
+Last updated: 2026-02-24T07:30:35.449Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -38,6 +38,8 @@ Last updated: 2026-02-24T07:17:54.405Z
   - Integrated chat-edit apply/undo into OpenCut shell with execution mode feedback, fallback/safety issues, operation summaries, AI job polling, and validated via unit + e2e slice12 regression
 - [x] OpenCut adoption Phase 4 media upload + export/render flow
   - Added slot-aware media import in OpenCut shell (presign/upload/register), required-slot readiness gating for render, and finalized export panel with end-to-end validation via tests + e2e slice12
+- [x] OpenCut adoption Phase 5 rollout telemetry + success/error metrics
+  - Implemented OpenCut telemetry and metrics APIs, wired shell event tracking for editor/transcript/chat/render flows, surfaced 24h rollout snapshot in UI, and validated via unit + e2e slice12 regression
 - [x] Phase 1 manual timeline editor parity
   - Timeline editor now ships split/merge/reorder/trim/transitions/keyframes, multi-track audio (voiceover/music/sfx + bundled library), media overlay transforms, export presets, and project revision history with timeline-aware preview/render wiring
 - [x] Phase 2 captions, AI edit, and chat edit

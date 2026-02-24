@@ -388,6 +388,31 @@ Implemented:
   - `pnpm test`
   - `pnpm test:e2e:slice12`
 
+## OpenCut Adoption Phase 5 (Implemented)
+
+Implemented:
+
+- Added OpenCut telemetry ingestion API:
+  - `POST /api/opencut/telemetry`
+  - tracks: `editor_open`, `transcript_edit_apply`, `chat_edit_apply`, `render_start`, `render_done`, `render_error`
+- Added OpenCut metrics summary API:
+  - `GET /api/opencut/metrics?windowHours=24`
+  - returns per-event totals + success/error split + success rate
+- Integrated telemetry emission in OpenCut shell:
+  - editor open tracking
+  - transcript apply success/error tracking
+  - chat apply success/error tracking
+  - render start/done/error tracking
+- Added rollout visibility panel in OpenCut shell with 24h success/error snapshot.
+- Rollback mechanism remains immediate via:
+  - `ENABLE_OPENCUT_EDITOR=false`
+  - or cohort controls (`OPENCUT_EDITOR_COHORT=internal|beta|all`)
+- Validation coverage updated:
+  - `tests/opencut-client.test.ts`
+  - `tests/opencut-metrics.test.ts`
+  - `pnpm test`
+  - `pnpm test:e2e:slice12`
+
 ## Phase 1 Manual Editor (Completed)
 
 Implemented and wired into preview + cloud render:

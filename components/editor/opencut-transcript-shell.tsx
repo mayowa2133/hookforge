@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
   autoTranscript,
+  getOpenCutMetrics,
   getAiJob,
   getLegacyProject,
   getRenderJob,
@@ -21,9 +22,11 @@ import {
   registerProjectAsset,
   runChatEdit,
   startRender,
+  trackOpenCutTelemetry,
   undoChatEdit,
   type ChatEditResponse,
   type LegacyProjectPayload,
+  type OpenCutMetricsResponse,
   type TimelineOperation,
   type TimelinePayload,
   type TranscriptPayload
@@ -131,6 +134,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [chatUndoResult, setChatUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
   const [chatJobId, setChatJobId] = useState<string | null>(null);
   const [chatJobStatus, setChatJobStatus] = useState<{ status: string; progress: number } | null>(null);
+  const [opencutMetrics, setOpencutMetrics] = useState<OpenCutMetricsResponse | null>(null);
   const [uploadingSlotKey, setUploadingSlotKey] = useState<string | null>(null);
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const [deleteStartMs, setDeleteStartMs] = useState("0");
@@ -142,6 +146,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [playheadMs, setPlayheadMs] = useState(0);
 
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const editorOpenTrackedRef = useRef(false);
+  const renderCompletionEventTrackedRef = useRef<string | null>(null);
 
   const selectedSegment = useMemo(
     () => transcript?.segments.find((segment) => segment.id === selectedSegmentId) ?? null,
@@ -179,6 +185,32 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     [assetBySlot, slotDefinitions]
   );
   const canRender = missingRequiredSlots.length === 0 && project?.status !== "RENDERING";
+
+  const trackOpenCutEvent = async (
+    event: "editor_open" | "transcript_edit_apply" | "chat_edit_apply" | "render_start" | "render_done" | "render_error",
+    outcome: "SUCCESS" | "ERROR" | "INFO",
+    metadata?: Record<string, unknown>
+  ) => {
+    try {
+      await trackOpenCutTelemetry({
+        projectId: projectV2Id,
+        event,
+        outcome,
+        metadata
+      });
+    } catch {
+      // Telemetry should never block editing flows.
+    }
+  };
+
+  const refreshOpenCutMetrics = async () => {
+    try {
+      const payload = await getOpenCutMetrics(24);
+      setOpencutMetrics(payload);
+    } catch {
+      // Metrics are non-blocking UI observability.
+    }
+  };
 
   const loadProjectSurface = async () => {
     const [projectPayload, timelinePayload] = await Promise.all([getLegacyProject(projectV2Id), getTimeline(projectV2Id)]);
@@ -242,6 +274,25 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       canceled = true;
     };
   }, [projectV2Id, language]);
+
+  useEffect(() => {
+    if (!project || editorOpenTrackedRef.current) {
+      return;
+    }
+    editorOpenTrackedRef.current = true;
+    void trackOpenCutEvent("editor_open", "SUCCESS", {
+      templateSlug: project.template.slug,
+      templateName: project.template.name
+    });
+  }, [project]);
+
+  useEffect(() => {
+    void refreshOpenCutMetrics();
+    const interval = setInterval(() => {
+      void refreshOpenCutMetrics();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!orderedTracks.length) {
@@ -308,10 +359,29 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         const payload = await getRenderJob(renderJobId);
         setRenderStatus(payload.renderJob);
         if (payload.renderJob.status === "DONE" || payload.renderJob.status === "ERROR") {
+          if (renderCompletionEventTrackedRef.current !== renderJobId) {
+            renderCompletionEventTrackedRef.current = renderJobId;
+            if (payload.renderJob.status === "DONE") {
+              void trackOpenCutEvent("render_done", "SUCCESS", {
+                renderJobId,
+                progress: payload.renderJob.progress
+              });
+            } else {
+              void trackOpenCutEvent("render_error", "ERROR", {
+                renderJobId,
+                progress: payload.renderJob.progress
+              });
+            }
+            void refreshOpenCutMetrics();
+          }
           await loadProjectSurface();
           setRenderJobId(null);
         }
       } catch (error) {
+        void trackOpenCutEvent("render_error", "ERROR", {
+          renderJobId,
+          phase: "poll"
+        });
         setPanelError(error instanceof Error ? error.message : "Failed to poll render job");
         setRenderJobId(null);
       }
@@ -480,7 +550,16 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         revisionId: payload.revisionId
       });
       await Promise.all([loadTranscript(), loadProjectSurface()]);
+      void trackOpenCutEvent("transcript_edit_apply", "SUCCESS", {
+        operationCount: operations.length,
+        suggestionsOnly: payload.suggestionsOnly,
+        issueCount: payload.issues.length
+      });
+      void refreshOpenCutMetrics();
     } catch (error) {
+      void trackOpenCutEvent("transcript_edit_apply", "ERROR", {
+        operationCount: operations.length
+      });
       setPanelError(error instanceof Error ? error.message : "Transcript operation failed");
     } finally {
       setBusy(null);
@@ -812,11 +891,20 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setChatUndoToken(payload.undoToken);
       setChatJobId(payload.aiJobId);
       setChatJobStatus({ status: "QUEUED", progress: 0 });
+      void trackOpenCutEvent("chat_edit_apply", "SUCCESS", {
+        executionMode: payload.executionMode,
+        plannedOperationCount: payload.plannedOperations.length,
+        constrainedSuggestionCount: payload.constrainedSuggestions.length
+      });
+      void refreshOpenCutMetrics();
 
       if (payload.executionMode === "APPLIED") {
         await Promise.all([loadProjectSurface(), loadTranscript()]);
       }
     } catch (error) {
+      void trackOpenCutEvent("chat_edit_apply", "ERROR", {
+        hasAttachments: attachmentAssetIds.length > 0
+      });
       setPanelError(error instanceof Error ? error.message : "Chat edit failed");
     } finally {
       setBusy(null);
@@ -853,6 +941,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setPanelError(null);
     try {
       const payload = await startRender(projectV2Id);
+      renderCompletionEventTrackedRef.current = null;
       setRenderJobId(payload.renderJob.id);
       setRenderStatus({
         status: payload.renderJob.status as "QUEUED" | "RUNNING" | "DONE" | "ERROR",
@@ -860,7 +949,14 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         outputUrl: null,
         errorMessage: null
       });
+      void trackOpenCutEvent("render_start", "INFO", {
+        renderJobId: payload.renderJob.id
+      });
+      void refreshOpenCutMetrics();
     } catch (error) {
+      void trackOpenCutEvent("render_error", "ERROR", {
+        phase: "start"
+      });
       setPanelError(error instanceof Error ? error.message : "Render failed to start");
     } finally {
       setBusy(null);
@@ -869,6 +965,13 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
 
   const trackCount = orderedTracks.length;
   const clipCount = orderedTracks.reduce((sum, track) => sum + track.clips.length, 0);
+  const metricByEvent = useMemo(() => {
+    const map = new Map<string, OpenCutMetricsResponse["metrics"][number]>();
+    for (const metric of opencutMetrics?.metrics ?? []) {
+      map.set(metric.event, metric);
+    }
+    return map;
+  }, [opencutMetrics]);
 
   return (
     <div className="-mx-2 space-y-4 md:-mx-4 lg:-mx-8">
@@ -1205,6 +1308,33 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             <div className="rounded-md border p-2 text-xs text-muted-foreground">
               Shortcuts: <span className="font-semibold text-foreground">Space</span> play/pause, <span className="font-semibold text-foreground">J/K/L</span>{" "}
               seek/pause, <span className="font-semibold text-foreground">S</span> split selected clip at playhead ({formatMs(playheadMs)}).
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">OpenCut Rollout Metrics (24h)</p>
+              {opencutMetrics ? (
+                <div className="mt-1 space-y-1 text-muted-foreground">
+                  <p>Total events: {opencutMetrics.totalEvents}</p>
+                  <p>
+                    Chat success:{" "}
+                    {metricByEvent.get("chat_edit_apply")?.successRate !== null
+                      ? `${Math.round((metricByEvent.get("chat_edit_apply")?.successRate ?? 0) * 100)}%`
+                      : "n/a"}
+                  </p>
+                  <p>
+                    Transcript success:{" "}
+                    {metricByEvent.get("transcript_edit_apply")?.successRate !== null
+                      ? `${Math.round((metricByEvent.get("transcript_edit_apply")?.successRate ?? 0) * 100)}%`
+                      : "n/a"}
+                  </p>
+                  <p>
+                    Render starts: {metricByEvent.get("render_start")?.total ?? 0} • done: {metricByEvent.get("render_done")?.total ?? 0} • errors:{" "}
+                    {metricByEvent.get("render_error")?.total ?? 0}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-1 text-muted-foreground">Metrics unavailable.</p>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

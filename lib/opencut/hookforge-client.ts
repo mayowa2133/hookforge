@@ -263,6 +263,27 @@ export type ChatEditUndoResponse = {
   appliedRevisionId: string;
 };
 
+type OpenCutTelemetryRequest = {
+  projectId: string;
+  event: "editor_open" | "transcript_edit_apply" | "chat_edit_apply" | "render_start" | "render_done" | "render_error";
+  outcome?: "SUCCESS" | "ERROR" | "INFO";
+  metadata?: Record<string, unknown>;
+};
+
+export type OpenCutMetricsResponse = {
+  windowHours: number;
+  totalEvents: number;
+  generatedAt: string;
+  metrics: Array<{
+    event: "editor_open" | "transcript_edit_apply" | "chat_edit_apply" | "render_start" | "render_done" | "render_error";
+    total: number;
+    success: number;
+    error: number;
+    info: number;
+    successRate: number | null;
+  }>;
+};
+
 async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
   const payload = (await response.json()) as T & ApiErrorPayload;
@@ -351,6 +372,18 @@ export async function undoChatEdit(projectIdOrV2Id: string, body: ChatEditUndoRe
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+}
+
+export async function trackOpenCutTelemetry(body: OpenCutTelemetryRequest) {
+  return requestJson<{ tracked: boolean; eventId: string; createdAt: string }>(`/api/opencut/telemetry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getOpenCutMetrics(windowHours = 24) {
+  return requestJson<OpenCutMetricsResponse>(`/api/opencut/metrics?windowHours=${windowHours}`);
 }
 
 export async function startRender(projectIdOrV2Id: string) {
