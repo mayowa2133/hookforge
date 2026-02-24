@@ -26,6 +26,21 @@ export type LegacyProjectPayload = {
     id: string;
     title: string;
     status: string;
+    template: {
+      id: string;
+      slug: string;
+      name: string;
+      slotSchema: {
+        slots: Array<{
+          key: string;
+          label: string;
+          kinds: Array<"VIDEO" | "IMAGE" | "AUDIO">;
+          required: boolean;
+          minDurationSec?: number;
+          helpText?: string;
+        }>;
+      };
+    };
     assets: Array<{
       id: string;
       slotKey: string;
@@ -164,8 +179,46 @@ type ChatEditRequest = {
   attachmentAssetIds?: string[];
 };
 
+type AssetPresignRequest = {
+  slotKey: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+type AssetRegisterRequest = {
+  slotKey: string;
+  storageKey: string;
+  mimeType: string;
+};
+
 type ChatEditUndoRequest = {
   undoToken: string;
+};
+
+export type AssetPresignResponse = {
+  uploadUrl: string;
+  storageKey: string;
+  method: "PUT";
+  headers: {
+    "Content-Type": string;
+  };
+};
+
+export type AssetRegisterResponse = {
+  asset: {
+    id: string;
+    slotKey: string;
+    kind: "VIDEO" | "IMAGE" | "AUDIO";
+    signedUrl: string;
+    durationSec: number | null;
+    mimeType: string;
+  };
+  project: {
+    id: string;
+    status: "DRAFT" | "READY" | "RENDERING" | "DONE" | "ERROR";
+  };
+  missingSlotKeys: string[];
 };
 
 export type ChatEditResponse = {
@@ -263,6 +316,22 @@ export async function patchTranscript(projectV2Id: string, body: TranscriptPatch
     }>;
   }>(`/api/projects-v2/${projectV2Id}/transcript`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function presignProjectAsset(projectIdOrV2Id: string, body: AssetPresignRequest) {
+  return requestJson<AssetPresignResponse>(`/api/projects/${projectIdOrV2Id}/assets/presign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function registerProjectAsset(projectIdOrV2Id: string, body: AssetRegisterRequest) {
+  return requestJson<AssetRegisterResponse>(`/api/projects/${projectIdOrV2Id}/assets/register`, {
+    method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });

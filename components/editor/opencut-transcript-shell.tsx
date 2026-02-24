@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,8 @@ import {
   getTranscript,
   patchTimeline,
   patchTranscript,
+  presignProjectAsset,
+  registerProjectAsset,
   runChatEdit,
   startRender,
   undoChatEdit,
@@ -80,6 +82,15 @@ function summarizeOps(ops: ChatEditResponse["plannedOperations"], max = 4) {
   return lines;
 }
 
+function acceptForKinds(kinds: Array<"VIDEO" | "IMAGE" | "AUDIO">) {
+  const map: Record<"VIDEO" | "IMAGE" | "AUDIO", string> = {
+    VIDEO: "video/*",
+    IMAGE: "image/*",
+    AUDIO: "audio/*"
+  };
+  return kinds.map((kind) => map[kind]).join(",");
+}
+
 export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, status }: OpenCutTranscriptShellProps) {
   const [project, setProject] = useState<LegacyProjectPayload["project"] | null>(null);
   const [timeline, setTimeline] = useState<TimelinePayload | null>(null);
@@ -120,6 +131,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [chatUndoResult, setChatUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
   const [chatJobId, setChatJobId] = useState<string | null>(null);
   const [chatJobStatus, setChatJobStatus] = useState<{ status: string; progress: number } | null>(null);
+  const [uploadingSlotKey, setUploadingSlotKey] = useState<string | null>(null);
+  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const [deleteStartMs, setDeleteStartMs] = useState("0");
   const [deleteEndMs, setDeleteEndMs] = useState("220");
   const [clipMoveInMs, setClipMoveInMs] = useState("0");
@@ -153,6 +166,19 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   }, [selectedTrack, selectedClipId]);
 
   const previewAsset = useMemo(() => pickPreviewAsset(project), [project]);
+  const slotDefinitions = useMemo(() => project?.template.slotSchema.slots ?? [], [project?.template.slotSchema.slots]);
+  const assetBySlot = useMemo(() => {
+    const entries = new Map<string, LegacyProjectPayload["project"]["assets"][number]>();
+    for (const asset of project?.assets ?? []) {
+      entries.set(asset.slotKey, asset);
+    }
+    return entries;
+  }, [project?.assets]);
+  const missingRequiredSlots = useMemo(
+    () => slotDefinitions.filter((slot) => slot.required && !assetBySlot.get(slot.key)).map((slot) => slot.key),
+    [assetBySlot, slotDefinitions]
+  );
+  const canRender = missingRequiredSlots.length === 0 && project?.status !== "RENDERING";
 
   const loadProjectSurface = async () => {
     const [projectPayload, timelinePayload] = await Promise.all([getLegacyProject(projectV2Id), getTimeline(projectV2Id)]);
@@ -711,6 +737,56 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     );
   };
 
+  const uploadSlotAsset = async (slotKey: string, file: File) => {
+    const mimeType = file.type || "application/octet-stream";
+    setUploadingSlotKey(slotKey);
+    setUploadErrors((current) => ({ ...current, [slotKey]: "" }));
+    setPanelError(null);
+
+    try {
+      const presign = await presignProjectAsset(projectV2Id, {
+        slotKey,
+        fileName: file.name,
+        mimeType,
+        sizeBytes: file.size
+      });
+
+      const uploadResponse = await fetch(presign.uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": mimeType
+        },
+        body: file
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed with status ${uploadResponse.status}`);
+      }
+
+      await registerProjectAsset(projectV2Id, {
+        slotKey,
+        storageKey: presign.storageKey,
+        mimeType
+      });
+
+      await Promise.all([loadProjectSurface(), loadTranscript()]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed";
+      setUploadErrors((current) => ({ ...current, [slotKey]: message }));
+      setPanelError(message);
+    } finally {
+      setUploadingSlotKey(null);
+    }
+  };
+
+  const onSlotFileChange = async (slotKey: string, event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) {
+      return;
+    }
+    await uploadSlotAsset(slotKey, file);
+  };
+
   const applyChatEdit = async () => {
     if (chatPrompt.trim().length < 4) {
       setPanelError("Chat prompt must be at least 4 characters.");
@@ -799,7 +875,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       <div className="rounded-xl border bg-background/95 p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">OpenCut Shell (Phase 3)</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">OpenCut Shell (Phase 4)</p>
             <h1 className="text-2xl font-black" style={{ fontFamily: "var(--font-heading)" }}>
               {title}
             </h1>
@@ -808,7 +884,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">Transcript-first + timeline + AI chat editor</Badge>
+            <Badge variant="outline">Transcript-first + timeline + AI chat + media import/export</Badge>
             <Badge variant="secondary">V2 ID: {projectV2Id.slice(0, 8)}</Badge>
           </div>
         </div>
@@ -834,6 +910,55 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   <Progress value={autoJobStatus.progress} />
                 </div>
               ) : null}
+            </div>
+
+            <div className="space-y-2 rounded-md border p-2">
+              <p className="text-xs font-semibold">Media Import</p>
+              <p className="text-xs text-muted-foreground">
+                Upload your own assets only. Templates are structure blueprints; you must have rights to all uploaded media.
+              </p>
+              <div className="max-h-[180px] space-y-2 overflow-y-auto">
+                {slotDefinitions.map((slot) => {
+                  const currentAsset = assetBySlot.get(slot.key);
+                  const busyThisSlot = uploadingSlotKey === slot.key;
+                  return (
+                    <div key={slot.key} className="rounded-md border p-2">
+                      <div className="mb-1 flex items-center justify-between gap-1">
+                        <p className="text-xs font-medium">
+                          {slot.label} <span className="text-muted-foreground">({slot.key})</span>
+                        </p>
+                        <Badge variant={currentAsset ? "secondary" : "outline"}>
+                          {currentAsset ? "Uploaded" : slot.required ? "Required" : "Optional"}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="file"
+                          className="h-8"
+                          accept={acceptForKinds(slot.kinds)}
+                          disabled={busyThisSlot}
+                          onChange={(event) => {
+                            void onSlotFileChange(slot.key, event);
+                          }}
+                        />
+                        <span className="text-[11px] text-muted-foreground">{busyThisSlot ? "Uploading..." : slot.kinds.join("/")}</span>
+                      </div>
+                      {slot.helpText ? <p className="mt-1 text-[11px] text-muted-foreground">{slot.helpText}</p> : null}
+                      {currentAsset ? (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Current: {currentAsset.kind} • {currentAsset.mimeType}
+                        </p>
+                      ) : null}
+                      {uploadErrors[slot.key] ? <p className="mt-1 text-[11px] text-destructive">{uploadErrors[slot.key]}</p> : null}
+                    </div>
+                  );
+                })}
+              </div>
+              {missingRequiredSlots.length > 0 ? (
+                <p className="text-[11px] text-muted-foreground">Missing required slots: {missingRequiredSlots.join(", ")}</p>
+              ) : (
+                <p className="text-[11px] text-emerald-600">All required slots uploaded.</p>
+              )}
             </div>
 
             <div className="max-h-[440px] space-y-2 overflow-y-auto rounded-md border p-2">
@@ -1061,7 +1186,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         <Card className="min-h-[580px]">
           <CardHeader>
             <CardTitle className="text-lg">Preview + Timeline</CardTitle>
-            <CardDescription>Interactive timeline controls (split/trim/move/reorder) with keyboard shortcuts.</CardDescription>
+            <CardDescription>Interactive timeline controls plus final cloud render/export.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {previewAsset ? (
@@ -1086,10 +1211,14 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               <Button size="sm" onClick={() => void loadProjectSurface()} disabled={busy !== null}>
                 Refresh Timeline
               </Button>
-              <Button size="sm" variant="secondary" onClick={enqueueRender} disabled={busy !== null}>
+              <Button size="sm" variant="secondary" onClick={enqueueRender} disabled={busy !== null || !canRender}>
                 Render MP4
               </Button>
             </div>
+
+            {!canRender ? (
+              <p className="text-xs text-muted-foreground">Upload required slots before rendering: {missingRequiredSlots.join(", ")}</p>
+            ) : null}
 
             {renderStatus ? (
               <div className="space-y-1 rounded-md border p-2 text-xs">

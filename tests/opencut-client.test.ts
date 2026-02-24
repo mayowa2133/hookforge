@@ -4,6 +4,8 @@ import {
   getProjectV2,
   patchTimeline,
   patchTranscript,
+  presignProjectAsset,
+  registerProjectAsset,
   runChatEdit,
   startRender,
   undoChatEdit
@@ -118,6 +120,67 @@ describe("opencut hookforge client", () => {
 
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/projects/pv2_4/timeline",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  it("presigns upload through bridgeable projects endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        uploadUrl: "https://storage.local/upload",
+        storageKey: "projects/pv2_5/file.mp4",
+        method: "PUT",
+        headers: {
+          "Content-Type": "video/mp4"
+        }
+      })
+    );
+
+    const payload = await presignProjectAsset("pv2_5", {
+      slotKey: "main",
+      fileName: "clip.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 10123
+    });
+
+    expect(payload.storageKey).toContain("projects");
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/projects/pv2_5/assets/presign",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  it("registers uploaded asset through bridgeable projects endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        asset: {
+          id: "asset_1",
+          slotKey: "main",
+          kind: "VIDEO",
+          signedUrl: "https://storage.local/asset.mp4",
+          durationSec: 4.2,
+          mimeType: "video/mp4"
+        },
+        project: {
+          id: "proj_1",
+          status: "READY"
+        },
+        missingSlotKeys: []
+      })
+    );
+
+    const payload = await registerProjectAsset("pv2_6", {
+      slotKey: "main",
+      storageKey: "projects/pv2_6/clip.mp4",
+      mimeType: "video/mp4"
+    });
+    expect(payload.project.status).toBe("READY");
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/projects/pv2_6/assets/register",
       expect.objectContaining({
         method: "POST"
       })

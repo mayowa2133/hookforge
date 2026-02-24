@@ -368,6 +368,26 @@ Implemented:
   - `pnpm test`
   - `pnpm test:e2e:slice12`
 
+## OpenCut Adoption Phase 4 (Implemented)
+
+Implemented:
+
+- Added media upload flow directly in the OpenCut shell:
+  - required/optional slot cards from template slot schema
+  - direct `presign -> PUT upload -> register` flow per slot
+  - slot-level upload errors and status badges
+  - required-slot readiness summary before render
+- Added typed OpenCut client methods for upload/register:
+  - `presignProjectAsset()`
+  - `registerProjectAsset()`
+- Added render gating and export polish:
+  - final render button is blocked until required slots are uploaded
+  - render/export panel now surfaces readiness guidance and download output when done
+- Validation coverage updated:
+  - `tests/opencut-client.test.ts`
+  - `pnpm test`
+  - `pnpm test:e2e:slice12`
+
 ## Phase 1 Manual Editor (Completed)
 
 Implemented and wired into preview + cloud render:
