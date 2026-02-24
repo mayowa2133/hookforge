@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { isSupportedLanguage } from "@/lib/languages";
 import { jsonError, jsonOk, routeErrorToResponse } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
@@ -9,7 +9,6 @@ import {
   normalizeProfileName,
   setWorkspaceDefaultTranslationProfile
 } from "@/lib/translation-profiles";
-import { isAtLeastRole } from "@/lib/workspace-roles";
 
 export const runtime = "nodejs";
 
@@ -27,27 +26,12 @@ const UpdateProfileSchema = z.object({
   isDefault: z.boolean().optional()
 });
 
-async function requireProfileEditor(workspaceId: string, userId: string) {
-  const membership = await prisma.workspaceMember.findUnique({
-    where: {
-      workspaceId_userId: {
-        workspaceId,
-        userId
-      }
-    }
-  });
-
-  if (!membership || !isAtLeastRole(membership.role, "EDITOR")) {
-    throw new Error("Unauthorized");
-  }
-
-  return membership;
-}
-
 export async function PATCH(request: Request, { params }: Context) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    await requireProfileEditor(workspace.id, user.id);
+    const { workspace } = await requireWorkspaceCapability({
+      capability: "translation_profiles.write",
+      request
+    });
 
     const body = UpdateProfileSchema.parse(await request.json());
 
@@ -94,10 +78,12 @@ export async function PATCH(request: Request, { params }: Context) {
   }
 }
 
-export async function DELETE(_request: Request, { params }: Context) {
+export async function DELETE(request: Request, { params }: Context) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    await requireProfileEditor(workspace.id, user.id);
+    const { workspace } = await requireWorkspaceCapability({
+      capability: "translation_profiles.write",
+      request
+    });
 
     const profile = await prisma.translationProfile.findFirst({
       where: {

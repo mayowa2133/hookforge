@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import {
@@ -22,25 +22,15 @@ const UpdateSchema = z.object({
   role: z.enum(["ADMIN", "EDITOR", "VIEWER"])
 });
 
-async function requireManager(workspaceId: string, userId: string) {
-  const membership = await prisma.workspaceMember.findUnique({
-    where: {
-      workspaceId_userId: {
-        workspaceId,
-        userId
-      }
-    }
-  });
-  if (!membership || !canManageWorkspaceMembers(membership.role)) {
-    throw new Error("Unauthorized");
-  }
-  return membership;
-}
-
 export async function PATCH(request: Request, { params }: Context) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    const membership = await requireManager(workspace.id, user.id);
+    const { user, workspace, membership } = await requireWorkspaceCapability({
+      capability: "workspace.members.write",
+      request
+    });
+    if (!canManageWorkspaceMembers(membership.role)) {
+      return jsonError("Only admins can update workspace members", 403);
+    }
     const body = UpdateSchema.parse(await request.json());
 
     const member = await prisma.workspaceMember.findFirst({
@@ -109,10 +99,15 @@ export async function PATCH(request: Request, { params }: Context) {
   }
 }
 
-export async function DELETE(_request: Request, { params }: Context) {
+export async function DELETE(request: Request, { params }: Context) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    const membership = await requireManager(workspace.id, user.id);
+    const { user, workspace, membership } = await requireWorkspaceCapability({
+      capability: "workspace.members.write",
+      request
+    });
+    if (!canManageWorkspaceMembers(membership.role)) {
+      return jsonError("Only admins can remove workspace members", 403);
+    }
 
     const member = await prisma.workspaceMember.findFirst({
       where: {

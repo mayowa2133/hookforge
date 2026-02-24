@@ -173,6 +173,18 @@ enum UsageAnomalyStatus {
   RESOLVED
 }
 
+enum IdentityProviderType {
+  OIDC
+  SAML
+}
+
+enum SsoSessionStatus {
+  INITIATED
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
 model User {
   id                 String                @id @default(cuid())
   email              String                @unique
@@ -192,6 +204,12 @@ model User {
   qualityEvalRunsCreated QualityEvalRun[]  @relation("QualityEvalCreatedBy")
   qualityFeedbackCreated QualityFeedback[] @relation("QualityFeedbackCreatedBy")
   usageAnomaliesResolved UsageAnomaly[]    @relation("UsageAnomalyResolvedBy")
+  userIdentities     UserIdentity[]
+  ssoSessions        SsoSession[]          @relation("SsoSessionUser")
+  securityPoliciesUpdated WorkspaceSecurityPolicy[] @relation("WorkspaceSecurityPolicyUpdatedBy")
+  auditEventsActed   AuditEvent[]          @relation("AuditEventActor")
+  identityProvidersCreated IdentityProviderConfig[] @relation("IdentityProviderConfigCreatedBy")
+  incidentsResolved  SystemIncident[]      @relation("SystemIncidentResolvedBy")
 }
 
 model Workspace {
@@ -224,6 +242,12 @@ model Workspace {
   qualityFeedback     QualityFeedback[]
   usageAnomalies      UsageAnomaly[]
   translationProfiles TranslationProfile[]
+  securityPolicy      WorkspaceSecurityPolicy?
+  identityProviders   IdentityProviderConfig[]
+  userIdentities      UserIdentity[]
+  auditEvents         AuditEvent[]
+  ssoSessions         SsoSession[]
+  systemIncidents     SystemIncident[]
 
   @@index([ownerId])
 }
@@ -941,12 +965,151 @@ model PublicApiKey {
   keyPrefix       String
   keyHash         String        @unique
   status          ApiKeyStatus  @default(ACTIVE)
+  scopes          String[]      @default([])
+  rateLimitPerMinute Int        @default(120)
+  expiresAt       DateTime?
+  rotatedFromKeyId String?
+  lastRotationAt  DateTime?
   lastUsedAt      DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy       User?         @relation("ApiKeyCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  rotatedFrom     PublicApiKey? @relation("PublicApiKeyRotation", fields: [rotatedFromKeyId], references: [id], onDelete: SetNull)
+  rotatedTo       PublicApiKey[] @relation("PublicApiKeyRotation")
 
   @@index([workspaceId])
+  @@index([status, expiresAt])
+}
+
+model WorkspaceSecurityPolicy {
+  id                String    @id @default(cuid())
+  workspaceId       String    @unique
+  enforceSso        Boolean   @default(false)
+  allowPasswordAuth Boolean   @default(true)
+  sessionTtlHours   Int       @default(168)
+  requireMfa        Boolean   @default(false)
+  allowedEmailDomains String[] @default([])
+  canaryAllowlist   String[]  @default([])
+  updatedByUserId   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  updatedBy         User?     @relation("WorkspaceSecurityPolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+}
+
+model IdentityProviderConfig {
+  id                      String               @id @default(cuid())
+  workspaceId             String
+  createdByUserId         String?
+  type                    IdentityProviderType
+  name                    String
+  issuerUrl               String?
+  clientId                String?
+  clientSecretCiphertext  String?
+  authorizationEndpoint   String?
+  tokenEndpoint           String?
+  jwksUri                 String?
+  samlMetadataXml         String?
+  samlEntityId            String?
+  samlSsoUrl              String?
+  enabled                 Boolean              @default(true)
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  workspace               Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy               User?                @relation("IdentityProviderConfigCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  userIdentities          UserIdentity[]
+  ssoSessions             SsoSession[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, type])
+}
+
+model UserIdentity {
+  id               String               @id @default(cuid())
+  workspaceId      String
+  userId           String
+  providerId       String
+  providerType     IdentityProviderType
+  providerSubject  String
+  email            String?
+  metadata         Json?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider         IdentityProviderConfig @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, providerSubject])
+  @@index([workspaceId, userId])
+}
+
+model SsoSession {
+  id               String           @id @default(cuid())
+  workspaceId      String
+  providerId       String
+  userId           String?
+  state            String           @unique
+  nonce            String?
+  returnTo         String?
+  codeVerifier     String?
+  status           SsoSessionStatus @default(INITIATED)
+  errorMessage     String?
+  ipAddress        String?
+  userAgent        String?
+  createdAt        DateTime         @default(now())
+  expiresAt        DateTime
+  completedAt      DateTime?
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider         IdentityProviderConfig @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  user             User?            @relation("SsoSessionUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([providerId])
+}
+
+model AuditEvent {
+  id               String       @id @default(cuid())
+  workspaceId      String
+  actorUserId      String?
+  action           String
+  targetType       String
+  targetId         String?
+  severity         TrustSeverity @default(INFO)
+  ipAddress        String?
+  userAgent        String?
+  metadata         Json?
+  createdAt        DateTime     @default(now())
+
+  workspace        Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor            User?        @relation("AuditEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, action, createdAt])
+}
+
+model SystemIncident {
+  id               String       @id @default(cuid())
+  workspaceId      String?
+  category         String
+  severity         TrustSeverity @default(WARN)
+  status           String       @default("OPEN")
+  summary          String
+  metadata         Json?
+  detectedAt       DateTime     @default(now())
+  resolvedAt       DateTime?
+  resolvedByUserId String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  workspace        Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  resolvedBy       User?        @relation("SystemIncidentResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, severity, createdAt])
+  @@index([workspaceId, createdAt])
 }

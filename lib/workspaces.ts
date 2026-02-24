@@ -42,6 +42,19 @@ export async function ensurePersonalWorkspace(userId: string, email: string) {
         }
       });
     }
+    await prisma.workspaceSecurityPolicy.upsert({
+      where: {
+        workspaceId: existingMembership.workspace.id
+      },
+      update: {},
+      create: {
+        workspaceId: existingMembership.workspace.id,
+        enforceSso: false,
+        allowPasswordAuth: true,
+        sessionTtlHours: 168,
+        requireMfa: false
+      }
+    });
     await ensureDefaultWorkspaceTranslationProfile(existingMembership.workspace.id);
     return existingMembership.workspace;
   }
@@ -66,6 +79,20 @@ export async function ensurePersonalWorkspace(userId: string, email: string) {
           balance: env.STARTER_CREDITS
         }
       }
+    }
+  });
+
+  await prisma.workspaceSecurityPolicy.upsert({
+    where: {
+      workspaceId: workspace.id
+    },
+    update: {},
+    create: {
+      workspaceId: workspace.id,
+      enforceSso: false,
+      allowPasswordAuth: true,
+      sessionTtlHours: 168,
+      requireMfa: false
     }
   });
 

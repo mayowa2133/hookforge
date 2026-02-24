@@ -1,11 +1,10 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { getPlanByTier } from "@/lib/billing/catalog";
 import { reconcileWorkspaceBillingState } from "@/lib/billing/reconciliation";
 import { addLedgerEntry, getCreditBalance } from "@/lib/credits";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { canManageWorkspaceMembers } from "@/lib/workspace-roles";
 import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 
 export const runtime = "nodejs";
@@ -16,25 +15,15 @@ const SubscribeSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
+    const { user, workspace } = await requireWorkspaceCapability({
+      capability: "billing.manage",
+      request
+    });
     const body = SubscribeSchema.parse(await request.json());
 
     const requestedPlan = getPlanByTier(body.tier);
     if (!requestedPlan) {
       return jsonError("Unknown plan tier", 400);
-    }
-
-    const membership = await prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId: workspace.id,
-          userId: user.id
-        }
-      }
-    });
-
-    if (!membership || !canManageWorkspaceMembers(membership.role)) {
-      return jsonError("Only admins can update subscriptions", 403);
     }
 
     await reconcileWorkspaceBillingState({

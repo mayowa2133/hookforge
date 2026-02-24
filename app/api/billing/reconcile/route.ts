@@ -1,9 +1,7 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { reconcileWorkspaceBillingState } from "@/lib/billing/reconciliation";
-import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
-import { prisma } from "@/lib/prisma";
-import { canManageWorkspaceMembers } from "@/lib/workspace-roles";
+import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 
 export const runtime = "nodejs";
@@ -14,20 +12,11 @@ const ReconcileSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    const body = ReconcileSchema.parse(await request.json().catch(() => ({})));
-
-    const membership = await prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId: workspace.id,
-          userId: user.id
-        }
-      }
+    const { user, workspace } = await requireWorkspaceCapability({
+      capability: "billing.manage",
+      request
     });
-    if (!membership || !canManageWorkspaceMembers(membership.role)) {
-      return jsonError("Only admins can reconcile billing", 403);
-    }
+    const body = ReconcileSchema.parse(await request.json().catch(() => ({})));
 
     const summary = await reconcileWorkspaceBillingState({
       workspaceId: workspace.id,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { listWorkspaceUsageAnomalies } from "@/lib/billing/anomalies";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 
@@ -13,7 +13,10 @@ const QuerySchema = z.object({
 
 export async function GET(request: Request) {
   try {
-    const { workspace } = await requireUserWithWorkspace();
+    const { workspace } = await requireWorkspaceCapability({
+      capability: "billing.read",
+      request
+    });
     const url = new URL(request.url);
     const query = QuerySchema.parse({
       status: url.searchParams.get("status") ?? undefined,

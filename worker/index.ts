@@ -166,6 +166,7 @@ const renderWorker = new Worker(
         composition,
         codec: "h264",
         outputLocation: outputPath,
+        timeoutInMilliseconds: 120000,
         inputProps: renderPlan.inputProps,
         onProgress: (progressPayload: unknown) => {
           const progressValue =

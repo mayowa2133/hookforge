@@ -53,6 +53,9 @@ Required variables are documented in `.env.example`.
 Slice 1 cutover flags:
 - `ENABLE_PROJECTS_V2=true` enables `/api/projects-v2` namespace.
 - `ENABLE_OPENCUT_EDITOR=false` toggles OpenCut-shell cohort routing scaffolding.
+- `ENABLE_ENTERPRISE_SECURITY=true` enables enterprise security/admin surfaces.
+- `ENABLE_SSO=true` enables OIDC/SAML route surfaces.
+- `ENABLE_API_KEY_SCOPES=true` enables scope checks and per-key rate ceilings on public API traffic.
 - `OPENCUT_EDITOR_COHORT=internal|beta|all` controls who gets the OpenCut shell path.
 - `OPENCUT_EDITOR_INTERNAL_DOMAIN=hookforge.local` marks internal cohort email-domain gate.
 - `OPENCUT_EDITOR_BETA_ALLOWLIST=` comma-separated beta allowlist emails.
@@ -123,6 +126,7 @@ Localization Lab: `http://localhost:3000/localization`
 Launch Console: `http://localhost:3000/launch`
 Mobile Beta Guide: `http://localhost:3000/mobile`
 OpenCut shell entrypoint (cohort gated): `http://localhost:3000/opencut/projects-v2/<projectV2Id>`
+Enterprise Security Center: `http://localhost:3000/settings/security`
 
 ## End-to-End Render Flow
 
@@ -184,10 +188,17 @@ Implemented route handlers:
 - `GET /api/public-api-keys` list workspace API keys
 - `POST /api/public-api-keys` create workspace API key (secret returned once)
 - `POST /api/public-api-keys/:id/disable` disable API key
+- `POST /api/public-api-keys/:id/rotate` rotate API key with overlap window
+- `POST /api/public-api-keys/:id/scopes` update API key scopes + per-key rate ceiling
 - `GET /api/workspace/members` list workspace members
 - `POST /api/workspace/members` add/update workspace member role
 - `PATCH /api/workspace/members/:memberId` update member role
 - `DELETE /api/workspace/members/:memberId` remove workspace member
+- `GET /api/workspace/security/policy` read workspace security policy
+- `POST /api/workspace/security/policy` update workspace security policy
+- `GET /api/workspace/security/sso/providers` list OIDC/SAML providers
+- `POST /api/workspace/security/sso/providers` create OIDC/SAML provider
+- `PATCH /api/workspace/security/sso/providers/:id` update provider
 - `GET /api/workspace/projects` list shared workspace projects
 - `GET /api/billing/plans` plan and credit-pack catalog
 - `GET /api/billing/overview` billing + usage overview
@@ -199,6 +210,14 @@ Implemented route handlers:
 - `POST /api/billing/anomalies/:id/status` acknowledge or resolve an anomaly
 - `POST /api/billing/reconcile` run subscription + ledger reconciliation checks
 - `GET /api/workspace/audit` immutable workspace audit trail events
+- `GET /api/workspace/audit/events` audit query endpoint with actor/action/date filters
+- `POST /api/auth/sso/oidc/start` start OIDC login
+- `GET /api/auth/sso/oidc/callback` OIDC callback completion
+- `POST /api/auth/sso/saml/acs` SAML ACS endpoint
+- `GET /api/auth/sso/saml/metadata` SAML metadata endpoint
+- `GET /api/ops/slo/summary` reliability SLO rollup (render/AI success + p95)
+- `GET /api/ops/queues/health` queue backlog and failed-job health
+- `POST /api/ops/recovery/backup-verify` recovery verification drill + incident trace
 - `GET /api/mobile/config` mobile rollout and quick-link config
 - `GET /api/mobile/health` mobile reliability + quality-system health signal
 - `POST /api/mobile/uploads/resumable/initiate` start resumable multipart upload session
@@ -502,6 +521,38 @@ Implemented:
 - Stronger collaboration role matrix (owner/admin constraints) with immutable workspace audit trail events (`/api/workspace/audit`)
 - Quality metrics enrichment for billing anomalies in `/api/quality/metrics`
 
+## Post-Phase 6 Enterprise Hardening (Completed)
+
+Implemented:
+
+- Enterprise identity controls:
+  - Workspace-level OIDC and SAML provider configuration APIs
+  - OIDC start/callback and SAML ACS/metadata routes
+  - Workspace security policy with SSO enforcement (`enforceSso`) and password fallback controls
+  - Session TTL policy used by credential and SSO logins
+- Capability-based authorization:
+  - centralized capability map in `lib/workspace-roles.ts`
+  - guard helper `requireWorkspaceCapability()` used across workspace, billing, API key, and ops admin routes
+- Immutable compliance trail:
+  - append-only `AuditEvent` model
+  - audit emission for privileged auth/policy/billing/member/API-key/ops actions
+  - audit query route with filters (`/api/workspace/audit/events`)
+- Public API key hardening:
+  - per-key scopes and rate ceilings
+  - rotation with overlap window
+  - scope update endpoint and lifecycle audit events
+- Single-region reliability hardening:
+  - SLO summary endpoint
+  - queue health endpoint
+  - backup verification endpoint with `SystemIncident` trace records
+- Enterprise admin UI:
+  - `/settings/security` tabs for policy, SSO providers, API keys/scopes, audit feed, and ops summary
+
+SOC2/readiness artifacts:
+
+- `docs/compliance/SOC2_TYPE1_CHECKLIST.md`
+- `docs/ops/ENTERPRISE_RECOVERY_RUNBOOK.md`
+
 ## Progress Tracker
 
 Progress artifacts:
@@ -554,6 +605,9 @@ pnpm test:e2e:phase0123
 pnpm test:e2e:phase01234
 pnpm test:e2e:phase012345
 pnpm test:e2e:phase0123456
+pnpm test:e2e:phase01234567
+pnpm test:e2e:enterprise
+pnpm test:e2e:phase01234567-enterprise
 ```
 
 ## Security / Safety Controls

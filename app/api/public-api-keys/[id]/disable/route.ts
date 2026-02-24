@@ -1,6 +1,8 @@
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
+import { enforceIdempotencyKey } from "@/lib/idempotency";
 import { prisma } from "@/lib/prisma";
+import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 
 export const runtime = "nodejs";
 
@@ -10,9 +12,17 @@ type Context = {
   };
 };
 
-export async function POST(_request: Request, { params }: Context) {
+export async function POST(request: Request, { params }: Context) {
   try {
-    const { workspace } = await requireUserWithWorkspace();
+    const { user, workspace } = await requireWorkspaceCapability({
+      capability: "api_keys.manage",
+      request
+    });
+    await enforceIdempotencyKey({
+      request,
+      scope: `api-key-disable:${workspace.id}:${params.id}`,
+      required: false
+    });
     const apiKey = await prisma.publicApiKey.findFirst({
       where: {
         id: params.id,
@@ -32,10 +42,22 @@ export async function POST(_request: Request, { params }: Context) {
         name: true,
         keyPrefix: true,
         status: true,
+        scopes: true,
+        rateLimitPerMinute: true,
+        expiresAt: true,
+        lastRotationAt: true,
         lastUsedAt: true,
         createdAt: true,
         updatedAt: true
       }
+    });
+
+    await recordWorkspaceAuditEvent({
+      workspaceId: workspace.id,
+      actorUserId: user.id,
+      action: "api_key_disable",
+      targetType: "PublicApiKey",
+      targetId: updated.id
     });
 
     return jsonOk({

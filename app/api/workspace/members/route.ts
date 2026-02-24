@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import {
@@ -17,9 +17,12 @@ const InviteSchema = z.object({
   role: z.enum(["ADMIN", "EDITOR", "VIEWER"]).default("EDITOR")
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const { workspace } = await requireUserWithWorkspace();
+    const { workspace } = await requireWorkspaceCapability({
+      capability: "workspace.members.read",
+      request
+    });
     const members = await prisma.workspaceMember.findMany({
       where: {
         workspaceId: workspace.id
@@ -55,17 +58,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    const body = InviteSchema.parse(await request.json());
-
-    const actorMembership = await prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId: workspace.id,
-          userId: user.id
-        }
-      }
+    const { user, workspace, membership: actorMembership } = await requireWorkspaceCapability({
+      capability: "workspace.members.write",
+      request
     });
+    const body = InviteSchema.parse(await request.json());
 
     if (!actorMembership || !canManageWorkspaceMembers(actorMembership.role)) {
       return jsonError("Only admins can add workspace members", 403);

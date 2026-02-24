@@ -1,10 +1,8 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { getCreditPackById } from "@/lib/billing/catalog";
 import { addLedgerEntry, getCreditBalance } from "@/lib/credits";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
-import { prisma } from "@/lib/prisma";
-import { canManageWorkspaceMembers } from "@/lib/workspace-roles";
 import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 
 export const runtime = "nodejs";
@@ -15,21 +13,11 @@ const PurchaseSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    const body = PurchaseSchema.parse(await request.json());
-
-    const membership = await prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId: workspace.id,
-          userId: user.id
-        }
-      }
+    const { user, workspace } = await requireWorkspaceCapability({
+      capability: "billing.manage",
+      request
     });
-
-    if (!membership || !canManageWorkspaceMembers(membership.role)) {
-      return jsonError("Only admins can purchase credit packs", 403);
-    }
+    const body = PurchaseSchema.parse(await request.json());
 
     const pack = getCreditPackById(body.packId);
     if (!pack) {

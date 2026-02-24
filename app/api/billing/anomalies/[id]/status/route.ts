@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { canManageWorkspaceMembers } from "@/lib/workspace-roles";
 import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 
 export const runtime = "nodejs";
@@ -20,20 +19,11 @@ const UpdateStatusSchema = z.object({
 
 export async function POST(request: Request, { params }: Context) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    const body = UpdateStatusSchema.parse(await request.json());
-
-    const membership = await prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId: workspace.id,
-          userId: user.id
-        }
-      }
+    const { user, workspace } = await requireWorkspaceCapability({
+      capability: "billing.manage",
+      request
     });
-    if (!membership || !canManageWorkspaceMembers(membership.role)) {
-      return jsonError("Only admins can update anomaly status", 403);
-    }
+    const body = UpdateStatusSchema.parse(await request.json());
 
     const anomaly = await prisma.usageAnomaly.findFirst({
       where: {

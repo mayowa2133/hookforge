@@ -1,4 +1,4 @@
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { creditPacks, planCatalog } from "@/lib/billing/catalog";
 import { buildUsageAlerts } from "@/lib/billing/usage-alerts";
 import { listWorkspaceUsageAnomalies } from "@/lib/billing/anomalies";
@@ -8,9 +8,12 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const { workspace } = await requireUserWithWorkspace();
+    const { workspace } = await requireWorkspaceCapability({
+      capability: "billing.read",
+      request
+    });
     const [balance, activeSubscription, entries, openAnomalies] = await Promise.all([
       getCreditBalance(workspace.id),
       prisma.subscription.findFirst({

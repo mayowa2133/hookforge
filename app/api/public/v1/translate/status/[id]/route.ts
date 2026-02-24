@@ -1,4 +1,4 @@
-import { authenticatePublicApiKey } from "@/lib/public-api";
+import { authenticatePublicApiKeyWithScope } from "@/lib/public-api";
 import { prisma } from "@/lib/prisma";
 import { routeErrorToResponse, jsonError, jsonOk } from "@/lib/http";
 import { getDownloadPresignedUrl } from "@/lib/storage";
@@ -11,7 +11,7 @@ type Context = {
 
 export async function GET(request: Request, { params }: Context) {
   try {
-    const apiKey = await authenticatePublicApiKey(request);
+    const apiKey = await authenticatePublicApiKeyWithScope(request, "translate.status");
 
     const aiJob = await prisma.aIJob.findFirst({
       where: {

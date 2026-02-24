@@ -20,8 +20,14 @@ export function routeErrorToResponse(error: unknown) {
     if (message === "UNAUTHORIZED" || normalized.includes("unauthorized")) {
       return jsonError("Unauthorized", 401);
     }
+    if (normalized.includes("rate limit")) {
+      return jsonError(message, 429);
+    }
     if (normalized.includes("insufficient credits")) {
       return jsonError(message, 402);
+    }
+    if (normalized.includes("scope denied")) {
+      return jsonError(message, 403);
     }
     if (normalized.includes("disabled")) {
       return jsonError(message, 403);

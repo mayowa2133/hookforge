@@ -56,6 +56,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   <Link href="/mobile" className="font-medium hover:text-primary">
                     Mobile
                   </Link>
+                  <Link href="/settings/security" className="font-medium hover:text-primary">
+                    Security
+                  </Link>
                   <LogoutButton />
                 </>
               ) : (

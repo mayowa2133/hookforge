@@ -38,3 +38,68 @@ export function canAssignWorkspaceRole(actorRole: WorkspaceRole, nextRole: Works
   }
   return false;
 }
+
+export type WorkspaceCapability =
+  | "workspace.members.read"
+  | "workspace.members.write"
+  | "workspace.security.read"
+  | "workspace.security.write"
+  | "workspace.audit.read"
+  | "workspace.projects.read"
+  | "workspace.projects.write"
+  | "translation_profiles.read"
+  | "translation_profiles.write"
+  | "billing.read"
+  | "billing.manage"
+  | "api_keys.read"
+  | "api_keys.manage"
+  | "ops.read";
+
+const capabilitiesByRole: Record<WorkspaceRole, ReadonlyArray<WorkspaceCapability>> = {
+  OWNER: [
+    "workspace.members.read",
+    "workspace.members.write",
+    "workspace.security.read",
+    "workspace.security.write",
+    "workspace.audit.read",
+    "workspace.projects.read",
+    "workspace.projects.write",
+    "translation_profiles.read",
+    "translation_profiles.write",
+    "billing.read",
+    "billing.manage",
+    "api_keys.read",
+    "api_keys.manage",
+    "ops.read"
+  ],
+  ADMIN: [
+    "workspace.members.read",
+    "workspace.members.write",
+    "workspace.security.read",
+    "workspace.audit.read",
+    "workspace.projects.read",
+    "workspace.projects.write",
+    "translation_profiles.read",
+    "translation_profiles.write",
+    "billing.read",
+    "billing.manage",
+    "api_keys.read",
+    "api_keys.manage",
+    "ops.read"
+  ],
+  EDITOR: [
+    "workspace.members.read",
+    "workspace.security.read",
+    "workspace.projects.read",
+    "workspace.projects.write",
+    "translation_profiles.read",
+    "translation_profiles.write",
+    "billing.read",
+    "api_keys.read"
+  ],
+  VIEWER: ["workspace.projects.read", "billing.read", "workspace.security.read", "workspace.members.read"]
+};
+
+export function hasWorkspaceCapability(role: WorkspaceRole, capability: WorkspaceCapability) {
+  return capabilitiesByRole[role].includes(capability);
+}

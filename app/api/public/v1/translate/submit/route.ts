@@ -4,7 +4,7 @@ import { estimatePhase5DubbingCredits, normalizeTargetLanguages } from "@/lib/ai
 import { reserveCredits } from "@/lib/credits";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 import { isSupportedLanguage } from "@/lib/languages";
-import { authenticatePublicApiKey } from "@/lib/public-api";
+import { authenticatePublicApiKeyWithScope } from "@/lib/public-api";
 import { validateImportUrl } from "@/lib/media-import";
 import { resolveWorkspaceTranslationProfile } from "@/lib/translation-profiles";
 
@@ -28,7 +28,7 @@ const TranslateSubmitSchema = z
 
 export async function POST(request: Request) {
   try {
-    const apiKey = await authenticatePublicApiKey(request);
+    const apiKey = await authenticatePublicApiKeyWithScope(request, "translate.submit");
     const body = TranslateSubmitSchema.parse(await request.json());
 
     if (!isSupportedLanguage(body.sourceLanguage)) {

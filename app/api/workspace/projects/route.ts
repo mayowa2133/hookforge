@@ -53,6 +53,7 @@ export async function GET() {
 
     return jsonOk({
       workspaceId: workspace.id,
+      workspaceSlug: workspace.slug,
       projects: projects.map((project) => ({
         id: project.id,
         title: project.title,

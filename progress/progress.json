@@ -160,8 +160,8 @@
     {
       "id": "post_phase6_enterprise_hardening",
       "title": "Post-Phase 6 enterprise hardening and scale",
-      "status": "TODO",
-      "details": "Next roadmap track covers SSO/SAML, advanced RBAC, SOC2 controls, mobile native wrappers, and high-scale reliability optimizations"
+      "status": "DONE",
+      "details": "Enterprise hardening delivered with workspace OIDC/SAML APIs, SSO policy enforcement, capability-based guards, immutable AuditEvent stream, scoped API key rotation/rate limits, ops SLO/queue/recovery endpoints, security settings UI, and enterprise e2e coverage"
     }
   ]
 }

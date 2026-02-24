@@ -55,6 +55,25 @@ async function main() {
     });
   }
 
+  const workspaces = await prisma.workspace.findMany({
+    select: { id: true }
+  });
+  for (const workspace of workspaces) {
+    await prisma.workspaceSecurityPolicy.upsert({
+      where: {
+        workspaceId: workspace.id
+      },
+      update: {},
+      create: {
+        workspaceId: workspace.id,
+        enforceSso: false,
+        allowPasswordAuth: true,
+        sessionTtlHours: 168,
+        requireMfa: false
+      }
+    });
+  }
+
   console.log(`Seeded ${templateCatalog.length} templates.`);
 }
 

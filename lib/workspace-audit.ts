@@ -1,23 +1,34 @@
-import { addLedgerEntry } from "@/lib/credits";
+import { Prisma, TrustSeverity } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 
-export async function recordWorkspaceAuditEvent(params: {
+type WorkspaceAuditParams = {
   workspaceId: string;
   actorUserId: string;
   action: string;
   targetType: string;
   targetId?: string;
+  severity?: TrustSeverity;
+  ipAddress?: string;
+  userAgent?: string;
   details?: Record<string, unknown>;
-}) {
-  return addLedgerEntry({
+};
+
+export function buildWorkspaceAuditEventInput(params: WorkspaceAuditParams) {
+  return {
     workspaceId: params.workspaceId,
-    amount: 0,
-    entryType: "ADJUSTMENT",
-    feature: `audit.${params.action}`,
-    referenceType: params.targetType,
-    referenceId: params.targetId,
-    metadata: {
-      actorUserId: params.actorUserId,
-      ...(params.details ?? {})
-    }
+    actorUserId: params.actorUserId,
+    action: params.action,
+    targetType: params.targetType,
+    targetId: params.targetId,
+    severity: params.severity ?? "INFO",
+    ipAddress: params.ipAddress,
+    userAgent: params.userAgent,
+    metadata: params.details as Prisma.InputJsonValue | undefined
+  };
+}
+
+export async function recordWorkspaceAuditEvent(params: WorkspaceAuditParams) {
+  return prisma.auditEvent.create({
+    data: buildWorkspaceAuditEventInput(params)
   });
 }

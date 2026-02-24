@@ -1,12 +1,15 @@
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { creditPacks, planCatalog } from "@/lib/billing/catalog";
 import { routeErrorToResponse, jsonOk } from "@/lib/http";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireUserWithWorkspace();
+    await requireWorkspaceCapability({
+      capability: "billing.read",
+      request
+    });
     return jsonOk({
       plans: planCatalog,
       creditPacks

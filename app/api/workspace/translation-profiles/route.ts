@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireUserWithWorkspace } from "@/lib/api-context";
+import { requireWorkspaceCapability } from "@/lib/api-context";
 import { isSupportedLanguage } from "@/lib/languages";
 import { jsonError, jsonOk, routeErrorToResponse } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
@@ -9,7 +9,6 @@ import {
   normalizeProfileName,
   setWorkspaceDefaultTranslationProfile
 } from "@/lib/translation-profiles";
-import { isAtLeastRole } from "@/lib/workspace-roles";
 
 export const runtime = "nodejs";
 
@@ -21,26 +20,12 @@ const CreateProfileSchema = z.object({
   isDefault: z.boolean().default(false)
 });
 
-async function requireProfileEditor(workspaceId: string, userId: string) {
-  const membership = await prisma.workspaceMember.findUnique({
-    where: {
-      workspaceId_userId: {
-        workspaceId,
-        userId
-      }
-    }
-  });
-
-  if (!membership || !isAtLeastRole(membership.role, "EDITOR")) {
-    throw new Error("Unauthorized");
-  }
-
-  return membership;
-}
-
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const { workspace } = await requireUserWithWorkspace();
+    const { workspace } = await requireWorkspaceCapability({
+      capability: "translation_profiles.read",
+      request
+    });
 
     const profiles = await prisma.translationProfile.findMany({
       where: {
@@ -64,8 +49,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { user, workspace } = await requireUserWithWorkspace();
-    await requireProfileEditor(workspace.id, user.id);
+    const { workspace } = await requireWorkspaceCapability({
+      capability: "translation_profiles.write",
+      request
+    });
 
     const body = CreateProfileSchema.parse(await request.json());
     const sourceLanguage = body.sourceLanguage.trim().toLowerCase();

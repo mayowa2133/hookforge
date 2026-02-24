@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "crypto";
+import { hasApiScope, type PublicApiScope } from "./enterprise-security";
 import { prisma } from "./prisma";
+import { withRedis } from "./redis";
 import { env } from "./env";
 
 function salt() {
@@ -28,6 +30,29 @@ function readApiKeyFromRequest(request: Request) {
 }
 
 export async function authenticatePublicApiKey(request: Request) {
+  return authenticatePublicApiKeyWithScope(request);
+}
+
+async function enforceApiKeyRateLimit(params: {
+  keyId: string;
+  limitPerMinute: number;
+}) {
+  const windowStart = Math.floor(Date.now() / 60_000);
+  const redisKey = `rate:public-api:${params.keyId}:${windowStart}`;
+  const count = await withRedis(async (client) => {
+    const next = await client.incr(redisKey);
+    if (next === 1) {
+      await client.expire(redisKey, 120);
+    }
+    return next;
+  });
+
+  if (count > params.limitPerMinute) {
+    throw new Error("Rate limit exceeded for API key");
+  }
+}
+
+export async function authenticatePublicApiKeyWithScope(request: Request, requiredScope?: PublicApiScope) {
   const raw = readApiKeyFromRequest(request);
   if (!raw) {
     throw new Error("Unauthorized");
@@ -48,6 +73,21 @@ export async function authenticatePublicApiKey(request: Request) {
 
   if (apiKey.status !== "ACTIVE") {
     throw new Error("API key is disabled");
+  }
+
+  if (apiKey.expiresAt && apiKey.expiresAt.getTime() <= Date.now()) {
+    throw new Error("API key is disabled");
+  }
+
+  if (env.ENABLE_API_KEY_SCOPES && requiredScope && !hasApiScope(apiKey.scopes, requiredScope)) {
+    throw new Error("API key scope denied");
+  }
+
+  if (env.ENABLE_API_KEY_SCOPES) {
+    await enforceApiKeyRateLimit({
+      keyId: apiKey.id,
+      limitPerMinute: Math.max(10, apiKey.rateLimitPerMinute || 120)
+    });
   }
 
   await prisma.publicApiKey.update({

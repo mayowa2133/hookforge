@@ -3,7 +3,7 @@ import { estimatePhase5DubbingCredits, normalizeTargetLanguages } from "@/lib/ai
 import { buildDubbingAdaptationPlan, estimateDubbingMos } from "@/lib/ai/phase5-quality";
 import { jsonOk, routeErrorToResponse } from "@/lib/http";
 import { isSupportedLanguage } from "@/lib/languages";
-import { authenticatePublicApiKey } from "@/lib/public-api";
+import { authenticatePublicApiKeyWithScope } from "@/lib/public-api";
 import { resolveWorkspaceTranslationProfile } from "@/lib/translation-profiles";
 
 export const runtime = "nodejs";
@@ -20,7 +20,7 @@ const TranslateEstimateSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const apiKey = await authenticatePublicApiKey(request);
+    const apiKey = await authenticatePublicApiKeyWithScope(request, "translate.estimate");
     const body = TranslateEstimateSchema.parse(await request.json());
 
     if (!isSupportedLanguage(body.sourceLanguage)) {
