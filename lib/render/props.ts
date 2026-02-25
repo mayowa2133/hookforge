@@ -3,6 +3,7 @@ import { sanitizeOverlayText } from "../sanitize";
 import { parseTemplateSlotSchema, validateAndMergeConfig } from "../template-runtime";
 import { timelineStateFromConfig } from "../timeline-legacy";
 import type { RemotionTimelineState } from "@/remotion/types";
+import { SYSTEM_FREEFORM_TEMPLATE_SLUG } from "@/lib/freeform";
 
 export type RenderAsset = Asset & {
   signedUrl: string;
@@ -129,8 +130,13 @@ export function mapProjectToRenderProps(template: Template, assets: RenderAsset[
     : 0;
   const durationInFrames = Math.max(60, estimateDurationInFrames(template.slug, assets, config, fps), timelineFrames);
 
+  const compositionId =
+    template.slug === SYSTEM_FREEFORM_TEMPLATE_SLUG
+      ? "system-freeform-editor"
+      : template.slug;
+
   return {
-    compositionId: template.slug,
+    compositionId,
     inputProps: {
       assets: normalizedAssets,
       assetManifest,

@@ -57,7 +57,7 @@ export default async function ProjectV2Page({ params }: PageProps) {
         <CardHeader>
           <CardTitle>{project.title}</CardTitle>
           <CardDescription>
-            This project was created in AI-editor mode without a legacy template seed.
+            This project is in freeform AI-editor mode.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -66,11 +66,10 @@ export default async function ProjectV2Page({ params }: PageProps) {
             <span className="font-semibold text-foreground">{projectsV2FeatureFlags.opencutEditorCohort}</span>)
           </p>
           <p>
-            The full freeform timeline UI will land in the next slice. For now, use Quick Start templates to jump directly into the
-            current editor stack.
+            Open the OpenCut shell to upload media, generate transcript, plan chat edits, and render final output.
           </p>
-          <Link href="/templates" className="inline-block rounded-md border px-3 py-2 font-medium text-foreground hover:bg-accent">
-            Open Quick Start Templates
+          <Link href={`/opencut/projects-v2/${project.id}`} className="inline-block rounded-md border px-3 py-2 font-medium text-foreground hover:bg-accent">
+            Open AI Editor
           </Link>
         </CardContent>
       </Card>

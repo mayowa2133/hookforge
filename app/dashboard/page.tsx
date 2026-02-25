@@ -7,6 +7,7 @@ import { CreateProjectButton } from "@/components/dashboard/create-project-butto
 import { ReferenceAnalyzer } from "@/components/dashboard/reference-analyzer";
 import { getCurrentUser } from "@/lib/auth";
 import { buildProjectsV2EntrypointPath, projectsV2FeatureFlags, resolveProjectsV2EditorShell } from "@/lib/editor-cutover";
+import { SYSTEM_FREEFORM_TEMPLATE_SLUG } from "@/lib/freeform";
 import { prisma } from "@/lib/prisma";
 import { parseTemplateSlotSchema } from "@/lib/template-runtime";
 import { ensurePersonalWorkspace } from "@/lib/workspaces";
@@ -20,6 +21,11 @@ export default async function DashboardPage() {
   const workspace = await ensurePersonalWorkspace(user.id, user.email);
   const [templates, projects, projectsV2Raw] = await Promise.all([
     prisma.template.findMany({
+      where: {
+        slug: {
+          not: SYSTEM_FREEFORM_TEMPLATE_SLUG
+        }
+      },
       orderBy: { createdAt: "asc" }
     }),
     prisma.project.findMany({
@@ -106,9 +112,11 @@ export default async function DashboardPage() {
         <p className="text-sm text-muted-foreground">AI editor first with quick-start templates when you want a head start.</p>
         <div className="flex flex-wrap gap-2">
           {projectsV2FeatureFlags.projectsV2Enabled ? <CreateAiProjectButton /> : null}
-          <Link href="/templates" className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-accent">
-            Open Quick Start
-          </Link>
+          {projectsV2FeatureFlags.quickStartVisible ? (
+            <Link href="/templates" className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-accent">
+              Open Quick Start
+            </Link>
+          ) : null}
         </div>
         <p className="text-sm text-muted-foreground">
           Need script-to-video, teleprompter, or camera capture?{" "}
@@ -181,6 +189,7 @@ export default async function DashboardPage() {
         </section>
       ) : null}
 
+      {projectsV2FeatureFlags.quickStartVisible ? (
       <section className="space-y-3">
         <h2 className="text-xl font-bold">Quick Start Templates</h2>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -226,6 +235,7 @@ export default async function DashboardPage() {
           </Link>
         </div>
       </section>
+      ) : null}
 
       <section className="space-y-3">
         <h2 className="text-xl font-bold">Legacy projects</h2>

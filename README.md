@@ -132,7 +132,7 @@ Enterprise Security Center: `http://localhost:3000/settings/security`
 
 1. Register or login.
 2. Open Dashboard.
-3. Create a project from a template.
+3. Create a project from a template, or create a freeform AI-editor project in `FREEFORM` mode.
 4. Upload required slot assets in `/projects/[id]`.
 5. Adjust template controls and preview.
 6. Click **Render MP4**.
@@ -148,6 +148,17 @@ Implemented route handlers:
 - `POST /api/projects-v2` create AI-editor project in projects-v2 namespace
 - `GET /api/projects-v2` list projects-v2 for current workspace
 - `GET /api/projects-v2/:id` fetch projects-v2 details + legacy bridge metadata
+- `GET /api/projects-v2/:id/editor-state` unified v2 editor state payload (project, media, transcript, timeline)
+- `POST /api/projects-v2/:id/media/import` v2 freeform media presign
+- `POST /api/projects-v2/:id/media/register` v2 freeform media register + timeline append
+- `GET /api/projects-v2/:id/timeline` v2 timeline fetch
+- `PATCH /api/projects-v2/:id/timeline` v2 timeline patch
+- `GET /api/projects-v2/presets` quick-start preset catalog
+- `POST /api/projects-v2/:id/presets/apply` apply quick-start preset macro to v2 project
+- `POST /api/projects-v2/:id/chat/plan` deterministic chat plan (preview)
+- `POST /api/projects-v2/:id/chat/apply` apply approved chat plan with invariant checks
+- `POST /api/projects-v2/:id/chat/undo` undo chat apply by undo token
+- `POST /api/projects-v2/:id/render/final` enqueue final render for v2 project
 - `GET /api/projects/:id` fetch project + assets
 - `PATCH /api/projects/:id` update config/title
 - `POST /api/projects/:id/assets/presign` create presigned upload URL
@@ -431,6 +442,21 @@ Implemented:
   - `tests/opencut-metrics.test.ts`
   - `pnpm test`
   - `pnpm test:e2e:slice12`
+
+## Freeform + Chat-First Cutover (Implemented)
+
+Implemented:
+
+- `FREEFORM` creation in `/api/projects-v2` no longer requires user-selected templates.
+- Hidden system bridge template preserves backward-compatible render/runtime wiring without exposing template friction in v2 flows.
+- OpenCut v2 shell now supports freeform media import/register and uses v2-first timeline/chat/render routes.
+- Chat editing runs as explicit `plan -> apply -> undo`:
+  - `POST /api/projects-v2/:id/chat/plan`
+  - `POST /api/projects-v2/:id/chat/apply`
+  - `POST /api/projects-v2/:id/chat/undo`
+- Optional Quick Start templates are available as preset macros instead of mandatory creation path.
+- Added dedicated runtime gate:
+  - `pnpm test:e2e:freeform`
 
 ## Phase 1 Manual Editor (Completed)
 

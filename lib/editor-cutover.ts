@@ -12,6 +12,7 @@ export type ProjectsV2FeatureFlags = {
   opencutEditorBetaAllowlist: string[];
   aiEditorDefault: boolean;
   showTemplatesNav: boolean;
+  quickStartVisible: boolean;
   defaultTemplateSlug: string;
 };
 
@@ -30,6 +31,7 @@ type ProjectsV2FlagSource = {
   OPENCUT_EDITOR_BETA_ALLOWLIST: string;
   NEXT_PUBLIC_AI_EDITOR_DEFAULT: boolean;
   NEXT_PUBLIC_SHOW_TEMPLATES_NAV: boolean;
+  NEXT_PUBLIC_QUICK_START_VISIBLE: boolean;
   AI_EDITOR_DEFAULT_TEMPLATE_SLUG: string;
 };
 
@@ -53,6 +55,7 @@ export function buildProjectsV2FeatureFlags(source: ProjectsV2FlagSource): Proje
     opencutEditorBetaAllowlist: [...new Set(betaAllowlist)],
     aiEditorDefault: source.NEXT_PUBLIC_AI_EDITOR_DEFAULT,
     showTemplatesNav: source.NEXT_PUBLIC_SHOW_TEMPLATES_NAV,
+    quickStartVisible: source.NEXT_PUBLIC_QUICK_START_VISIBLE,
     defaultTemplateSlug: source.AI_EDITOR_DEFAULT_TEMPLATE_SLUG
   };
 }
@@ -92,14 +95,11 @@ export function resolveProjectsV2EditorShell(email: string, flags: ProjectsV2Fea
 
 export function buildProjectsV2EntrypointPath(input: ProjectsV2EntrypointInput) {
   const flags = input.flags ?? projectsV2FeatureFlags;
-  if (!input.legacyProjectId) {
-    return `/projects-v2/${input.projectV2Id}`;
-  }
   const shell = resolveProjectsV2EditorShell(input.userEmail, flags);
   if (shell === "OPENCUT") {
     return `/opencut/projects-v2/${input.projectV2Id}`;
   }
-  return `/projects/${input.legacyProjectId}`;
+  return `/projects-v2/${input.projectV2Id}`;
 }
 
 export const projectsV2FeatureFlags = buildProjectsV2FeatureFlags(env);

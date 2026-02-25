@@ -1,16 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  applyProjectV2ChatEdit,
   autoTranscript,
+  getProjectV2EditorState,
+  getProjectV2Presets,
   getProjectV2,
   getOpenCutMetrics,
+  importProjectV2Media,
   patchTimeline,
   patchTranscript,
-  presignProjectAsset,
-  registerProjectAsset,
-  runChatEdit,
+  registerProjectV2Media,
+  planProjectV2ChatEdit,
+  applyProjectV2Preset,
   startRender,
   trackOpenCutTelemetry,
-  undoChatEdit
+  undoProjectV2ChatEdit
 } from "@/lib/opencut/hookforge-client";
 
 function mockResponse(body: unknown, ok = true, status = 200) {
@@ -79,7 +83,7 @@ describe("opencut hookforge client", () => {
     ).rejects.toThrow("Bad request");
   });
 
-  it("starts render through bridgeable projects endpoint", async () => {
+  it("starts render through projects-v2 final render endpoint", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockResponse({
         renderJob: {
@@ -93,14 +97,14 @@ describe("opencut hookforge client", () => {
     const payload = await startRender("pv2_3");
     expect(payload.renderJob.id).toBe("render_1");
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/projects/pv2_3/render",
+      "/api/projects-v2/pv2_3/render/final",
       expect.objectContaining({
         method: "POST"
       })
     );
   });
 
-  it("posts timeline operations through bridgeable projects endpoint", async () => {
+  it("posts timeline operations through projects-v2 timeline endpoint", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockResponse({
         timeline: {
@@ -121,14 +125,14 @@ describe("opencut hookforge client", () => {
     ]);
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/projects/pv2_4/timeline",
+      "/api/projects-v2/pv2_4/timeline",
       expect.objectContaining({
         method: "POST"
       })
     );
   });
 
-  it("presigns upload through bridgeable projects endpoint", async () => {
+  it("imports media through projects-v2 media import endpoint", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockResponse({
         uploadUrl: "https://storage.local/upload",
@@ -136,12 +140,12 @@ describe("opencut hookforge client", () => {
         method: "PUT",
         headers: {
           "Content-Type": "video/mp4"
-        }
+        },
+        assetIdDraft: "pv2_5:projects/pv2_5/file.mp4"
       })
     );
 
-    const payload = await presignProjectAsset("pv2_5", {
-      slotKey: "main",
+    const payload = await importProjectV2Media("pv2_5", {
       fileName: "clip.mp4",
       mimeType: "video/mp4",
       sizeBytes: 10123
@@ -149,14 +153,14 @@ describe("opencut hookforge client", () => {
 
     expect(payload.storageKey).toContain("projects");
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/projects/pv2_5/assets/presign",
+      "/api/projects-v2/pv2_5/media/import",
       expect.objectContaining({
         method: "POST"
       })
     );
   });
 
-  it("registers uploaded asset through bridgeable projects endpoint", async () => {
+  it("registers uploaded media through projects-v2 media register endpoint", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockResponse({
         asset: {
@@ -171,53 +175,80 @@ describe("opencut hookforge client", () => {
           id: "proj_1",
           status: "READY"
         },
+        mediaAsset: {
+          id: "ma_1",
+          storageKey: "projects/pv2_6/clip.mp4",
+          kind: "VIDEO",
+          mimeType: "video/mp4",
+          durationSec: 4.2
+        },
         missingSlotKeys: []
       })
     );
 
-    const payload = await registerProjectAsset("pv2_6", {
-      slotKey: "main",
+    const payload = await registerProjectV2Media("pv2_6", {
       storageKey: "projects/pv2_6/clip.mp4",
       mimeType: "video/mp4"
     });
     expect(payload.project.status).toBe("READY");
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/projects/pv2_6/assets/register",
+      "/api/projects-v2/pv2_6/media/register",
       expect.objectContaining({
         method: "POST"
       })
     );
   });
 
-  it("runs chat edit through bridgeable projects endpoint and returns mode metadata", async () => {
+  it("creates chat plan through projects-v2 chat plan endpoint", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockResponse({
+        planId: "plan_1",
+        confidence: 0.78,
+        requiresConfirmation: true,
         executionMode: "SUGGESTIONS_ONLY",
-        plannedOperations: [],
-        validatedOperations: [],
-        appliedTimelineOperations: [],
-        planValidation: { valid: false, confidence: 0.4, reason: "Low confidence" },
+        opsPreview: [],
         constrainedSuggestions: ["Try: split clip 1 at 500ms"],
-        invariantIssues: [],
-        appliedRevisionId: null,
-        undoToken: null,
-        aiJobId: "ai_1"
+        issues: []
       })
     );
 
-    const payload = await runChatEdit("pv2_7", {
+    const payload = await planProjectV2ChatEdit("pv2_7", {
       prompt: "tighten this section and remove dead air"
     });
-    expect(payload.executionMode).toBe("SUGGESTIONS_ONLY");
+    expect(payload.planId).toBe("plan_1");
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/projects/pv2_7/chat-edit",
+      "/api/projects-v2/pv2_7/chat/plan",
       expect.objectContaining({
         method: "POST"
       })
     );
   });
 
-  it("runs chat undo through bridgeable projects endpoint", async () => {
+  it("applies planned chat edit through projects-v2 chat apply endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        applied: true,
+        suggestionsOnly: false,
+        issues: [],
+        revisionId: "rev_1",
+        undoToken: "undo_1"
+      })
+    );
+
+    const payload = await applyProjectV2ChatEdit("pv2_8", {
+      planId: "plan_1",
+      confirmed: true
+    });
+    expect(payload.applied).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/projects-v2/pv2_8/chat/apply",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  it("runs chat undo through projects-v2 chat undo endpoint", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockResponse({
         restored: true,
@@ -225,10 +256,66 @@ describe("opencut hookforge client", () => {
       })
     );
 
-    const payload = await undoChatEdit("pv2_8", { undoToken: "token_12345678" });
+    const payload = await undoProjectV2ChatEdit("pv2_8", { undoToken: "token_12345678" });
     expect(payload.restored).toBe(true);
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/projects/pv2_8/chat-edit/undo",
+      "/api/projects-v2/pv2_8/chat/undo",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  it("fetches editor state and presets and applies preset", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          project: {
+            id: "pv2_9",
+            title: "Project",
+            status: "DRAFT",
+            creationMode: "FREEFORM",
+            hasLegacyBridge: true,
+            legacyProjectId: "legacy_9"
+          },
+          assets: [],
+          mediaAssets: [],
+          timeline: {
+            timeline: { tracks: [] },
+            revisionId: null,
+            revision: 1
+          },
+          transcript: null
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          presets: [
+            { id: "green-screen-commentator", slug: "green-screen-commentator", name: "Green Screen", description: "", tags: [] }
+          ]
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          applied: true,
+          presetId: "green-screen-commentator",
+          revisionId: "rev_12",
+          operationCount: 2
+        })
+      );
+
+    const editorState = await getProjectV2EditorState("pv2_9");
+    const presets = await getProjectV2Presets();
+    const applyResult = await applyProjectV2Preset("pv2_9", "green-screen-commentator");
+
+    expect(editorState.project.id).toBe("pv2_9");
+    expect(presets.presets.length).toBe(1);
+    expect(applyResult.applied).toBe(true);
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/projects-v2/pv2_9/editor-state", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/projects-v2/presets", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects-v2/pv2_9/presets/apply",
       expect.objectContaining({
         method: "POST"
       })

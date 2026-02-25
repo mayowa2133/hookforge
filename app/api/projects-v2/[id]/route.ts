@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { buildProjectsV2EntrypointPath, projectsV2FeatureFlags, resolveProjectsV2EditorShell } from "@/lib/editor-cutover";
+import { isSystemTemplateSlug } from "@/lib/freeform";
 import { routeErrorToResponse } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 
@@ -77,6 +78,7 @@ export async function GET(_request: Request, { params }: Context) {
     return NextResponse.json({
       project: {
         ...project,
+        creationMode: legacyProject?.template?.slug && isSystemTemplateSlug(legacyProject.template.slug) ? "FREEFORM" : "QUICK_START",
         editorShell: resolveProjectsV2EditorShell(user.email, projectsV2FeatureFlags),
         entrypointPath: buildProjectsV2EntrypointPath({
           projectV2Id: project.id,
@@ -84,6 +86,9 @@ export async function GET(_request: Request, { params }: Context) {
           userEmail: user.email,
           flags: projectsV2FeatureFlags
         }),
+        hasLegacyBridge: Boolean(legacyProject),
+        supportsChatPlanApply: true,
+        supportsFreeformRender: true,
         legacyProject
       }
     });

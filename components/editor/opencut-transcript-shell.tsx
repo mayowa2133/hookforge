@@ -9,24 +9,31 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  applyProjectV2ChatEdit,
+  applyProjectV2Preset,
   autoTranscript,
+  getProjectV2EditorState,
+  getProjectV2Presets,
   getOpenCutMetrics,
   getAiJob,
   getLegacyProject,
   getRenderJob,
   getTimeline,
   getTranscript,
+  importProjectV2Media,
   patchTimeline,
   patchTranscript,
-  presignProjectAsset,
-  registerProjectAsset,
-  runChatEdit,
+  planProjectV2ChatEdit,
+  registerProjectV2Media,
   startRender,
   trackOpenCutTelemetry,
-  undoChatEdit,
-  type ChatEditResponse,
+  undoProjectV2ChatEdit,
+  type ChatApplyResponse,
+  type ChatPlanResponse,
+  type EditorStatePayload,
   type LegacyProjectPayload,
   type OpenCutMetricsResponse,
+  type PresetCatalogResponse,
   type TimelineOperation,
   type TimelinePayload,
   type TranscriptPayload
@@ -35,7 +42,7 @@ import { clampPlaybackSeekSeconds, computeSplitPointMs, computeTrackReorderTarge
 
 type OpenCutTranscriptShellProps = {
   projectV2Id: string;
-  legacyProjectId: string;
+  legacyProjectId: string | null;
   title: string;
   status: string;
 };
@@ -71,7 +78,13 @@ function isTypingTarget(eventTarget: EventTarget | null) {
   return tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
 }
 
-function summarizeOps(ops: ChatEditResponse["plannedOperations"], max = 4) {
+function summarizeOps(
+  ops: Array<{
+    op: string;
+    [key: string]: unknown;
+  }>,
+  max = 4
+) {
   const lines = ops.slice(0, max).map((op, index) => {
     const payload = Object.entries(op)
       .filter(([key]) => key !== "op")
@@ -83,15 +96,6 @@ function summarizeOps(ops: ChatEditResponse["plannedOperations"], max = 4) {
     lines.push(`+${ops.length - max} more operation(s)`);
   }
   return lines;
-}
-
-function acceptForKinds(kinds: Array<"VIDEO" | "IMAGE" | "AUDIO">) {
-  const map: Record<"VIDEO" | "IMAGE" | "AUDIO", string> = {
-    VIDEO: "video/*",
-    IMAGE: "image/*",
-    AUDIO: "audio/*"
-  };
-  return kinds.map((kind) => map[kind]).join(",");
 }
 
 export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, status }: OpenCutTranscriptShellProps) {
@@ -129,14 +133,17 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   } | null>(null);
   const [chatPrompt, setChatPrompt] = useState("");
   const [chatAttachmentIds, setChatAttachmentIds] = useState("");
-  const [chatResult, setChatResult] = useState<ChatEditResponse | null>(null);
+  const [chatPlanResult, setChatPlanResult] = useState<ChatPlanResponse | null>(null);
+  const [chatApplyResult, setChatApplyResult] = useState<ChatApplyResponse | null>(null);
   const [chatUndoToken, setChatUndoToken] = useState<string | null>(null);
   const [chatUndoResult, setChatUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
   const [chatJobId, setChatJobId] = useState<string | null>(null);
   const [chatJobStatus, setChatJobStatus] = useState<{ status: string; progress: number } | null>(null);
   const [opencutMetrics, setOpencutMetrics] = useState<OpenCutMetricsResponse | null>(null);
-  const [uploadingSlotKey, setUploadingSlotKey] = useState<string | null>(null);
-  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+  const [mediaAssets, setMediaAssets] = useState<EditorStatePayload["mediaAssets"]>([]);
+  const [presetCatalog, setPresetCatalog] = useState<PresetCatalogResponse["presets"]>([]);
+  const [presetId, setPresetId] = useState("");
   const [deleteStartMs, setDeleteStartMs] = useState("0");
   const [deleteEndMs, setDeleteEndMs] = useState("220");
   const [clipMoveInMs, setClipMoveInMs] = useState("0");
@@ -172,19 +179,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   }, [selectedTrack, selectedClipId]);
 
   const previewAsset = useMemo(() => pickPreviewAsset(project), [project]);
-  const slotDefinitions = useMemo(() => project?.template.slotSchema.slots ?? [], [project?.template.slotSchema.slots]);
-  const assetBySlot = useMemo(() => {
-    const entries = new Map<string, LegacyProjectPayload["project"]["assets"][number]>();
-    for (const asset of project?.assets ?? []) {
-      entries.set(asset.slotKey, asset);
-    }
-    return entries;
-  }, [project?.assets]);
-  const missingRequiredSlots = useMemo(
-    () => slotDefinitions.filter((slot) => slot.required && !assetBySlot.get(slot.key)).map((slot) => slot.key),
-    [assetBySlot, slotDefinitions]
-  );
-  const canRender = missingRequiredSlots.length === 0 && project?.status !== "RENDERING";
+  const canRender = (project?.assets.length ?? 0) > 0 && project?.status !== "RENDERING";
 
   const trackOpenCutEvent = async (
     event: "editor_open" | "transcript_edit_apply" | "chat_edit_apply" | "render_start" | "render_done" | "render_error",
@@ -213,9 +208,14 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   };
 
   const loadProjectSurface = async () => {
-    const [projectPayload, timelinePayload] = await Promise.all([getLegacyProject(projectV2Id), getTimeline(projectV2Id)]);
+    const [projectPayload, timelinePayload, editorState] = await Promise.all([
+      getLegacyProject(projectV2Id),
+      getTimeline(projectV2Id),
+      getProjectV2EditorState(projectV2Id)
+    ]);
     setProject(projectPayload.project);
     setTimeline(timelinePayload);
+    setMediaAssets(editorState.mediaAssets);
   };
 
   const loadTranscript = async () => {
@@ -288,11 +288,19 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
 
   useEffect(() => {
     void refreshOpenCutMetrics();
+    void getProjectV2Presets()
+      .then((payload) => {
+        setPresetCatalog(payload.presets);
+        if (!presetId && payload.presets[0]) {
+          setPresetId(payload.presets[0].id);
+        }
+      })
+      .catch(() => undefined);
     const interval = setInterval(() => {
       void refreshOpenCutMetrics();
     }, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [presetId]);
 
   useEffect(() => {
     if (!orderedTracks.length) {
@@ -816,18 +824,34 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     );
   };
 
-  const uploadSlotAsset = async (slotKey: string, file: File) => {
+  const applyPreset = async () => {
+    if (!presetId) {
+      setPanelError("Select a preset first.");
+      return;
+    }
+    setBusy("preset_apply");
+    setPanelError(null);
+    try {
+      await applyProjectV2Preset(projectV2Id, presetId);
+      await Promise.all([loadProjectSurface(), loadTranscript()]);
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Preset apply failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const uploadMediaAsset = async (file: File) => {
     const mimeType = file.type || "application/octet-stream";
-    setUploadingSlotKey(slotKey);
-    setUploadErrors((current) => ({ ...current, [slotKey]: "" }));
+    setUploading(true);
     setPanelError(null);
 
     try {
-      const presign = await presignProjectAsset(projectV2Id, {
-        slotKey,
+      const presign = await importProjectV2Media(projectV2Id, {
         fileName: file.name,
         mimeType,
-        sizeBytes: file.size
+        sizeBytes: file.size,
+        slot: mimeType.startsWith("audio/") ? "audio" : "primary"
       });
 
       const uploadResponse = await fetch(presign.uploadUrl, {
@@ -841,32 +865,32 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         throw new Error(`Upload failed with status ${uploadResponse.status}`);
       }
 
-      await registerProjectAsset(projectV2Id, {
-        slotKey,
+      await registerProjectV2Media(projectV2Id, {
         storageKey: presign.storageKey,
-        mimeType
+        mimeType,
+        originalFileName: file.name,
+        slot: mimeType.startsWith("audio/") ? "audio" : "primary"
       });
 
       await Promise.all([loadProjectSurface(), loadTranscript()]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
-      setUploadErrors((current) => ({ ...current, [slotKey]: message }));
       setPanelError(message);
     } finally {
-      setUploadingSlotKey(null);
+      setUploading(false);
     }
   };
 
-  const onSlotFileChange = async (slotKey: string, event: ChangeEvent<HTMLInputElement>) => {
+  const onMediaFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.currentTarget.value = "";
     if (!file) {
       return;
     }
-    await uploadSlotAsset(slotKey, file);
+    await uploadMediaAsset(file);
   };
 
-  const applyChatEdit = async () => {
+  const planChatEdit = async () => {
     if (chatPrompt.trim().length < 4) {
       setPanelError("Chat prompt must be at least 4 characters.");
       return;
@@ -880,32 +904,58 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setBusy("chat_edit");
     setPanelError(null);
     setChatUndoResult(null);
+    setChatPlanResult(null);
+    setChatApplyResult(null);
 
     try {
-      const payload = await runChatEdit(projectV2Id, {
+      const payload = await planProjectV2ChatEdit(projectV2Id, {
         prompt: chatPrompt.trim(),
         attachmentAssetIds: attachmentAssetIds.length > 0 ? attachmentAssetIds : undefined
       });
 
-      setChatResult(payload);
-      setChatUndoToken(payload.undoToken);
-      setChatJobId(payload.aiJobId);
-      setChatJobStatus({ status: "QUEUED", progress: 0 });
+      setChatPlanResult(payload);
+      setChatUndoToken(null);
+      setChatApplyResult(null);
+      setChatJobId(null);
+      setChatJobStatus(null);
       void trackOpenCutEvent("chat_edit_apply", "SUCCESS", {
         executionMode: payload.executionMode,
-        plannedOperationCount: payload.plannedOperations.length,
+        plannedOperationCount: payload.opsPreview.length,
         constrainedSuggestionCount: payload.constrainedSuggestions.length
       });
       void refreshOpenCutMetrics();
-
-      if (payload.executionMode === "APPLIED") {
-        await Promise.all([loadProjectSurface(), loadTranscript()]);
-      }
     } catch (error) {
       void trackOpenCutEvent("chat_edit_apply", "ERROR", {
         hasAttachments: attachmentAssetIds.length > 0
       });
       setPanelError(error instanceof Error ? error.message : "Chat edit failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyPlannedChatEdit = async () => {
+    if (!chatPlanResult?.planId) {
+      setPanelError("Create a chat plan before applying.");
+      return;
+    }
+
+    setBusy("chat_apply");
+    setPanelError(null);
+    setChatUndoResult(null);
+
+    try {
+      const payload = await applyProjectV2ChatEdit(projectV2Id, {
+        planId: chatPlanResult.planId,
+        confirmed: true
+      });
+      setChatApplyResult(payload);
+      setChatUndoToken(payload.undoToken);
+      if (payload.applied) {
+        await Promise.all([loadProjectSurface(), loadTranscript()]);
+      }
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Chat apply failed");
     } finally {
       setBusy(null);
     }
@@ -921,7 +971,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setPanelError(null);
 
     try {
-      const payload = await undoChatEdit(projectV2Id, {
+      const payload = await undoProjectV2ChatEdit(projectV2Id, {
         undoToken: chatUndoToken
       });
       setChatUndoResult({
@@ -983,7 +1033,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               {title}
             </h1>
             <p className="text-xs text-muted-foreground">
-              Legacy project: {legacyProjectId} • Status: {status}
+              Legacy bridge: {legacyProjectId ?? "not-linked"} • Status: {status}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1020,48 +1070,29 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               <p className="text-xs text-muted-foreground">
                 Upload your own assets only. Templates are structure blueprints; you must have rights to all uploaded media.
               </p>
-              <div className="max-h-[180px] space-y-2 overflow-y-auto">
-                {slotDefinitions.map((slot) => {
-                  const currentAsset = assetBySlot.get(slot.key);
-                  const busyThisSlot = uploadingSlotKey === slot.key;
-                  return (
-                    <div key={slot.key} className="rounded-md border p-2">
-                      <div className="mb-1 flex items-center justify-between gap-1">
-                        <p className="text-xs font-medium">
-                          {slot.label} <span className="text-muted-foreground">({slot.key})</span>
-                        </p>
-                        <Badge variant={currentAsset ? "secondary" : "outline"}>
-                          {currentAsset ? "Uploaded" : slot.required ? "Required" : "Optional"}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type="file"
-                          className="h-8"
-                          accept={acceptForKinds(slot.kinds)}
-                          disabled={busyThisSlot}
-                          onChange={(event) => {
-                            void onSlotFileChange(slot.key, event);
-                          }}
-                        />
-                        <span className="text-[11px] text-muted-foreground">{busyThisSlot ? "Uploading..." : slot.kinds.join("/")}</span>
-                      </div>
-                      {slot.helpText ? <p className="mt-1 text-[11px] text-muted-foreground">{slot.helpText}</p> : null}
-                      {currentAsset ? (
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          Current: {currentAsset.kind} • {currentAsset.mimeType}
-                        </p>
-                      ) : null}
-                      {uploadErrors[slot.key] ? <p className="mt-1 text-[11px] text-destructive">{uploadErrors[slot.key]}</p> : null}
-                    </div>
-                  );
-                })}
+              <div className="flex items-center gap-2">
+                <Input
+                  type="file"
+                  className="h-8"
+                  accept="video/*,image/*,audio/*"
+                  disabled={uploading}
+                  onChange={(event) => {
+                    void onMediaFileChange(event);
+                  }}
+                />
+                <span className="text-[11px] text-muted-foreground">{uploading ? "Uploading..." : "Video / image / audio"}</span>
               </div>
-              {missingRequiredSlots.length > 0 ? (
-                <p className="text-[11px] text-muted-foreground">Missing required slots: {missingRequiredSlots.join(", ")}</p>
-              ) : (
-                <p className="text-[11px] text-emerald-600">All required slots uploaded.</p>
-              )}
+              <div className="max-h-[160px] space-y-1 overflow-y-auto rounded border p-2">
+                {mediaAssets.length > 0 ? (
+                  mediaAssets.map((asset) => (
+                    <p key={asset.id} className="text-[11px] text-muted-foreground">
+                      {asset.mimeType} • {asset.durationSec ? `${asset.durationSec.toFixed(2)}s` : "n/a"} • {asset.id.slice(0, 8)}
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">No uploaded media yet.</p>
+                )}
+              </div>
             </div>
 
             <div className="max-h-[440px] space-y-2 overflow-y-auto rounded-md border p-2">
@@ -1166,11 +1197,33 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               />
             </div>
 
+            <div className="space-y-2 rounded-md border p-2">
+              <p className="text-sm font-semibold">Quick Start Presets (Optional)</p>
+              <p className="text-xs text-muted-foreground">Apply a preset macro, then continue editing freeform.</p>
+              <div className="flex items-center gap-2">
+                <select
+                  className="h-9 flex-1 rounded-md border px-2 text-sm"
+                  value={presetId}
+                  onChange={(event) => setPresetId(event.target.value)}
+                >
+                  <option value="">Select preset</option>
+                  {presetCatalog.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </select>
+                <Button size="sm" variant="secondary" disabled={busy !== null || !presetId} onClick={applyPreset}>
+                  Apply Preset
+                </Button>
+              </div>
+            </div>
+
             <div className="space-y-2 border-t pt-3">
               <div>
-                <p className="text-sm font-semibold">AI Co-Editor (Phase 3)</p>
+                <p className="text-sm font-semibold">AI Co-Editor</p>
                 <p className="text-xs text-muted-foreground">
-                  Ask for timeline edits in natural language. Unsafe plans fall back to suggestions-only mode.
+                  Ask for timeline edits in natural language. Plan is previewed first, then applied after confirmation.
                 </p>
               </div>
               <Textarea
@@ -1184,12 +1237,15 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 onChange={(event) => setChatAttachmentIds(event.target.value)}
                 placeholder="Optional attachment asset IDs (comma-separated)"
               />
-              <div className="grid grid-cols-2 gap-2">
-                <Button size="sm" disabled={busy !== null} onClick={applyChatEdit}>
-                  Apply Chat Edit
+              <div className="grid grid-cols-3 gap-2">
+                <Button size="sm" disabled={busy !== null} onClick={planChatEdit}>
+                  Plan Chat Edit
+                </Button>
+                <Button size="sm" variant="secondary" disabled={busy !== null || !chatPlanResult?.planId} onClick={applyPlannedChatEdit}>
+                  Confirm + Apply
                 </Button>
                 <Button size="sm" variant="outline" disabled={busy !== null || !chatUndoToken} onClick={applyChatUndo}>
-                  Undo Last Chat Apply
+                  Undo
                 </Button>
               </div>
 
@@ -1202,42 +1258,53 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 </div>
               ) : null}
 
-              {chatResult ? (
+              {chatPlanResult ? (
                 <div className="rounded-md border p-2 text-xs">
                   <p className="font-semibold">
-                    {chatResult.executionMode === "APPLIED" ? "Applied" : "Suggestions only"} • confidence{" "}
-                    {Math.round(chatResult.planValidation.confidence * 100)}%
+                    Plan {chatPlanResult.executionMode === "APPLIED" ? "ready to apply" : "suggestions only"} • confidence{" "}
+                    {Math.round(chatPlanResult.confidence * 100)}%
                   </p>
-                  <p className="text-muted-foreground">
-                    {chatResult.appliedRevisionId ? `Revision ${chatResult.appliedRevisionId.slice(0, 8)}` : "No revision applied"} •{" "}
-                    {chatResult.undoToken ? `undo token ${chatResult.undoToken.slice(0, 8)}` : "no undo token"}
-                  </p>
-                  {chatResult.fallbackReason ? <p className="mt-1 text-amber-600">Fallback: {chatResult.fallbackReason}</p> : null}
-                  {chatResult.planValidation.reason ? (
-                    <p className="mt-1 text-muted-foreground">Validation: {chatResult.planValidation.reason}</p>
-                  ) : null}
-                  {chatResult.invariantIssues.length > 0 ? (
+                  {chatPlanResult.issues.length > 0 ? (
                     <ul className="mt-1 space-y-1 text-muted-foreground">
-                      {chatResult.invariantIssues.map((issue, index) => (
+                      {chatPlanResult.issues.map((issue, index) => (
                         <li key={`${issue.code}-${index}`}>
                           [{issue.severity}] {issue.message}
                         </li>
                       ))}
                     </ul>
                   ) : null}
-                  {chatResult.plannedOperations.length > 0 ? (
+                  {chatPlanResult.opsPreview.length > 0 ? (
                     <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
-                      {summarizeOps(chatResult.plannedOperations).map((line) => (
+                      {summarizeOps(chatPlanResult.opsPreview).map((line) => (
                         <li key={line}>{line}</li>
                       ))}
                     </ul>
                   ) : (
                     <p className="mt-1 text-muted-foreground">No operations planned.</p>
                   )}
-                  {chatResult.constrainedSuggestions.length > 0 ? (
+                  {chatPlanResult.constrainedSuggestions.length > 0 ? (
                     <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
-                      {chatResult.constrainedSuggestions.slice(0, 4).map((suggestion) => (
+                      {chatPlanResult.constrainedSuggestions.slice(0, 4).map((suggestion) => (
                         <li key={suggestion}>{suggestion}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {chatApplyResult ? (
+                <div className="rounded-md border p-2 text-xs">
+                  <p className="font-semibold">{chatApplyResult.applied ? "Plan applied" : "Plan not applied"}</p>
+                  <p className="text-muted-foreground">
+                    {chatApplyResult.revisionId ? `Revision ${chatApplyResult.revisionId.slice(0, 8)}` : "No revision applied"}
+                    {chatApplyResult.undoToken ? ` • undo ${chatApplyResult.undoToken.slice(0, 8)}` : ""}
+                  </p>
+                  {chatApplyResult.issues.length > 0 ? (
+                    <ul className="mt-1 space-y-1 text-muted-foreground">
+                      {chatApplyResult.issues.map((issue, index) => (
+                        <li key={`${issue.code}-${index}`}>
+                          [{issue.severity}] {issue.message}
+                        </li>
                       ))}
                     </ul>
                   ) : null}
@@ -1347,7 +1414,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             </div>
 
             {!canRender ? (
-              <p className="text-xs text-muted-foreground">Upload required slots before rendering: {missingRequiredSlots.join(", ")}</p>
+              <p className="text-xs text-muted-foreground">Upload at least one media file before rendering.</p>
             ) : null}
 
             {renderStatus ? (

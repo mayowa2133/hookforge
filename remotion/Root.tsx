@@ -5,6 +5,7 @@ import { TweetCommentPopupReplyTemplate } from "./templates/tweet-comment-popup-
 import { ThreeBeatMontageIntroTemplate } from "./templates/three-beat-montage-intro-main-talk";
 import { SplitScreenReactionTemplate } from "./templates/split-screen-reaction";
 import { FakeFaceTimeIncomingCallTemplate } from "./templates/fake-facetime-incoming-call";
+import { SystemFreeformEditorTemplate } from "./templates/system-freeform-editor";
 
 const defaultProps: RemotionTemplateProps = {
   assets: {
@@ -81,6 +82,14 @@ const defaultProps: RemotionTemplateProps = {
       src: "/demo-assets/caller-avatar.svg",
       kind: "IMAGE",
       mimeType: "image/svg+xml"
+    },
+    seed_media: {
+      id: "demo-seed",
+      slotKey: "seed_media",
+      src: "/demo-assets/demo-portrait.mp4",
+      kind: "VIDEO",
+      mimeType: "video/mp4",
+      durationSec: 6
     }
   },
   config: {
@@ -157,6 +166,16 @@ export const RemotionRoot = () => {
       <Composition
         id="fake-facetime-incoming-call"
         component={FakeFaceTimeIncomingCallTemplate}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={180}
+        calculateMetadata={calculateMetadata}
+        defaultProps={defaultProps}
+      />
+      <Composition
+        id="system-freeform-editor"
+        component={SystemFreeformEditorTemplate}
         width={1080}
         height={1920}
         fps={30}

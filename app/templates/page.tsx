@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SYSTEM_FREEFORM_TEMPLATE_SLUG } from "@/lib/freeform";
 import { prisma } from "@/lib/prisma";
 import { parseTemplateSlotSchema } from "@/lib/template-runtime";
 
 export default async function TemplatesPage() {
-  const templates = await prisma.template.findMany({ orderBy: { createdAt: "asc" } });
+  const templates = await prisma.template.findMany({
+    where: {
+      slug: {
+        not: SYSTEM_FREEFORM_TEMPLATE_SLUG
+      }
+    },
+    orderBy: { createdAt: "asc" }
+  });
 
   return (
     <div className="space-y-5">

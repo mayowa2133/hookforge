@@ -62,11 +62,10 @@ export default async function OpenCutProjectV2Page({ params }: PageProps) {
         <Card>
           <CardHeader>
             <CardTitle>{project.title}</CardTitle>
-            <CardDescription>OpenCut transcript editor currently requires a Quick Start seeded legacy project.</CardDescription>
+            <CardDescription>This project has no legacy bridge yet.</CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            This project does not have a legacy bridge yet. Create a Quick Start template project and reopen it to use the OpenCut shell
-            transcript editor path.
+            Reopen from Dashboard so the system can finish initializing project bridge metadata, then try again.
           </CardContent>
         </Card>
       </div>
@@ -75,7 +74,7 @@ export default async function OpenCutProjectV2Page({ params }: PageProps) {
 
   const editorShell = resolveProjectsV2EditorShell(user.email, projectsV2FeatureFlags);
   if (editorShell !== "OPENCUT") {
-    redirect(`/projects/${project.legacyProjectId}`);
+    redirect(`/projects-v2/${project.id}`);
   }
 
   return (

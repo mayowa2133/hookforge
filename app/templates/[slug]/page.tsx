@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CreateProjectButton } from "@/components/dashboard/create-project-button";
 import { getCurrentUser } from "@/lib/auth";
+import { isSystemTemplateSlug } from "@/lib/freeform";
 import { prisma } from "@/lib/prisma";
 import { parseTemplateSlotSchema } from "@/lib/template-runtime";
 
@@ -18,7 +19,7 @@ export default async function TemplateDetailPage({ params }: PageProps) {
     getCurrentUser()
   ]);
 
-  if (!template) {
+  if (!template || isSystemTemplateSlug(template.slug)) {
     notFound();
   }
 

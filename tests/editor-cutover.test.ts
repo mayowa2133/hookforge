@@ -39,6 +39,7 @@ describe("editor cutover feature flags", () => {
       OPENCUT_EDITOR_BETA_ALLOWLIST: "beta@hookforge.dev,beta2@hookforge.dev",
       NEXT_PUBLIC_AI_EDITOR_DEFAULT: false,
       NEXT_PUBLIC_SHOW_TEMPLATES_NAV: true,
+      NEXT_PUBLIC_QUICK_START_VISIBLE: true,
       AI_EDITOR_DEFAULT_TEMPLATE_SLUG: "green-screen-commentator"
     });
 
@@ -49,6 +50,7 @@ describe("editor cutover feature flags", () => {
     expect(flags.opencutEditorBetaAllowlist).toEqual(["beta@hookforge.dev", "beta2@hookforge.dev"]);
     expect(flags.aiEditorDefault).toBe(false);
     expect(flags.showTemplatesNav).toBe(true);
+    expect(flags.quickStartVisible).toBe(true);
     expect(flags.defaultTemplateSlug).toBe("green-screen-commentator");
   });
 
@@ -61,6 +63,7 @@ describe("editor cutover feature flags", () => {
       OPENCUT_EDITOR_BETA_ALLOWLIST: "",
       NEXT_PUBLIC_AI_EDITOR_DEFAULT: true,
       NEXT_PUBLIC_SHOW_TEMPLATES_NAV: false,
+      NEXT_PUBLIC_QUICK_START_VISIBLE: true,
       AI_EDITOR_DEFAULT_TEMPLATE_SLUG: "green-screen-commentator"
     });
     expect(resolveProjectsV2EditorShell("dev@hookforge.dev", internalFlags)).toBe("OPENCUT");
@@ -74,6 +77,7 @@ describe("editor cutover feature flags", () => {
       OPENCUT_EDITOR_BETA_ALLOWLIST: "tester@example.com",
       NEXT_PUBLIC_AI_EDITOR_DEFAULT: true,
       NEXT_PUBLIC_SHOW_TEMPLATES_NAV: false,
+      NEXT_PUBLIC_QUICK_START_VISIBLE: true,
       AI_EDITOR_DEFAULT_TEMPLATE_SLUG: "green-screen-commentator"
     });
     expect(resolveProjectsV2EditorShell("tester@example.com", betaFlags)).toBe("OPENCUT");
@@ -89,6 +93,7 @@ describe("editor cutover feature flags", () => {
       OPENCUT_EDITOR_BETA_ALLOWLIST: "",
       NEXT_PUBLIC_AI_EDITOR_DEFAULT: true,
       NEXT_PUBLIC_SHOW_TEMPLATES_NAV: false,
+      NEXT_PUBLIC_QUICK_START_VISIBLE: true,
       AI_EDITOR_DEFAULT_TEMPLATE_SLUG: "green-screen-commentator"
     });
 
@@ -108,6 +113,6 @@ describe("editor cutover feature flags", () => {
         userEmail: "creator@example.com",
         flags
       })
-    ).toBe("/projects-v2/pv2_2");
+    ).toBe("/opencut/projects-v2/pv2_2");
   });
 });

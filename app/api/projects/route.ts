@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
+import { isSystemTemplateSlug } from "@/lib/freeform";
 import { prisma } from "@/lib/prisma";
 import { getDefaultConfigFromTemplate } from "@/lib/template-runtime";
 import { routeErrorToResponse } from "@/lib/http";
@@ -65,6 +66,9 @@ export async function POST(request: Request) {
     });
 
     if (!template) {
+      return NextResponse.json({ error: "Template not found" }, { status: 404 });
+    }
+    if (isSystemTemplateSlug(template.slug)) {
       return NextResponse.json({ error: "Template not found" }, { status: 404 });
     }
 

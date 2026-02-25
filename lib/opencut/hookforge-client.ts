@@ -9,7 +9,11 @@ export type ProjectV2ApiPayload = {
     id: string;
     title: string;
     status: string;
+    creationMode?: "FREEFORM" | "QUICK_START";
     legacyProjectId: string | null;
+    hasLegacyBridge?: boolean;
+    supportsChatPlanApply?: boolean;
+    supportsFreeformRender?: boolean;
     editorShell?: "LEGACY" | "OPENCUT";
     entrypointPath: string;
     legacyProject?: {
@@ -179,6 +183,16 @@ type ChatEditRequest = {
   attachmentAssetIds?: string[];
 };
 
+type ChatPlanRequest = {
+  prompt: string;
+  attachmentAssetIds?: string[];
+};
+
+type ChatApplyRequest = {
+  planId: string;
+  confirmed: true;
+};
+
 type AssetPresignRequest = {
   slotKey: string;
   fileName: string;
@@ -190,6 +204,20 @@ type AssetRegisterRequest = {
   slotKey: string;
   storageKey: string;
   mimeType: string;
+};
+
+type MediaImportRequest = {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  slot?: "primary" | "broll" | "audio";
+};
+
+type MediaRegisterRequest = {
+  storageKey: string;
+  mimeType: string;
+  originalFileName?: string;
+  slot?: "primary" | "broll" | "audio";
 };
 
 type ChatEditUndoRequest = {
@@ -213,6 +241,39 @@ export type AssetRegisterResponse = {
     signedUrl: string;
     durationSec: number | null;
     mimeType: string;
+  };
+  project: {
+    id: string;
+    status: "DRAFT" | "READY" | "RENDERING" | "DONE" | "ERROR";
+  };
+  missingSlotKeys: string[];
+};
+
+export type MediaImportResponse = {
+  uploadUrl: string;
+  storageKey: string;
+  method: "PUT";
+  headers: {
+    "Content-Type": string;
+  };
+  assetIdDraft: string;
+};
+
+export type MediaRegisterResponse = {
+  asset: {
+    id: string;
+    slotKey: string;
+    kind: "VIDEO" | "IMAGE" | "AUDIO";
+    signedUrl: string;
+    durationSec: number | null;
+    mimeType: string;
+  };
+  mediaAsset: {
+    id: string;
+    storageKey: string;
+    kind: "VIDEO" | "IMAGE" | "AUDIO";
+    mimeType: string;
+    durationSec: number | null;
   };
   project: {
     id: string;
@@ -263,6 +324,66 @@ export type ChatEditUndoResponse = {
   appliedRevisionId: string;
 };
 
+export type ChatPlanResponse = {
+  planId: string;
+  confidence: number;
+  requiresConfirmation: true;
+  executionMode: "APPLIED" | "SUGGESTIONS_ONLY";
+  opsPreview: Array<{
+    op: string;
+    [key: string]: unknown;
+  }>;
+  constrainedSuggestions: string[];
+  issues: Array<{
+    code: string;
+    message: string;
+    severity: "INFO" | "WARN" | "ERROR";
+  }>;
+};
+
+export type ChatApplyResponse = {
+  applied: boolean;
+  suggestionsOnly: boolean;
+  issues: Array<{
+    code: string;
+    message: string;
+    severity: "INFO" | "WARN" | "ERROR";
+  }>;
+  revisionId: string | null;
+  undoToken: string | null;
+};
+
+export type EditorStatePayload = {
+  project: {
+    id: string;
+    title: string;
+    status: string;
+    creationMode: "FREEFORM" | "QUICK_START";
+    hasLegacyBridge: boolean;
+    legacyProjectId: string;
+  };
+  assets: LegacyProjectPayload["project"]["assets"];
+  mediaAssets: Array<{
+    id: string;
+    storageKey: string;
+    mimeType: string;
+    durationSec: number | null;
+    createdAt: string;
+  }>;
+  timeline: TimelinePayload;
+  transcript: TranscriptPayload | null;
+};
+
+export type PresetCatalogResponse = {
+  presets: Array<{
+    id: string;
+    slug: string;
+    name: string;
+    description: string;
+    tags: string[];
+  }>;
+};
+
 type OpenCutTelemetryRequest = {
   projectId: string;
   event: "editor_open" | "transcript_edit_apply" | "chat_edit_apply" | "render_start" | "render_done" | "render_error";
@@ -302,11 +423,11 @@ export async function getLegacyProject(projectIdOrV2Id: string) {
 }
 
 export async function getTimeline(projectIdOrV2Id: string) {
-  return requestJson<TimelinePayload>(`/api/projects/${projectIdOrV2Id}/timeline`);
+  return requestJson<TimelinePayload>(`/api/projects-v2/${projectIdOrV2Id}/timeline`);
 }
 
 export async function patchTimeline(projectIdOrV2Id: string, operations: TimelineOperation[]) {
-  return requestJson<TimelinePayload>(`/api/projects/${projectIdOrV2Id}/timeline`, {
+  return requestJson<TimelinePayload>(`/api/projects-v2/${projectIdOrV2Id}/timeline`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ operations })
@@ -358,6 +479,22 @@ export async function registerProjectAsset(projectIdOrV2Id: string, body: AssetR
   });
 }
 
+export async function importProjectV2Media(projectIdOrV2Id: string, body: MediaImportRequest) {
+  return requestJson<MediaImportResponse>(`/api/projects-v2/${projectIdOrV2Id}/media/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function registerProjectV2Media(projectIdOrV2Id: string, body: MediaRegisterRequest) {
+  return requestJson<MediaRegisterResponse>(`/api/projects-v2/${projectIdOrV2Id}/media/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
 export async function runChatEdit(projectIdOrV2Id: string, body: ChatEditRequest) {
   return requestJson<ChatEditResponse>(`/api/projects/${projectIdOrV2Id}/chat-edit`, {
     method: "POST",
@@ -374,6 +511,49 @@ export async function undoChatEdit(projectIdOrV2Id: string, body: ChatEditUndoRe
   });
 }
 
+export async function planProjectV2ChatEdit(projectIdOrV2Id: string, body: ChatPlanRequest) {
+  return requestJson<ChatPlanResponse>(`/api/projects-v2/${projectIdOrV2Id}/chat/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function applyProjectV2ChatEdit(projectIdOrV2Id: string, body: ChatApplyRequest) {
+  return requestJson<ChatApplyResponse>(`/api/projects-v2/${projectIdOrV2Id}/chat/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function undoProjectV2ChatEdit(projectIdOrV2Id: string, body: ChatEditUndoRequest) {
+  return requestJson<ChatEditUndoResponse>(`/api/projects-v2/${projectIdOrV2Id}/chat/undo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2EditorState(projectIdOrV2Id: string) {
+  return requestJson<EditorStatePayload>(`/api/projects-v2/${projectIdOrV2Id}/editor-state`);
+}
+
+export async function getProjectV2Presets() {
+  return requestJson<PresetCatalogResponse>(`/api/projects-v2/presets`);
+}
+
+export async function applyProjectV2Preset(projectIdOrV2Id: string, presetId: string) {
+  return requestJson<{ applied: boolean; presetId: string; operationCount?: number; reason?: string; revisionId: string | null }>(
+    `/api/projects-v2/${projectIdOrV2Id}/presets/apply`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ presetId })
+    }
+  );
+}
+
 export async function trackOpenCutTelemetry(body: OpenCutTelemetryRequest) {
   return requestJson<{ tracked: boolean; eventId: string; createdAt: string }>(`/api/opencut/telemetry`, {
     method: "POST",
@@ -387,7 +567,7 @@ export async function getOpenCutMetrics(windowHours = 24) {
 }
 
 export async function startRender(projectIdOrV2Id: string) {
-  return requestJson<{ renderJob: { id: string; status: string; progress: number } }>(`/api/projects/${projectIdOrV2Id}/render`, {
+  return requestJson<{ renderJob: { id: string; status: string; progress: number } }>(`/api/projects-v2/${projectIdOrV2Id}/render/final`, {
     method: "POST"
   });
 }

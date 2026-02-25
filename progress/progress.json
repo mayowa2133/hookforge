@@ -116,6 +116,12 @@
       "details": "Implemented OpenCut telemetry and metrics APIs, wired shell event tracking for editor/transcript/chat/render flows, surfaced 24h rollout snapshot in UI, and validated via unit + e2e slice12 regression"
     },
     {
+      "id": "freeform_chat_cutover",
+      "title": "Freeform + chat-first editor cutover (no template requirement)",
+      "status": "DONE",
+      "details": "Projects-v2 FREEFORM now creates hidden system bridge projects, media import/register/timeline/chat plan-apply-undo/render APIs run under v2 routes, OpenCut shell uses freeform uploads + preset macros, and validation passes via tsc + pnpm test + test:e2e:freeform + test:e2e:slice12"
+    },
+    {
       "id": "phase1_timeline_editor",
       "title": "Phase 1 manual timeline editor parity",
       "status": "DONE",

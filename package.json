@@ -30,6 +30,8 @@
     "test:e2e:phase6": "bash scripts/e2e-phase6.sh",
     "test:e2e:phase7": "bash scripts/e2e-phase7.sh",
     "test:e2e:enterprise": "bash scripts/e2e-enterprise.sh",
+    "test:e2e:freeform": "bash scripts/e2e-freeform-chat.sh",
+    "test:e2e:freeform-cutover": "bash scripts/e2e-freeform-chat.sh && bash scripts/e2e-phase01234567-enterprise.sh",
     "test:e2e:slice12": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh",
     "test:e2e:trackab": "bash scripts/e2e-trackab.sh",
     "test:e2e:trackabc": "bash scripts/e2e-trackabc.sh",

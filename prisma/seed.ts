@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { templateCatalog } from "../lib/template-catalog";
+import { SYSTEM_FREEFORM_TEMPLATE_NAME, SYSTEM_FREEFORM_TEMPLATE_SLUG, systemFreeformTemplateSchema } from "../lib/freeform";
 
 const prisma = new PrismaClient();
 
@@ -23,6 +24,23 @@ async function main() {
       }
     });
   }
+
+  await prisma.template.upsert({
+    where: { slug: SYSTEM_FREEFORM_TEMPLATE_SLUG },
+    update: {
+      name: SYSTEM_FREEFORM_TEMPLATE_NAME,
+      description: "Internal freeform editor compatibility template.",
+      tags: ["system", "freeform"],
+      slotSchema: systemFreeformTemplateSchema
+    },
+    create: {
+      slug: SYSTEM_FREEFORM_TEMPLATE_SLUG,
+      name: SYSTEM_FREEFORM_TEMPLATE_NAME,
+      description: "Internal freeform editor compatibility template.",
+      tags: ["system", "freeform"],
+      slotSchema: systemFreeformTemplateSchema
+    }
+  });
 
   const qualityModelSeeds = [
     { capability: "asr", provider: "deepgram", model: "nova", version: "v1", status: "ACTIVE" as const },
@@ -74,7 +92,7 @@ async function main() {
     });
   }
 
-  console.log(`Seeded ${templateCatalog.length} templates.`);
+  console.log(`Seeded ${templateCatalog.length + 1} templates (including system freeform template).`);
 }
 
 main()

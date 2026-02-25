@@ -27,15 +27,17 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               HookForge
             </Link>
             <nav className="flex items-center gap-3 text-sm">
-              {projectsV2FeatureFlags.showTemplatesNav ? (
-                <Link href="/templates" className="font-medium hover:text-primary">
-                  Templates
-                </Link>
-              ) : (
-                <Link href="/templates" className="font-medium hover:text-primary">
-                  Quick Start
-                </Link>
-              )}
+              {projectsV2FeatureFlags.quickStartVisible ? (
+                projectsV2FeatureFlags.showTemplatesNav ? (
+                  <Link href="/templates" className="font-medium hover:text-primary">
+                    Templates
+                  </Link>
+                ) : (
+                  <Link href="/templates" className="font-medium hover:text-primary">
+                    Quick Start
+                  </Link>
+                )
+              ) : null}
               {user ? (
                 <>
                   <Link href="/dashboard" className="font-medium hover:text-primary">
