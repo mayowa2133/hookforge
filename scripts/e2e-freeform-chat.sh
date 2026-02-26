@@ -107,14 +107,35 @@ plan_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -H "Content-Type: application/json" \
   -d '{"prompt":"split the first clip at midpoint and tighten intro pacing"}')
 plan_id=$(echo "$plan_resp" | jq -r ".planId")
+plan_revision_hash=$(echo "$plan_resp" | jq -r ".planRevisionHash")
 plan_mode=$(echo "$plan_resp" | jq -r ".executionMode")
 [ -n "$plan_id" ] && [ "$plan_id" != "null" ]
+[ -n "$plan_revision_hash" ] && [ "$plan_revision_hash" != "null" ]
 echo "plan_mode=$plan_mode"
+
+search_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  "$BASE/api/projects-v2/$project_id/transcript/search?language=en&q=demo")
+search_matches=$(echo "$search_resp" | jq -r ".totalMatches")
+[ "$search_matches" -ge 0 ]
+
+preview_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/ops/preview" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","operations":[{"op":"normalize_punctuation"}],"minConfidenceForRipple":0.86}')
+preview_mode=$(echo "$preview_resp" | jq -r ".mode")
+[ "$preview_mode" = "PREVIEW" ]
+
+apply_ops_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/ops/apply" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","operations":[{"op":"normalize_punctuation"}],"minConfidenceForRipple":0.86}')
+apply_ops_mode=$(echo "$apply_ops_resp" | jq -r ".mode")
+[ "$apply_ops_mode" = "APPLY" ]
 
 apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/chat/apply" \
   -H "Content-Type: application/json" \
-  -d "$(printf '{"planId":"%s","confirmed":true}' "$plan_id")")
+  -d "$(printf '{"planId":"%s","planRevisionHash":"%s","confirmed":true}' "$plan_id" "$plan_revision_hash")")
 applied=$(echo "$apply_resp" | jq -r ".applied")
 undo_token=$(echo "$apply_resp" | jq -r ".undoToken")
 [ "$applied" = "true" ]
@@ -128,6 +149,11 @@ undo_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
 restored=$(echo "$undo_resp" | jq -r ".restored")
 [ "$restored" = "true" ]
 echo "chat_undo_restored=$restored"
+
+health_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/editor-health")
+health_status=$(echo "$health_resp" | jq -r ".status")
+[ -n "$health_status" ] && [ "$health_status" != "null" ]
+echo "editor_health_status=$health_status"
 
 render_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/render/final")

@@ -16,10 +16,26 @@ type Context = {
 
 const TrackKindSchema = z.enum(["VIDEO", "AUDIO", "CAPTION"]);
 const PresetSchema = z.enum(["tiktok_9x16", "reels_9x16", "youtube_shorts_9x16", "custom"]);
+const UiIntentSchema = z.enum(["manual_edit", "chat_apply", "transcript_apply", "preset_macro", "system_sync"]);
+
+const SelectionContextSchema = z.object({
+  selectedTrackId: z.string().nullable().optional(),
+  selectedClipId: z.string().nullable().optional(),
+  selectedSegmentId: z.string().nullable().optional(),
+  playheadMs: z.number().int().min(0).nullable().optional(),
+  language: z.string().min(2).max(12).optional()
+}).optional();
+
+const operationMetaShape = {
+  selectionContext: SelectionContextSchema,
+  uiIntent: UiIntentSchema.optional()
+} as const;
+
+const withMeta = <T extends z.ZodRawShape>(shape: T) => z.object({ ...shape, ...operationMetaShape });
 
 const TimelineOperationSchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("create_track"), trackId: z.string().min(1).optional(), kind: TrackKindSchema, name: z.string().min(1).max(120) }),
-  z.object({
+  withMeta({ op: z.literal("create_track"), trackId: z.string().min(1).optional(), kind: TrackKindSchema, name: z.string().min(1).max(120) }),
+  withMeta({
     op: z.literal("add_clip"),
     clipId: z.string().min(1).optional(),
     trackId: z.string().min(1),
@@ -31,20 +47,20 @@ const TimelineOperationSchema = z.discriminatedUnion("op", [
     sourceInMs: z.number().int().min(0).optional(),
     sourceOutMs: z.number().int().min(0).optional()
   }),
-  z.object({ op: z.literal("split_clip"), trackId: z.string().min(1), clipId: z.string().min(1), splitMs: z.number().int().min(1) }),
-  z.object({ op: z.literal("trim_clip"), trackId: z.string().min(1), clipId: z.string().min(1), trimStartMs: z.number().int().min(0).optional(), trimEndMs: z.number().int().min(0).optional() }),
-  z.object({ op: z.literal("reorder_track"), trackId: z.string().min(1), order: z.number().int().min(0) }),
-  z.object({ op: z.literal("remove_clip"), trackId: z.string().min(1), clipId: z.string().min(1) }),
-  z.object({ op: z.literal("move_clip"), trackId: z.string().min(1), clipId: z.string().min(1), timelineInMs: z.number().int().min(0) }),
-  z.object({ op: z.literal("set_clip_timing"), trackId: z.string().min(1), clipId: z.string().min(1), timelineInMs: z.number().int().min(0), durationMs: z.number().int().min(120) }),
-  z.object({ op: z.literal("merge_clip_with_next"), trackId: z.string().min(1), clipId: z.string().min(1) }),
-  z.object({ op: z.literal("set_clip_label"), trackId: z.string().min(1), clipId: z.string().min(1), label: z.string().min(1).max(160) }),
-  z.object({ op: z.literal("set_track_audio"), trackId: z.string().min(1), volume: z.number().min(0).max(1.5).optional(), muted: z.boolean().optional() }),
-  z.object({ op: z.literal("add_effect"), trackId: z.string().min(1), clipId: z.string().min(1), effectType: z.string().min(1).max(80), config: z.record(z.unknown()).optional() }),
-  z.object({ op: z.literal("upsert_effect"), trackId: z.string().min(1), clipId: z.string().min(1), effectType: z.string().min(1).max(80), config: z.record(z.unknown()).optional() }),
-  z.object({ op: z.literal("set_transition"), trackId: z.string().min(1), clipId: z.string().min(1), transitionType: z.enum(["cut", "crossfade", "slide"]), durationMs: z.number().int().min(40).max(4000) }),
-  z.object({ op: z.literal("set_keyframe"), trackId: z.string().min(1), clipId: z.string().min(1), effectId: z.string().min(1), property: z.string().min(1).max(80), timeMs: z.number().int().min(0), value: z.union([z.string(), z.number(), z.boolean()]), easing: z.string().max(40).optional() }),
-  z.object({ op: z.literal("set_export_preset"), preset: PresetSchema, width: z.number().int().min(120).optional(), height: z.number().int().min(120).optional() })
+  withMeta({ op: z.literal("split_clip"), trackId: z.string().min(1), clipId: z.string().min(1), splitMs: z.number().int().min(1) }),
+  withMeta({ op: z.literal("trim_clip"), trackId: z.string().min(1), clipId: z.string().min(1), trimStartMs: z.number().int().min(0).optional(), trimEndMs: z.number().int().min(0).optional() }),
+  withMeta({ op: z.literal("reorder_track"), trackId: z.string().min(1), order: z.number().int().min(0) }),
+  withMeta({ op: z.literal("remove_clip"), trackId: z.string().min(1), clipId: z.string().min(1) }),
+  withMeta({ op: z.literal("move_clip"), trackId: z.string().min(1), clipId: z.string().min(1), timelineInMs: z.number().int().min(0) }),
+  withMeta({ op: z.literal("set_clip_timing"), trackId: z.string().min(1), clipId: z.string().min(1), timelineInMs: z.number().int().min(0), durationMs: z.number().int().min(120) }),
+  withMeta({ op: z.literal("merge_clip_with_next"), trackId: z.string().min(1), clipId: z.string().min(1) }),
+  withMeta({ op: z.literal("set_clip_label"), trackId: z.string().min(1), clipId: z.string().min(1), label: z.string().min(1).max(160) }),
+  withMeta({ op: z.literal("set_track_audio"), trackId: z.string().min(1), volume: z.number().min(0).max(1.5).optional(), muted: z.boolean().optional() }),
+  withMeta({ op: z.literal("add_effect"), trackId: z.string().min(1), clipId: z.string().min(1), effectType: z.string().min(1).max(80), config: z.record(z.unknown()).optional() }),
+  withMeta({ op: z.literal("upsert_effect"), trackId: z.string().min(1), clipId: z.string().min(1), effectType: z.string().min(1).max(80), config: z.record(z.unknown()).optional() }),
+  withMeta({ op: z.literal("set_transition"), trackId: z.string().min(1), clipId: z.string().min(1), transitionType: z.enum(["cut", "crossfade", "slide"]), durationMs: z.number().int().min(40).max(4000) }),
+  withMeta({ op: z.literal("set_keyframe"), trackId: z.string().min(1), clipId: z.string().min(1), effectId: z.string().min(1), property: z.string().min(1).max(80), timeMs: z.number().int().min(0), value: z.union([z.string(), z.number(), z.boolean()]), easing: z.string().max(40).optional() }),
+  withMeta({ op: z.literal("set_export_preset"), preset: PresetSchema, width: z.number().int().min(120).optional(), height: z.number().int().min(120).optional() })
 ]);
 
 const TimelinePatchSchema = z.object({
@@ -148,4 +164,8 @@ export async function POST(request: Request, { params }: Context) {
   } catch (error) {
     return routeErrorToResponse(error);
   }
+}
+
+export async function PATCH(request: Request, context: Context) {
+  return POST(request, context);
 }

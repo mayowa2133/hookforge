@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { type AIJob, type AIJobStatus } from "@prisma/client";
 import { requireProjectContext } from "@/lib/api-context";
 import { runChatEditPlannerValidatorExecutor, type ChatEditPipelineResult } from "@/lib/ai/chat-edit-pipeline";
@@ -9,13 +9,103 @@ import { previewTimelineOperationsWithValidation } from "@/lib/timeline-invarian
 import { TIMELINE_STATE_KEY, buildTimelineState, serializeTimelineState } from "@/lib/timeline-legacy";
 import type { TimelineOperation } from "@/lib/timeline-types";
 
+export type ChatPlanDiffItem = {
+  id: string;
+  type: "operation" | "note";
+  label: string;
+  before?: string;
+  after?: string;
+  severity?: "INFO" | "WARN" | "ERROR";
+};
+
+export type ChatPlanDiffGroup = {
+  group: "timeline" | "transcript" | "captions";
+  title: string;
+  summary: string;
+  items: ChatPlanDiffItem[];
+};
+
 type PlanPayload = {
   kind: "chat_plan_v2";
   execution: ChatEditPipelineResult;
   createdAt: string;
+  planRevisionHash: string;
+  diffGroups: ChatPlanDiffGroup[];
   appliedRevisionId?: string | null;
   undoToken?: string | null;
 };
+
+function hashPlanRevision(params: {
+  prompt: string;
+  execution: ChatEditPipelineResult;
+}) {
+  const payload = JSON.stringify({
+    prompt: params.prompt,
+    executionMode: params.execution.executionMode,
+    plannedOperations: params.execution.plannedOperations,
+    validatedOperations: params.execution.validatedOperations,
+    appliedTimelineOperations: params.execution.appliedTimelineOperations,
+    constrainedSuggestions: params.execution.constrainedSuggestions,
+    fallbackReason: params.execution.fallbackReason
+  });
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+function toTitleCase(input: string) {
+  return input
+    .replaceAll("_", " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word[0]?.toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function buildDiffGroups(execution: ChatEditPipelineResult): ChatPlanDiffGroup[] {
+  const timelineItems: ChatPlanDiffItem[] = execution.appliedTimelineOperations.map((operation, index) => ({
+    id: `timeline-op-${index + 1}`,
+    type: "operation",
+    label: `${index + 1}. ${toTitleCase(operation.op)}`,
+    after: JSON.stringify(operation)
+  }));
+
+  const captionItems: ChatPlanDiffItem[] = execution.validatedOperations
+    .filter((operation) => operation.op === "caption_style")
+    .map((operation, index) => ({
+      id: `caption-op-${index + 1}`,
+      type: "operation",
+      label: `${index + 1}. Caption Style`,
+      after: JSON.stringify(operation)
+    }));
+
+  const transcriptItems: ChatPlanDiffItem[] = execution.constrainedSuggestions.map((suggestion, index) => ({
+    id: `transcript-note-${index + 1}`,
+    type: "note",
+    label: `${suggestion.title}: ${suggestion.reason}`,
+    after: suggestion.prompt,
+    severity: "INFO"
+  }));
+
+  return [
+    {
+      group: "timeline",
+      title: "Timeline Changes",
+      summary: timelineItems.length > 0 ? `${timelineItems.length} operation(s) planned` : "No timeline mutation planned",
+      items: timelineItems
+    },
+    {
+      group: "transcript",
+      title: "Transcript Notes",
+      summary: transcriptItems.length > 0 ? `${transcriptItems.length} suggestion(s)` : "No transcript note generated",
+      items: transcriptItems
+    },
+    {
+      group: "captions",
+      title: "Caption Changes",
+      summary: captionItems.length > 0 ? `${captionItems.length} caption operation(s)` : "No caption operation planned",
+      items: captionItems
+    }
+  ];
+}
 
 function asTimelineOperations(input: unknown): TimelineOperation[] {
   if (!Array.isArray(input)) {
@@ -67,6 +157,11 @@ export async function createChatPlan(projectIdOrV2Id: string, prompt: string, at
     prompt,
     state
   });
+  const planRevisionHash = hashPlanRevision({
+    prompt,
+    execution
+  });
+  const diffGroups = buildDiffGroups(execution);
 
   const planJob = await prisma.aIJob.create({
     data: {
@@ -83,6 +178,8 @@ export async function createChatPlan(projectIdOrV2Id: string, prompt: string, at
       output: {
         kind: "chat_plan_v2",
         execution,
+        planRevisionHash,
+        diffGroups,
         createdAt: new Date().toISOString()
       } as never
     }
@@ -122,6 +219,32 @@ export async function applyChatPlan(projectIdOrV2Id: string, planId: string) {
   }
 
   const payload = parsePlanPayload(planJob);
+  if (!payload.planRevisionHash) {
+    throw new Error("Plan hash missing");
+  }
+  return applyChatPlanWithHash(projectIdOrV2Id, planId, payload.planRevisionHash);
+}
+
+export async function applyChatPlanWithHash(projectIdOrV2Id: string, planId: string, expectedPlanRevisionHash: string) {
+  const { ctx, legacyProject, state } = await loadLegacyProjectState(projectIdOrV2Id);
+  const planJob = await prisma.aIJob.findFirst({
+    where: {
+      id: planId,
+      workspaceId: ctx.workspace.id,
+      projectId: ctx.projectV2.id,
+      type: "CHAT_EDIT"
+    }
+  });
+
+  if (!planJob) {
+    throw new Error("Plan not found");
+  }
+
+  const payload = parsePlanPayload(planJob);
+  if (payload.planRevisionHash !== expectedPlanRevisionHash) {
+    throw new Error("Plan revision hash mismatch");
+  }
+
   if (payload.execution.executionMode !== "APPLIED") {
     return {
       applied: false,
@@ -217,6 +340,10 @@ export async function applyChatPlan(projectIdOrV2Id: string, planId: string) {
 }
 
 export async function undoChatPlanApply(projectIdOrV2Id: string, undoToken: string) {
+  return undoChatPlanApplyWithMode(projectIdOrV2Id, undoToken, false);
+}
+
+export async function undoChatPlanApplyWithMode(projectIdOrV2Id: string, undoToken: string, force = false) {
   const { ctx, legacyProject } = await loadLegacyProjectState(projectIdOrV2Id);
 
   const currentTimeline = buildTimelineState(
@@ -229,7 +356,7 @@ export async function undoChatPlanApply(projectIdOrV2Id: string, undoToken: stri
     projectId: legacyProject.id,
     currentRevision: currentTimeline.version,
     currentTimelineHash: currentTimeline.revisions[0]?.timelineHash ?? null,
-    requireLatestLineage: true
+    requireLatestLineage: !force
   });
   if ("error" in consumed) {
     throw new Error(consumed.error);

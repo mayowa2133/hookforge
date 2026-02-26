@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  applyTranscriptOps,
   applyProjectV2ChatEdit,
   autoTranscript,
+  getProjectV2EditorHealth,
   getProjectV2EditorState,
   getProjectV2Presets,
   getProjectV2,
@@ -9,7 +11,9 @@ import {
   importProjectV2Media,
   patchTimeline,
   patchTranscript,
+  previewTranscriptOps,
   registerProjectV2Media,
+  searchTranscript,
   planProjectV2ChatEdit,
   applyProjectV2Preset,
   startRender,
@@ -127,8 +131,79 @@ describe("opencut hookforge client", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/projects-v2/pv2_4/timeline",
       expect.objectContaining({
-        method: "POST"
+        method: "PATCH"
       })
+    );
+  });
+
+  it("searches transcript and supports preview/apply transcript ops routes", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_4",
+          language: "en",
+          query: "hook",
+          totalSegments: 4,
+          totalMatches: 1,
+          matches: [
+            {
+              segmentId: "seg_1",
+              startMs: 0,
+              endMs: 1000,
+              text: "great hook here",
+              confidenceAvg: 0.88,
+              matchStart: 6,
+              matchEnd: 10
+            }
+          ],
+          tookMs: 2
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "PREVIEW",
+          applied: false,
+          suggestionsOnly: false,
+          revisionId: null,
+          issues: [],
+          timelineOps: [{ op: "trim_clip" }]
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "APPLY",
+          applied: true,
+          suggestionsOnly: false,
+          revisionId: "rev_1",
+          issues: [],
+          timelineOps: [{ op: "trim_clip" }]
+        })
+      );
+
+    const search = await searchTranscript("pv2_4", "en", "hook");
+    const preview = await previewTranscriptOps("pv2_4", {
+      language: "en",
+      operations: [{ op: "normalize_punctuation" }]
+    });
+    const apply = await applyTranscriptOps("pv2_4", {
+      language: "en",
+      operations: [{ op: "normalize_punctuation" }]
+    });
+
+    expect(search.totalMatches).toBe(1);
+    expect(preview.mode).toBe("PREVIEW");
+    expect(apply.mode).toBe("APPLY");
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/projects-v2/pv2_4/transcript/search?language=en&q=hook", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects-v2/pv2_4/transcript/ops/preview",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects-v2/pv2_4/transcript/ops/apply",
+      expect.objectContaining({ method: "POST" })
     );
   });
 
@@ -203,11 +278,13 @@ describe("opencut hookforge client", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockResponse({
         planId: "plan_1",
+        planRevisionHash: "hash_123456",
         confidence: 0.78,
         requiresConfirmation: true,
         executionMode: "SUGGESTIONS_ONLY",
         opsPreview: [],
-        constrainedSuggestions: ["Try: split clip 1 at 500ms"],
+        diffGroups: [],
+        constrainedSuggestions: [],
         issues: []
       })
     );
@@ -237,6 +314,7 @@ describe("opencut hookforge client", () => {
 
     const payload = await applyProjectV2ChatEdit("pv2_8", {
       planId: "plan_1",
+      planRevisionHash: "hash_123456",
       confirmed: true
     });
     expect(payload.applied).toBe(true);
@@ -320,6 +398,26 @@ describe("opencut hookforge client", () => {
         method: "POST"
       })
     );
+  });
+
+  it("fetches editor health snapshot through projects-v2 endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        projectId: "pv2_9",
+        legacyProjectId: "legacy_9",
+        status: "HEALTHY",
+        syncStatus: "IN_SYNC",
+        hasRenderableMedia: true,
+        queue: { healthy: true, queues: [] },
+        render: { readiness: "READY", latest: null, recent: [] },
+        ai: { latest: null, recent: [] },
+        updatedAt: new Date().toISOString()
+      })
+    );
+
+    const payload = await getProjectV2EditorHealth("pv2_9");
+    expect(payload.status).toBe("HEALTHY");
+    expect(fetchSpy).toHaveBeenCalledWith("/api/projects-v2/pv2_9/editor-health", undefined);
   });
 
   it("tracks opencut telemetry events", async () => {

@@ -52,11 +52,11 @@ Required variables are documented in `.env.example`.
 
 Slice 1 cutover flags:
 - `ENABLE_PROJECTS_V2=true` enables `/api/projects-v2` namespace.
-- `ENABLE_OPENCUT_EDITOR=false` toggles OpenCut-shell cohort routing scaffolding.
+- `ENABLE_OPENCUT_EDITOR=true` enables the OpenCut shell as the default projects-v2 editor.
 - `ENABLE_ENTERPRISE_SECURITY=true` enables enterprise security/admin surfaces.
 - `ENABLE_SSO=true` enables OIDC/SAML route surfaces.
 - `ENABLE_API_KEY_SCOPES=true` enables scope checks and per-key rate ceilings on public API traffic.
-- `OPENCUT_EDITOR_COHORT=internal|beta|all` controls who gets the OpenCut shell path.
+- `OPENCUT_EDITOR_COHORT=all` is the immediate-replacement default.
 - `OPENCUT_EDITOR_INTERNAL_DOMAIN=hookforge.local` marks internal cohort email-domain gate.
 - `OPENCUT_EDITOR_BETA_ALLOWLIST=` comma-separated beta allowlist emails.
 - `NEXT_PUBLIC_AI_EDITOR_DEFAULT=true` makes AI editor creation the dashboard default CTA.
@@ -153,10 +153,11 @@ Implemented route handlers:
 - `POST /api/projects-v2/:id/media/register` v2 freeform media register + timeline append
 - `GET /api/projects-v2/:id/timeline` v2 timeline fetch
 - `PATCH /api/projects-v2/:id/timeline` v2 timeline patch
+- `GET /api/projects-v2/:id/editor-health` v2 editor sync/queue/render readiness snapshot
 - `GET /api/projects-v2/presets` quick-start preset catalog
 - `POST /api/projects-v2/:id/presets/apply` apply quick-start preset macro to v2 project
 - `POST /api/projects-v2/:id/chat/plan` deterministic chat plan (preview)
-- `POST /api/projects-v2/:id/chat/apply` apply approved chat plan with invariant checks
+- `POST /api/projects-v2/:id/chat/apply` apply approved chat plan with invariant checks (`planRevisionHash` required)
 - `POST /api/projects-v2/:id/chat/undo` undo chat apply by undo token
 - `POST /api/projects-v2/:id/render/final` enqueue final render for v2 project
 - `GET /api/projects/:id` fetch project + assets
@@ -177,6 +178,9 @@ Implemented route handlers:
 - `GET /api/projects-v2/:id/transcript` projects-v2 alias of transcript fetch
 - `POST /api/projects-v2/:id/transcript/auto` projects-v2 alias of transcript auto
 - `PATCH /api/projects-v2/:id/transcript` projects-v2 alias of transcript patch
+- `GET /api/projects-v2/:id/transcript/search` transcript segment search with match offsets
+- `POST /api/projects-v2/:id/transcript/ops/preview` transcript op preview (no destructive apply)
+- `POST /api/projects-v2/:id/transcript/ops/apply` transcript op apply path
 - `POST /api/projects/:id/ai-edit` queue one-click AI edit pipeline
 - `POST /api/projects/:id/chat-edit` deterministic chat-edit planner + revision append
 - `POST /api/ai-creator/generate` queue creator generation flow
@@ -442,6 +446,46 @@ Implemented:
   - `tests/opencut-metrics.test.ts`
   - `pnpm test`
   - `pnpm test:e2e:slice12`
+
+## Descript-First UX Replacement (Implemented)
+
+Implemented on `/opencut/projects-v2/[id]`:
+
+- Replaced card-style shell with fixed editor IA:
+  - left rail for media/scenes/quick actions/history
+  - center transcript-first canvas
+  - right preview/inspector/chat co-editor
+  - expandable bottom timeline rail
+- Transcript depth improvements:
+  - search/jump to segments
+  - word-range selection
+  - preview-first ripple delete (`transcript/ops/preview`)
+  - apply path (`transcript/ops/apply`) with issues surface
+  - low-confidence badges and speaker relabel/split/merge controls
+- Timeline ergonomics:
+  - compact lane view with collapse/reorder
+  - clip move/trim/split/merge/remove controls
+  - CapCut-style shortcuts:
+    - `Cmd/Ctrl+B` split at playhead
+    - `Delete` ripple delete selected clip/segment
+    - `Shift+D` duplicate selected clip
+    - `[` and `]` trim in/out to playhead
+    - `Space`, `J/K/L` transport
+- Chat co-editor strict flow:
+  - plan -> grouped diff review -> apply
+  - apply requires `planRevisionHash`
+  - one-click undo with lineage checks
+- Reliability UX:
+  - editor health status chip via `GET /api/projects-v2/:id/editor-health`
+  - queue/render readiness surfaced in editor
+  - operation history and autosave state
+
+Validation:
+
+- `pnpm test`
+- `pnpm test:e2e:freeform`
+- `pnpm test:e2e:slice12`
+- `pnpm test:e2e:phase01234567-enterprise`
 
 ## Freeform + Chat-First Cutover (Implemented)
 

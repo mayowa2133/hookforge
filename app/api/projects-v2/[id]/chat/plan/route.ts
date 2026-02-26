@@ -17,15 +17,33 @@ export async function POST(request: Request, { params }: Context) {
   try {
     const body = ChatPlanSchema.parse(await request.json());
     const { planJob, execution } = await createChatPlan(params.id, body.prompt, body.attachmentAssetIds ?? []);
+    const output = (planJob.output ?? {}) as {
+      planRevisionHash?: string;
+      diffGroups?: unknown;
+    };
+    const validationIssues = execution.planValidation.reasons.map((reason) => ({
+      code: "PLAN_VALIDATION",
+      message: reason,
+      severity: "WARN" as const
+    }));
 
     return jsonOk({
       planId: planJob.id,
+      planRevisionHash: output.planRevisionHash ?? null,
       confidence: execution.planValidation.averageConfidence,
       requiresConfirmation: true,
       executionMode: execution.executionMode,
       opsPreview: execution.appliedTimelineOperations,
       constrainedSuggestions: execution.constrainedSuggestions,
-      issues: execution.invariantIssues
+      diffGroups: Array.isArray(output.diffGroups) ? output.diffGroups : [],
+      issues: [
+        ...validationIssues,
+        ...execution.invariantIssues.map((issue) => ({
+          code: issue.code,
+          message: issue.message,
+          severity: "ERROR" as const
+        }))
+      ]
     }, 202);
   } catch (error) {
     return routeErrorToResponse(error);

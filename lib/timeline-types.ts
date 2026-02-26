@@ -41,7 +41,20 @@ export type TimelineTrack = {
   clips: TimelineClip[];
 };
 
-export type TimelineOperation =
+export type TimelineSelectionState = {
+  selectedTrackId?: string | null;
+  selectedClipId?: string | null;
+  selectedSegmentId?: string | null;
+  playheadMs?: number | null;
+  language?: string;
+};
+
+export type TimelineOperationMeta = {
+  selectionContext?: TimelineSelectionState;
+  uiIntent?: "manual_edit" | "chat_apply" | "transcript_apply" | "preset_macro" | "system_sync";
+};
+
+type TimelineOperationBase =
   | {
       op: "create_track";
       trackId?: string;
@@ -150,6 +163,8 @@ export type TimelineOperation =
       width?: number;
       height?: number;
     };
+
+export type TimelineOperation = TimelineOperationBase & TimelineOperationMeta;
 
 export type TimelineRevisionEntry = {
   id: string;

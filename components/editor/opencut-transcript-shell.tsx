@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,42 +10,48 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
   applyProjectV2ChatEdit,
-  applyProjectV2Preset,
+  applyTranscriptOps,
   autoTranscript,
-  getProjectV2EditorState,
-  getProjectV2Presets,
-  getOpenCutMetrics,
   getAiJob,
   getLegacyProject,
+  getProjectV2EditorHealth,
   getRenderJob,
   getTimeline,
   getTranscript,
-  importProjectV2Media,
   patchTimeline,
-  patchTranscript,
   planProjectV2ChatEdit,
-  registerProjectV2Media,
+  previewTranscriptOps,
+  searchTranscript,
   startRender,
   trackOpenCutTelemetry,
   undoProjectV2ChatEdit,
   type ChatApplyResponse,
   type ChatPlanResponse,
-  type EditorStatePayload,
+  type EditorHealthStatus,
   type LegacyProjectPayload,
-  type OpenCutMetricsResponse,
-  type PresetCatalogResponse,
   type TimelineOperation,
   type TimelinePayload,
-  type TranscriptPayload
+  type TranscriptPayload,
+  type TranscriptRangeSelection
 } from "@/lib/opencut/hookforge-client";
 import { clampPlaybackSeekSeconds, computeSplitPointMs, computeTrackReorderTarget } from "@/lib/opencut/timeline-helpers";
 
 type OpenCutTranscriptShellProps = {
   projectV2Id: string;
-  legacyProjectId: string | null;
+  legacyProjectId: string;
   title: string;
   status: string;
 };
+
+type OperationHistoryEntry = {
+  id: string;
+  label: string;
+  detail: string;
+  createdAt: string;
+  status: "SUCCESS" | "INFO" | "ERROR";
+};
+
+type AutosaveStatus = "SAVED" | "SAVING" | "ERROR";
 
 function formatMs(ms: number) {
   const safe = Math.max(0, Math.floor(ms));
@@ -54,6 +60,13 @@ function formatMs(ms: number) {
   const seconds = totalSeconds % 60;
   const centiseconds = Math.floor((safe % 1000) / 10);
   return `${minutes}:${seconds.toString().padStart(2, "0")}.${centiseconds.toString().padStart(2, "0")}`;
+}
+
+function safeRatio(numerator: number, denominator: number) {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, numerator / denominator));
 }
 
 function pickPreviewAsset(project: LegacyProjectPayload["project"] | null) {
@@ -78,50 +91,69 @@ function isTypingTarget(eventTarget: EventTarget | null) {
   return tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
 }
 
-function summarizeOps(
-  ops: Array<{
-    op: string;
-    [key: string]: unknown;
-  }>,
-  max = 4
-) {
-  const lines = ops.slice(0, max).map((op, index) => {
-    const payload = Object.entries(op)
-      .filter(([key]) => key !== "op")
-      .map(([key, value]) => `${key}=${String(value)}`)
-      .join(" ");
-    return `${index + 1}. ${op.op}${payload ? ` ${payload}` : ""}`;
-  });
-  if (ops.length > max) {
-    lines.push(`+${ops.length - max} more operation(s)`);
+function buildHistoryEntry(input: Omit<OperationHistoryEntry, "id" | "createdAt">): OperationHistoryEntry {
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(),
+    ...input
+  };
+}
+
+function confidenceBadge(confidence: number | null, minConfidence: number) {
+  if (confidence === null) {
+    return { label: "No score", variant: "outline" as const, className: "text-muted-foreground" };
   }
-  return lines;
+  if (confidence < minConfidence) {
+    return { label: `Low ${confidence.toFixed(2)}`, variant: "outline" as const, className: "border-destructive/70 text-destructive" };
+  }
+  return { label: `${confidence.toFixed(2)}`, variant: "secondary" as const, className: "" };
 }
 
 export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, status }: OpenCutTranscriptShellProps) {
   const [project, setProject] = useState<LegacyProjectPayload["project"] | null>(null);
   const [timeline, setTimeline] = useState<TimelinePayload | null>(null);
   const [transcript, setTranscript] = useState<TranscriptPayload | null>(null);
+  const [health, setHealth] = useState<EditorHealthStatus | null>(null);
   const [language, setLanguage] = useState("en");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
   const [selectedTrackId, setSelectedTrackId] = useState("");
   const [selectedClipId, setSelectedClipId] = useState("");
   const [segmentDraft, setSegmentDraft] = useState("");
   const [speakerDraft, setSpeakerDraft] = useState("");
-  const [previewOnly, setPreviewOnly] = useState(false);
-  const [minConfidenceForRipple, setMinConfidenceForRipple] = useState(0.86);
+  const [deleteStartMs, setDeleteStartMs] = useState("0");
+  const [deleteEndMs, setDeleteEndMs] = useState("240");
+  const [clipMoveInMs, setClipMoveInMs] = useState("0");
+  const [clipDurationMs, setClipDurationMs] = useState("1200");
+  const [trimStartMs, setTrimStartMs] = useState("0");
+  const [trimEndMs, setTrimEndMs] = useState("0");
+  const [playheadMs, setPlayheadMs] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
-  const [opResult, setOpResult] = useState<{
+  const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("SAVED");
+  const [operationHistory, setOperationHistory] = useState<OperationHistoryEntry[]>([]);
+  const [minConfidenceForRipple, setMinConfidenceForRipple] = useState(0.86);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchMatches, setSearchMatches] = useState<Array<{
+    segmentId: string;
+    startMs: number;
+    endMs: number;
+    text: string;
+    confidenceAvg: number | null;
+    matchStart: number;
+    matchEnd: number;
+  }>>([]);
+  const [rangeSelection, setRangeSelection] = useState<TranscriptRangeSelection>({
+    startWordIndex: 0,
+    endWordIndex: 0
+  });
+  const [lastTranscriptPreview, setLastTranscriptPreview] = useState<{
     applied: boolean;
     suggestionsOnly: boolean;
+    revisionId: string | null;
     issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
-    revisionId: string | null;
+    timelineOps: Array<{ op: string; [key: string]: unknown }>;
   } | null>(null);
-  const [timelineResult, setTimelineResult] = useState<{
-    revisionId: string | null;
-    revision: number;
-  } | null>(null);
+  const [timelineResult, setTimelineResult] = useState<{ revisionId: string | null; revision: number } | null>(null);
   const [autoJobId, setAutoJobId] = useState<string | null>(null);
   const [autoJobStatus, setAutoJobStatus] = useState<{ status: string; progress: number } | null>(null);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
@@ -131,40 +163,29 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     outputUrl: string | null;
     errorMessage: string | null;
   } | null>(null);
+  const [timelineExpanded, setTimelineExpanded] = useState(true);
+  const [zoomPercent, setZoomPercent] = useState(100);
+  const [collapsedTracks, setCollapsedTracks] = useState<Record<string, boolean>>({});
+  const [segmentWindowStart, setSegmentWindowStart] = useState(0);
+  const [timelineWindowStart, setTimelineWindowStart] = useState(0);
   const [chatPrompt, setChatPrompt] = useState("");
-  const [chatAttachmentIds, setChatAttachmentIds] = useState("");
-  const [chatPlanResult, setChatPlanResult] = useState<ChatPlanResponse | null>(null);
+  const [chatPlan, setChatPlan] = useState<ChatPlanResponse | null>(null);
   const [chatApplyResult, setChatApplyResult] = useState<ChatApplyResponse | null>(null);
   const [chatUndoToken, setChatUndoToken] = useState<string | null>(null);
   const [chatUndoResult, setChatUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
-  const [chatJobId, setChatJobId] = useState<string | null>(null);
-  const [chatJobStatus, setChatJobStatus] = useState<{ status: string; progress: number } | null>(null);
-  const [opencutMetrics, setOpencutMetrics] = useState<OpenCutMetricsResponse | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [mediaAssets, setMediaAssets] = useState<EditorStatePayload["mediaAssets"]>([]);
-  const [presetCatalog, setPresetCatalog] = useState<PresetCatalogResponse["presets"]>([]);
-  const [presetId, setPresetId] = useState("");
-  const [deleteStartMs, setDeleteStartMs] = useState("0");
-  const [deleteEndMs, setDeleteEndMs] = useState("220");
-  const [clipMoveInMs, setClipMoveInMs] = useState("0");
-  const [clipDurationMs, setClipDurationMs] = useState("1200");
-  const [trimStartMs, setTrimStartMs] = useState("0");
-  const [trimEndMs, setTrimEndMs] = useState("0");
-  const [playheadMs, setPlayheadMs] = useState(0);
 
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
-  const editorOpenTrackedRef = useRef(false);
-  const renderCompletionEventTrackedRef = useRef<string | null>(null);
-
-  const selectedSegment = useMemo(
-    () => transcript?.segments.find((segment) => segment.id === selectedSegmentId) ?? null,
-    [selectedSegmentId, transcript?.segments]
-  );
+  const openedTelemetryRef = useRef(false);
 
   const orderedTracks = useMemo(() => {
     const tracks = timeline?.timeline.tracks ?? [];
     return [...tracks].sort((a, b) => a.order - b.order);
   }, [timeline?.timeline.tracks]);
+
+  const selectedSegment = useMemo(
+    () => transcript?.segments.find((segment) => segment.id === selectedSegmentId) ?? null,
+    [selectedSegmentId, transcript?.segments]
+  );
 
   const selectedTrack = useMemo(
     () => orderedTracks.find((track) => track.id === selectedTrackId) ?? null,
@@ -176,86 +197,73 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       return null;
     }
     return selectedTrack.clips.find((clip) => clip.id === selectedClipId) ?? null;
-  }, [selectedTrack, selectedClipId]);
+  }, [selectedClipId, selectedTrack]);
 
   const previewAsset = useMemo(() => pickPreviewAsset(project), [project]);
-  const canRender = (project?.assets.length ?? 0) > 0 && project?.status !== "RENDERING";
+  const segmentWindowSize = 220;
+  const timelineWindowSize = 60;
+  const totalSegments = transcript?.segments.length ?? 0;
 
-  const trackOpenCutEvent = async (
-    event: "editor_open" | "transcript_edit_apply" | "chat_edit_apply" | "render_start" | "render_done" | "render_error",
-    outcome: "SUCCESS" | "ERROR" | "INFO",
-    metadata?: Record<string, unknown>
-  ) => {
-    try {
-      await trackOpenCutTelemetry({
-        projectId: projectV2Id,
-        event,
-        outcome,
-        metadata
-      });
-    } catch {
-      // Telemetry should never block editing flows.
-    }
-  };
+  const visibleSegments = useMemo(
+    () => transcript?.segments.slice(segmentWindowStart, segmentWindowStart + segmentWindowSize) ?? [],
+    [segmentWindowStart, transcript?.segments]
+  );
 
-  const refreshOpenCutMetrics = async () => {
-    try {
-      const payload = await getOpenCutMetrics(24);
-      setOpencutMetrics(payload);
-    } catch {
-      // Metrics are non-blocking UI observability.
-    }
-  };
+  const visibleTracks = useMemo(
+    () => orderedTracks.slice(timelineWindowStart, timelineWindowStart + timelineWindowSize),
+    [orderedTracks, timelineWindowStart]
+  );
 
-  const loadProjectSurface = async () => {
-    const [projectPayload, timelinePayload, editorState] = await Promise.all([
-      getLegacyProject(projectV2Id),
-      getTimeline(projectV2Id),
-      getProjectV2EditorState(projectV2Id)
-    ]);
-    setProject(projectPayload.project);
-    setTimeline(timelinePayload);
-    setMediaAssets(editorState.mediaAssets);
-  };
+  const appendHistory = useCallback((entry: Omit<OperationHistoryEntry, "id" | "createdAt">) => {
+    setOperationHistory((previous) => [buildHistoryEntry(entry), ...previous].slice(0, 30));
+  }, []);
 
-  const loadTranscript = async () => {
-    const next = await getTranscript(projectV2Id, language);
-    setTranscript(next);
-
-    if (next.segments.length === 0) {
-      setSelectedSegmentId("");
-      setSegmentDraft("");
-      setSpeakerDraft("");
+  const syncSelectedClipDraft = useCallback((trackId: string, clipId: string, sourceTimeline?: TimelinePayload | null) => {
+    const state = sourceTimeline ?? timeline;
+    if (!state) {
       return;
     }
-
-    const keepCurrent = next.segments.find((segment) => segment.id === selectedSegmentId);
-    const active = keepCurrent ?? next.segments[0];
-    setSelectedSegmentId(active.id);
-    setSegmentDraft(active.text);
-    setSpeakerDraft(active.speakerLabel ?? "");
-    setDeleteStartMs(String(active.startMs));
-    setDeleteEndMs(String(Math.min(active.endMs, active.startMs + 220)));
-  };
-
-  const syncSelectedClipDraft = (trackId: string, clipId: string, nextTimeline?: TimelinePayload | null) => {
-    const sourceTimeline = nextTimeline ?? timeline;
-    if (!sourceTimeline) {
-      return;
-    }
-    const track = sourceTimeline.timeline.tracks.find((entry) => entry.id === trackId);
-    const clip = track?.clips.find((entry) => entry.id === clipId);
+    const track = state.timeline.tracks.find((item) => item.id === trackId);
+    const clip = track?.clips.find((item) => item.id === clipId);
     if (!track || !clip) {
       return;
     }
-
     setSelectedTrackId(track.id);
     setSelectedClipId(clip.id);
     setClipMoveInMs(String(clip.timelineInMs));
     setClipDurationMs(String(Math.max(120, clip.timelineOutMs - clip.timelineInMs)));
     setTrimStartMs("0");
     setTrimEndMs("0");
-  };
+  }, [timeline]);
+
+  const loadProjectSurface = useCallback(async () => {
+    const [projectPayload, timelinePayload, healthPayload] = await Promise.all([
+      getLegacyProject(projectV2Id),
+      getTimeline(projectV2Id),
+      getProjectV2EditorHealth(projectV2Id)
+    ]);
+    setProject(projectPayload.project);
+    setTimeline(timelinePayload);
+    setHealth(healthPayload);
+  }, [projectV2Id]);
+
+  const loadTranscript = useCallback(async () => {
+    const next = await getTranscript(projectV2Id, language);
+    setTranscript(next);
+    if (next.segments.length === 0) {
+      setSelectedSegmentId("");
+      setSegmentDraft("");
+      setSpeakerDraft("");
+      return;
+    }
+    const keepCurrent = next.segments.find((segment) => segment.id === selectedSegmentId);
+    const active = keepCurrent ?? next.segments[0];
+    setSelectedSegmentId(active.id);
+    setSegmentDraft(active.text);
+    setSpeakerDraft(active.speakerLabel ?? "");
+    setDeleteStartMs(String(active.startMs));
+    setDeleteEndMs(String(Math.min(active.endMs, active.startMs + 240)));
+  }, [language, projectV2Id, selectedSegmentId]);
 
   useEffect(() => {
     let canceled = false;
@@ -273,34 +281,28 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     return () => {
       canceled = true;
     };
-  }, [projectV2Id, language]);
+  }, [loadProjectSurface, loadTranscript]);
 
   useEffect(() => {
-    if (!project || editorOpenTrackedRef.current) {
+    if (openedTelemetryRef.current) {
       return;
     }
-    editorOpenTrackedRef.current = true;
-    void trackOpenCutEvent("editor_open", "SUCCESS", {
-      templateSlug: project.template.slug,
-      templateName: project.template.name
-    });
-  }, [project]);
+    openedTelemetryRef.current = true;
+    void trackOpenCutTelemetry({
+      projectId: projectV2Id,
+      event: "editor_open",
+      outcome: "INFO"
+    }).catch(() => {});
+  }, [projectV2Id]);
 
   useEffect(() => {
-    void refreshOpenCutMetrics();
-    void getProjectV2Presets()
-      .then((payload) => {
-        setPresetCatalog(payload.presets);
-        if (!presetId && payload.presets[0]) {
-          setPresetId(payload.presets[0].id);
-        }
-      })
-      .catch(() => undefined);
     const interval = setInterval(() => {
-      void refreshOpenCutMetrics();
-    }, 30000);
+      void getProjectV2EditorHealth(projectV2Id)
+        .then((payload) => setHealth(payload))
+        .catch(() => {});
+    }, 10000);
     return () => clearInterval(interval);
-  }, [presetId]);
+  }, [projectV2Id]);
 
   useEffect(() => {
     if (!orderedTracks.length) {
@@ -308,44 +310,60 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setSelectedClipId("");
       return;
     }
-
     const hasTrack = orderedTracks.some((track) => track.id === selectedTrackId);
     const fallbackTrack = hasTrack ? orderedTracks.find((track) => track.id === selectedTrackId) ?? orderedTracks[0] : orderedTracks[0];
-    const fallbackClip = fallbackTrack.clips[0] ?? null;
-
+    const hasClip = fallbackTrack.clips.some((clip) => clip.id === selectedClipId);
     if (!hasTrack) {
       setSelectedTrackId(fallbackTrack.id);
     }
-
-    const hasClip = fallbackTrack.clips.some((clip) => clip.id === selectedClipId);
-    if (!hasClip) {
-      if (fallbackClip) {
-        syncSelectedClipDraft(fallbackTrack.id, fallbackClip.id);
-      } else {
-        setSelectedClipId("");
-      }
+    if (!hasClip && fallbackTrack.clips[0]) {
+      syncSelectedClipDraft(fallbackTrack.id, fallbackTrack.clips[0].id);
     }
-  }, [orderedTracks, selectedClipId, selectedTrackId]);
+  }, [orderedTracks, selectedClipId, selectedTrackId, syncSelectedClipDraft]);
+
+  useEffect(() => {
+    if (!selectedSegment) {
+      return;
+    }
+    const firstWordIndex = transcript?.words.findIndex(
+      (word) => word.startMs >= selectedSegment.startMs && word.endMs <= selectedSegment.endMs
+    ) ?? -1;
+    if (firstWordIndex >= 0) {
+      const matchingWordCount = transcript?.words.filter(
+        (word) => word.startMs >= selectedSegment.startMs && word.endMs <= selectedSegment.endMs
+      ).length ?? 1;
+      setRangeSelection({
+        startWordIndex: firstWordIndex,
+        endWordIndex: firstWordIndex + Math.max(0, matchingWordCount - 1)
+      });
+    }
+  }, [selectedSegment, transcript?.words]);
 
   useEffect(() => {
     if (!autoJobId) {
       return;
     }
-
     const interval = setInterval(async () => {
       try {
         const payload = await getAiJob(autoJobId);
-        setAutoJobStatus({
-          status: payload.aiJob.status,
-          progress: payload.aiJob.progress
-        });
-
+        setAutoJobStatus({ status: payload.aiJob.status, progress: payload.aiJob.progress });
         if (payload.aiJob.status === "DONE") {
           await Promise.all([loadTranscript(), loadProjectSurface()]);
+          appendHistory({
+            label: "Transcript auto generation",
+            detail: "Auto transcript completed",
+            status: "SUCCESS"
+          });
           setAutoJobId(null);
         }
         if (payload.aiJob.status === "ERROR" || payload.aiJob.status === "CANCELED") {
-          setPanelError(payload.aiJob.errorMessage ?? `Auto transcript job ${payload.aiJob.status.toLowerCase()}`);
+          const message = payload.aiJob.errorMessage ?? `Auto transcript job ${payload.aiJob.status.toLowerCase()}`;
+          setPanelError(message);
+          appendHistory({
+            label: "Transcript auto generation",
+            detail: message,
+            status: "ERROR"
+          });
           setAutoJobId(null);
         }
       } catch (error) {
@@ -353,93 +371,236 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         setAutoJobId(null);
       }
     }, 2200);
-
     return () => clearInterval(interval);
-  }, [autoJobId]);
+  }, [appendHistory, autoJobId, loadProjectSurface, loadTranscript]);
 
   useEffect(() => {
     if (!renderJobId) {
       return;
     }
-
     const interval = setInterval(async () => {
       try {
         const payload = await getRenderJob(renderJobId);
         setRenderStatus(payload.renderJob);
-        if (payload.renderJob.status === "DONE" || payload.renderJob.status === "ERROR") {
-          if (renderCompletionEventTrackedRef.current !== renderJobId) {
-            renderCompletionEventTrackedRef.current = renderJobId;
-            if (payload.renderJob.status === "DONE") {
-              void trackOpenCutEvent("render_done", "SUCCESS", {
-                renderJobId,
-                progress: payload.renderJob.progress
-              });
-            } else {
-              void trackOpenCutEvent("render_error", "ERROR", {
-                renderJobId,
-                progress: payload.renderJob.progress
-              });
-            }
-            void refreshOpenCutMetrics();
-          }
+        if (payload.renderJob.status === "DONE") {
           await loadProjectSurface();
+          appendHistory({
+            label: "Final render",
+            detail: `Render completed (${payload.renderJob.id.slice(0, 8)})`,
+            status: "SUCCESS"
+          });
+          void trackOpenCutTelemetry({
+            projectId: projectV2Id,
+            event: "render_done",
+            outcome: "SUCCESS"
+          }).catch(() => {});
+          setRenderJobId(null);
+        }
+        if (payload.renderJob.status === "ERROR") {
+          appendHistory({
+            label: "Final render",
+            detail: payload.renderJob.errorMessage ?? "Render failed",
+            status: "ERROR"
+          });
+          void trackOpenCutTelemetry({
+            projectId: projectV2Id,
+            event: "render_error",
+            outcome: "ERROR"
+          }).catch(() => {});
           setRenderJobId(null);
         }
       } catch (error) {
-        void trackOpenCutEvent("render_error", "ERROR", {
-          renderJobId,
-          phase: "poll"
-        });
         setPanelError(error instanceof Error ? error.message : "Failed to poll render job");
         setRenderJobId(null);
       }
     }, 2200);
-
     return () => clearInterval(interval);
-  }, [renderJobId]);
+  }, [appendHistory, loadProjectSurface, projectV2Id, renderJobId]);
 
-  useEffect(() => {
-    if (!chatJobId) {
-      return;
+  const timelineSelectionContext = useMemo(() => ({
+    selectedTrackId: selectedTrackId || null,
+    selectedClipId: selectedClipId || null,
+    selectedSegmentId: selectedSegmentId || null,
+    playheadMs,
+    language
+  }), [language, playheadMs, selectedClipId, selectedSegmentId, selectedTrackId]);
+
+  const applyTimelineOperations = useCallback(async (operations: TimelineOperation[], action: string, uiIntent: TimelineOperation["uiIntent"] = "manual_edit") => {
+    setBusy(action);
+    setPanelError(null);
+    setTimelineResult(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await patchTimeline(
+        projectV2Id,
+        operations.map((operation) => ({
+          ...operation,
+          selectionContext: operation.selectionContext ?? timelineSelectionContext,
+          uiIntent: operation.uiIntent ?? uiIntent
+        }))
+      );
+      setTimeline(payload);
+      setTimelineResult({
+        revisionId: payload.revisionId,
+        revision: payload.revision
+      });
+      await Promise.all([loadTranscript(), loadProjectSurface()]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Timeline edit",
+        detail: `${action} applied (rev ${payload.revision})`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Timeline operation failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Timeline edit",
+        detail: `${action} failed: ${message}`,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
     }
+  }, [appendHistory, loadProjectSurface, loadTranscript, projectV2Id, timelineSelectionContext]);
 
-    const interval = setInterval(async () => {
-      try {
-        const payload = await getAiJob(chatJobId);
-        setChatJobStatus({
-          status: payload.aiJob.status,
-          progress: payload.aiJob.progress
-        });
-        if (payload.aiJob.status === "DONE") {
-          await Promise.all([loadProjectSurface(), loadTranscript()]);
-          setChatJobId(null);
+  const runTranscriptPreview = useCallback(async (operations: Array<{
+    op: "replace_text" | "split_segment" | "merge_segments" | "delete_range" | "set_speaker" | "normalize_punctuation";
+    [key: string]: unknown;
+  }>, action: string) => {
+    setBusy(action);
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await previewTranscriptOps(projectV2Id, {
+        language,
+        operations: operations as never[],
+        minConfidenceForRipple
+      });
+      setLastTranscriptPreview(payload);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Transcript preview",
+        detail: `${action} preview: ${payload.timelineOps.length} timeline op(s)`,
+        status: "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Transcript preview failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Transcript preview",
+        detail: `${action} failed: ${message}`,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  }, [appendHistory, language, minConfidenceForRipple, projectV2Id]);
+
+  const runTranscriptApply = useCallback(async (operations: Array<{
+    op: "replace_text" | "split_segment" | "merge_segments" | "delete_range" | "set_speaker" | "normalize_punctuation";
+    [key: string]: unknown;
+  }>, action: string) => {
+    setBusy(action);
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await applyTranscriptOps(projectV2Id, {
+        language,
+        operations: operations as never[],
+        minConfidenceForRipple
+      });
+      setLastTranscriptPreview(payload);
+      await Promise.all([loadTranscript(), loadProjectSurface()]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Transcript apply",
+        detail: `${action}: ${payload.suggestionsOnly ? "suggestions only" : "applied"} (${payload.issues.length} issue(s))`,
+        status: payload.suggestionsOnly ? "INFO" : "SUCCESS"
+      });
+      void trackOpenCutTelemetry({
+        projectId: projectV2Id,
+        event: "transcript_edit_apply",
+        outcome: payload.suggestionsOnly ? "INFO" : "SUCCESS",
+        metadata: {
+          action,
+          suggestionsOnly: payload.suggestionsOnly,
+          issueCount: payload.issues.length
         }
-        if (payload.aiJob.status === "ERROR" || payload.aiJob.status === "CANCELED") {
-          setPanelError(payload.aiJob.errorMessage ?? `Chat edit job ${payload.aiJob.status.toLowerCase()}`);
-          setChatJobId(null);
-        }
-      } catch (error) {
-        setPanelError(error instanceof Error ? error.message : "Failed to poll chat edit job");
-        setChatJobId(null);
+      }).catch(() => {});
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Transcript operation failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Transcript apply",
+        detail: `${action} failed: ${message}`,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  }, [appendHistory, language, loadProjectSurface, loadTranscript, minConfidenceForRipple, projectV2Id]);
+
+  const transcriptRangeMs = useMemo(() => {
+    const words = transcript?.words ?? [];
+    if (words.length === 0) {
+      return null;
+    }
+    const start = Math.max(0, Math.min(rangeSelection.startWordIndex, words.length - 1));
+    const end = Math.max(start, Math.min(rangeSelection.endWordIndex, words.length - 1));
+    const first = words[start];
+    const last = words[end];
+    return {
+      startMs: first.startMs,
+      endMs: last.endMs,
+      startIndex: start,
+      endIndex: end
+    };
+  }, [rangeSelection.endWordIndex, rangeSelection.startWordIndex, transcript?.words]);
+
+  const chatConfidenceBand = useMemo(() => {
+    const score = chatPlan?.confidence ?? 0;
+    if (!chatPlan) {
+      return "N/A";
+    }
+    if (chatPlan.executionMode === "SUGGESTIONS_ONLY" || score < 0.65) {
+      return "Suggestions-only";
+    }
+    if (score < 0.8) {
+      return "Apply-with-confirm";
+    }
+    return "Applied";
+  }, [chatPlan]);
+
+  const clipAtSelectedSegment = useMemo(() => {
+    if (!selectedSegment) {
+      return null;
+    }
+    for (const track of orderedTracks) {
+      const clip = track.clips.find((entry) => selectedSegment.startMs >= entry.timelineInMs && selectedSegment.startMs <= entry.timelineOutMs);
+      if (clip) {
+        return {
+          trackId: track.id,
+          clipId: clip.id
+        };
       }
-    }, 2200);
-
-    return () => clearInterval(interval);
-  }, [chatJobId]);
+    }
+    return null;
+  }, [orderedTracks, selectedSegment]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target) || busy !== null) {
         return;
       }
-
       const video = previewVideoRef.current;
-      if (!video) {
-        return;
-      }
-
       const key = event.key.toLowerCase();
-      if (key === " ") {
+      const withCommand = event.metaKey || event.ctrlKey;
+
+      if (key === " " && video) {
         event.preventDefault();
         if (video.paused) {
           void video.play();
@@ -449,7 +610,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         return;
       }
 
-      if (key === "j") {
+      if (video && key === "j") {
         event.preventDefault();
         const next = clampPlaybackSeekSeconds({
           currentSeconds: video.currentTime,
@@ -461,13 +622,13 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         return;
       }
 
-      if (key === "k") {
+      if (video && key === "k") {
         event.preventDefault();
         video.pause();
         return;
       }
 
-      if (key === "l") {
+      if (video && key === "l") {
         event.preventDefault();
         const next = clampPlaybackSeekSeconds({
           currentSeconds: video.currentTime,
@@ -479,7 +640,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         return;
       }
 
-      if (key === "s" && selectedTrack && selectedClip) {
+      if (selectedTrack && selectedClip && ((withCommand && key === "b") || (!withCommand && key === "s"))) {
         event.preventDefault();
         const splitMs = computeSplitPointMs(
           {
@@ -489,27 +650,98 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
           playheadMs
         );
         void applyTimelineOperations(
-          [
-            {
-              op: "split_clip",
-              trackId: selectedTrack.id,
-              clipId: selectedClip.id,
-              splitMs
-            }
-          ],
-          "timeline_split"
+          [{ op: "split_clip", trackId: selectedTrack.id, clipId: selectedClip.id, splitMs }],
+          "split_clip"
         );
+        return;
+      }
+
+      if (selectedTrack && selectedClip && event.shiftKey && key === "d") {
+        event.preventDefault();
+        const durationMs = Math.max(120, selectedClip.timelineOutMs - selectedClip.timelineInMs);
+        void applyTimelineOperations(
+          [{
+            op: "add_clip",
+            trackId: selectedTrack.id,
+            assetId: selectedClip.assetId,
+            slotKey: selectedClip.slotKey,
+            label: `${selectedClip.label ?? "Clip"} Copy`,
+            timelineInMs: selectedClip.timelineInMs + 120,
+            durationMs,
+            sourceInMs: selectedClip.sourceInMs,
+            sourceOutMs: selectedClip.sourceOutMs
+          }],
+          "duplicate_clip"
+        );
+        return;
+      }
+
+      if (selectedTrack && selectedClip && (key === "[" || key === "]")) {
+        event.preventDefault();
+        if (key === "[") {
+          const trimStartMs = Math.max(0, playheadMs - selectedClip.timelineInMs);
+          void applyTimelineOperations(
+            [{ op: "trim_clip", trackId: selectedTrack.id, clipId: selectedClip.id, trimStartMs }],
+            "trim_in_to_playhead"
+          );
+        } else {
+          const trimEndMs = Math.max(0, selectedClip.timelineOutMs - playheadMs);
+          void applyTimelineOperations(
+            [{ op: "trim_clip", trackId: selectedTrack.id, clipId: selectedClip.id, trimEndMs }],
+            "trim_out_to_playhead"
+          );
+        }
+        return;
+      }
+
+      if ((key === "delete" || key === "backspace") && selectedTrack && selectedClip) {
+        event.preventDefault();
+        void applyTimelineOperations(
+          [{ op: "remove_clip", trackId: selectedTrack.id, clipId: selectedClip.id }],
+          "ripple_delete_clip"
+        );
+        return;
+      }
+
+      if ((key === "delete" || key === "backspace") && selectedSegment) {
+        event.preventDefault();
+        void runTranscriptApply(
+          [{ op: "delete_range", startMs: selectedSegment.startMs, endMs: selectedSegment.endMs }],
+          "ripple_delete_segment"
+        );
+        return;
+      }
+
+      if (withCommand && event.shiftKey && key === "s" && selectedSegment) {
+        event.preventDefault();
+        const midpoint = selectedSegment.startMs + Math.floor((selectedSegment.endMs - selectedSegment.startMs) / 2);
+        void runTranscriptApply(
+          [{ op: "split_segment", segmentId: selectedSegment.id, splitMs: Math.max(selectedSegment.startMs + 80, midpoint) }],
+          "split_segment_shortcut"
+        );
+        return;
+      }
+
+      if (withCommand && event.shiftKey && key === "m" && selectedSegment && transcript) {
+        event.preventDefault();
+        const index = transcript.segments.findIndex((segment) => segment.id === selectedSegment.id);
+        const nextSegment = index >= 0 ? transcript.segments[index + 1] : null;
+        if (nextSegment) {
+          void runTranscriptApply(
+            [{ op: "merge_segments", firstSegmentId: selectedSegment.id, secondSegmentId: nextSegment.id }],
+            "merge_segment_shortcut"
+          );
+        }
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, playheadMs, selectedClip, selectedTrack]);
+  }, [applyTimelineOperations, busy, playheadMs, runTranscriptApply, selectedClip, selectedSegment, selectedTrack, transcript]);
 
   const runAutoTranscript = async () => {
-    setBusy("auto");
+    setBusy("auto_transcript");
     setPanelError(null);
-    setOpResult(null);
     try {
       const payload = await autoTranscript(projectV2Id, {
         language,
@@ -530,170 +762,108 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }
   };
 
-  const applyTranscriptOperation = async (
-    operations: Array<
-      | { op: "replace_text"; segmentId: string; text: string }
-      | { op: "split_segment"; segmentId: string; splitMs: number }
-      | { op: "merge_segments"; firstSegmentId: string; secondSegmentId: string }
-      | { op: "delete_range"; startMs: number; endMs: number }
-      | { op: "set_speaker"; segmentId: string; speakerLabel: string | null }
-      | { op: "normalize_punctuation"; segmentIds?: string[] }
-    >,
-    action: string
-  ) => {
-    setBusy(action);
+  const runSearch = async () => {
+    setBusy("transcript_search");
     setPanelError(null);
-    setOpResult(null);
     try {
-      const payload = await patchTranscript(projectV2Id, {
-        language,
-        operations,
-        minConfidenceForRipple,
-        previewOnly
-      });
-      setOpResult({
-        applied: payload.applied,
-        suggestionsOnly: payload.suggestionsOnly,
-        issues: payload.issues,
-        revisionId: payload.revisionId
-      });
-      await Promise.all([loadTranscript(), loadProjectSurface()]);
-      void trackOpenCutEvent("transcript_edit_apply", "SUCCESS", {
-        operationCount: operations.length,
-        suggestionsOnly: payload.suggestionsOnly,
-        issueCount: payload.issues.length
-      });
-      void refreshOpenCutMetrics();
+      const query = searchQuery.trim();
+      if (query.length < 2) {
+        setSearchMatches([]);
+        return;
+      }
+      const payload = await searchTranscript(projectV2Id, language, query);
+      setSearchMatches(payload.matches);
     } catch (error) {
-      void trackOpenCutEvent("transcript_edit_apply", "ERROR", {
-        operationCount: operations.length
-      });
-      setPanelError(error instanceof Error ? error.message : "Transcript operation failed");
+      setPanelError(error instanceof Error ? error.message : "Search failed");
     } finally {
       setBusy(null);
     }
   };
 
-  const applyTimelineOperations = async (operations: TimelineOperation[], action: string) => {
-    setBusy(action);
-    setPanelError(null);
-    setTimelineResult(null);
-    try {
-      const payload = await patchTimeline(projectV2Id, operations);
-      setTimeline(payload);
-      setTimelineResult({
-        revisionId: payload.revisionId,
-        revision: payload.revision
-      });
-      await loadTranscript();
-    } catch (error) {
-      setPanelError(error instanceof Error ? error.message : "Timeline operation failed");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const replaceText = async () => {
+  const applyReplaceText = async () => {
     if (!selectedSegment || !segmentDraft.trim()) {
       return;
     }
-    await applyTranscriptOperation(
-      [
-        {
-          op: "replace_text",
-          segmentId: selectedSegment.id,
-          text: segmentDraft.trim()
-        }
-      ],
+    await runTranscriptApply(
+      [{ op: "replace_text", segmentId: selectedSegment.id, text: segmentDraft.trim() }],
       "replace_text"
     );
   };
 
-  const splitSegment = async () => {
+  const applySplitSegment = async () => {
     if (!selectedSegment) {
       return;
     }
     const midpoint = selectedSegment.startMs + Math.floor((selectedSegment.endMs - selectedSegment.startMs) / 2);
-    await applyTranscriptOperation(
-      [
-        {
-          op: "split_segment",
-          segmentId: selectedSegment.id,
-          splitMs: Math.max(selectedSegment.startMs + 100, midpoint)
-        }
-      ],
+    await runTranscriptApply(
+      [{ op: "split_segment", segmentId: selectedSegment.id, splitMs: Math.max(selectedSegment.startMs + 80, midpoint) }],
       "split_segment"
     );
   };
 
-  const mergeWithNext = async () => {
-    if (!transcript || !selectedSegment) {
+  const applyMergeWithNext = async () => {
+    if (!selectedSegment || !transcript) {
       return;
     }
-    const currentIndex = transcript.segments.findIndex((segment) => segment.id === selectedSegment.id);
-    const nextSegment = currentIndex >= 0 ? transcript.segments[currentIndex + 1] : null;
+    const index = transcript.segments.findIndex((segment) => segment.id === selectedSegment.id);
+    const nextSegment = index >= 0 ? transcript.segments[index + 1] : null;
     if (!nextSegment) {
       return;
     }
-    await applyTranscriptOperation(
-      [
-        {
-          op: "merge_segments",
-          firstSegmentId: selectedSegment.id,
-          secondSegmentId: nextSegment.id
-        }
-      ],
-      "merge_segments"
+    await runTranscriptApply(
+      [{ op: "merge_segments", firstSegmentId: selectedSegment.id, secondSegmentId: nextSegment.id }],
+      "merge_segment"
     );
   };
 
-  const saveSpeaker = async () => {
+  const applySpeaker = async () => {
     if (!selectedSegment) {
       return;
     }
-    await applyTranscriptOperation(
-      [
-        {
-          op: "set_speaker",
-          segmentId: selectedSegment.id,
-          speakerLabel: speakerDraft.trim() ? speakerDraft.trim() : null
-        }
-      ],
+    await runTranscriptApply(
+      [{ op: "set_speaker", segmentId: selectedSegment.id, speakerLabel: speakerDraft.trim() || null }],
       "set_speaker"
     );
   };
 
-  const deleteRange = async () => {
+  const previewRangeDelete = async () => {
+    if (!transcriptRangeMs) {
+      return;
+    }
+    await runTranscriptPreview(
+      [{ op: "delete_range", startMs: transcriptRangeMs.startMs, endMs: transcriptRangeMs.endMs }],
+      "delete_range_preview"
+    );
+  };
+
+  const applyRangeDelete = async () => {
+    if (!transcriptRangeMs) {
+      return;
+    }
+    await runTranscriptApply(
+      [{ op: "delete_range", startMs: transcriptRangeMs.startMs, endMs: transcriptRangeMs.endMs }],
+      "delete_range_apply"
+    );
+  };
+
+  const applyManualDeleteRange = async () => {
     const start = Number(deleteStartMs);
     const end = Number(deleteEndMs);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       setPanelError("Delete range requires valid start/end ms.");
       return;
     }
-    await applyTranscriptOperation(
-      [
-        {
-          op: "delete_range",
-          startMs: Math.max(0, Math.floor(start)),
-          endMs: Math.floor(end)
-        }
-      ],
-      "delete_range"
+    await runTranscriptApply(
+      [{ op: "delete_range", startMs: Math.max(0, Math.floor(start)), endMs: Math.floor(end) }],
+      "delete_range_manual"
     );
   };
 
-  const normalizePunctuation = async () => {
-    await applyTranscriptOperation(
-      [
-        {
-          op: "normalize_punctuation"
-        }
-      ],
-      "normalize_punctuation"
-    );
+  const applyNormalizePunctuation = async () => {
+    await runTranscriptApply([{ op: "normalize_punctuation" }], "normalize_punctuation");
   };
 
-  const runTimelineSplit = async () => {
+  const splitTimelineAtPlayhead = async () => {
     if (!selectedTrack || !selectedClip) {
       return;
     }
@@ -705,105 +875,75 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       playheadMs
     );
     await applyTimelineOperations(
-      [
-        {
-          op: "split_clip",
-          trackId: selectedTrack.id,
-          clipId: selectedClip.id,
-          splitMs
-        }
-      ],
-      "timeline_split"
+      [{ op: "split_clip", trackId: selectedTrack.id, clipId: selectedClip.id, splitMs }],
+      "split_clip"
     );
   };
 
-  const runTimelineTrim = async () => {
-    if (!selectedTrack || !selectedClip) {
-      return;
-    }
-    const start = Math.max(0, Math.floor(Number(trimStartMs) || 0));
-    const end = Math.max(0, Math.floor(Number(trimEndMs) || 0));
-    await applyTimelineOperations(
-      [
-        {
-          op: "trim_clip",
-          trackId: selectedTrack.id,
-          clipId: selectedClip.id,
-          trimStartMs: start,
-          trimEndMs: end
-        }
-      ],
-      "timeline_trim"
-    );
-  };
-
-  const runTimelineMove = async () => {
-    if (!selectedTrack || !selectedClip) {
-      return;
-    }
-    const nextIn = Math.max(0, Math.floor(Number(clipMoveInMs) || 0));
-    await applyTimelineOperations(
-      [
-        {
-          op: "move_clip",
-          trackId: selectedTrack.id,
-          clipId: selectedClip.id,
-          timelineInMs: nextIn
-        }
-      ],
-      "timeline_move"
-    );
-  };
-
-  const runTimelineSetTiming = async () => {
-    if (!selectedTrack || !selectedClip) {
-      return;
-    }
-    const nextIn = Math.max(0, Math.floor(Number(clipMoveInMs) || 0));
-    const nextDuration = Math.max(120, Math.floor(Number(clipDurationMs) || 1200));
-    await applyTimelineOperations(
-      [
-        {
-          op: "set_clip_timing",
-          trackId: selectedTrack.id,
-          clipId: selectedClip.id,
-          timelineInMs: nextIn,
-          durationMs: nextDuration
-        }
-      ],
-      "timeline_set_timing"
-    );
-  };
-
-  const runTimelineMerge = async () => {
+  const trimTimeline = async () => {
     if (!selectedTrack || !selectedClip) {
       return;
     }
     await applyTimelineOperations(
-      [
-        {
-          op: "merge_clip_with_next",
-          trackId: selectedTrack.id,
-          clipId: selectedClip.id
-        }
-      ],
-      "timeline_merge"
+      [{
+        op: "trim_clip",
+        trackId: selectedTrack.id,
+        clipId: selectedClip.id,
+        trimStartMs: Math.max(0, Math.floor(Number(trimStartMs) || 0)),
+        trimEndMs: Math.max(0, Math.floor(Number(trimEndMs) || 0))
+      }],
+      "trim_clip"
     );
   };
 
-  const runTimelineRemove = async () => {
+  const moveTimelineClip = async () => {
     if (!selectedTrack || !selectedClip) {
       return;
     }
     await applyTimelineOperations(
-      [
-        {
-          op: "remove_clip",
-          trackId: selectedTrack.id,
-          clipId: selectedClip.id
-        }
-      ],
-      "timeline_remove"
+      [{
+        op: "move_clip",
+        trackId: selectedTrack.id,
+        clipId: selectedClip.id,
+        timelineInMs: Math.max(0, Math.floor(Number(clipMoveInMs) || 0))
+      }],
+      "move_clip"
+    );
+  };
+
+  const setTimelineClipTiming = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    await applyTimelineOperations(
+      [{
+        op: "set_clip_timing",
+        trackId: selectedTrack.id,
+        clipId: selectedClip.id,
+        timelineInMs: Math.max(0, Math.floor(Number(clipMoveInMs) || 0)),
+        durationMs: Math.max(120, Math.floor(Number(clipDurationMs) || 1200))
+      }],
+      "set_clip_timing"
+    );
+  };
+
+  const mergeTimelineClipWithNext = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    await applyTimelineOperations(
+      [{ op: "merge_clip_with_next", trackId: selectedTrack.id, clipId: selectedClip.id }],
+      "merge_clip_with_next"
+    );
+  };
+
+  const removeTimelineClip = async () => {
+    if (!selectedTrack || !selectedClip) {
+      return;
+    }
+    await applyTimelineOperations(
+      [{ op: "remove_clip", trackId: selectedTrack.id, clipId: selectedClip.id }],
+      "remove_clip"
     );
   };
 
@@ -813,174 +953,141 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       return;
     }
     await applyTimelineOperations(
-      [
-        {
-          op: "reorder_track",
-          trackId,
-          order: nextOrder
-        }
-      ],
-      "timeline_reorder"
+      [{ op: "reorder_track", trackId, order: nextOrder }],
+      "reorder_track"
     );
   };
 
-  const applyPreset = async () => {
-    if (!presetId) {
-      setPanelError("Select a preset first.");
-      return;
-    }
-    setBusy("preset_apply");
-    setPanelError(null);
-    try {
-      await applyProjectV2Preset(projectV2Id, presetId);
-      await Promise.all([loadProjectSurface(), loadTranscript()]);
-    } catch (error) {
-      setPanelError(error instanceof Error ? error.message : "Preset apply failed");
-    } finally {
-      setBusy(null);
-    }
+  const toggleTrackCollapsed = (trackId: string) => {
+    setCollapsedTracks((previous) => ({
+      ...previous,
+      [trackId]: !previous[trackId]
+    }));
   };
 
-  const uploadMediaAsset = async (file: File) => {
-    const mimeType = file.type || "application/octet-stream";
-    setUploading(true);
-    setPanelError(null);
-
-    try {
-      const presign = await importProjectV2Media(projectV2Id, {
-        fileName: file.name,
-        mimeType,
-        sizeBytes: file.size,
-        slot: mimeType.startsWith("audio/") ? "audio" : "primary"
-      });
-
-      const uploadResponse = await fetch(presign.uploadUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": mimeType
-        },
-        body: file
-      });
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload failed with status ${uploadResponse.status}`);
+  const jumpSegmentToTimeline = () => {
+    if (!clipAtSelectedSegment) {
+      return;
+    }
+    syncSelectedClipDraft(clipAtSelectedSegment.trackId, clipAtSelectedSegment.clipId);
+    const track = orderedTracks.find((entry) => entry.id === clipAtSelectedSegment.trackId);
+    const clip = track?.clips.find((entry) => entry.id === clipAtSelectedSegment.clipId);
+    if (clip) {
+      setPlayheadMs(clip.timelineInMs);
+      if (previewVideoRef.current) {
+        previewVideoRef.current.currentTime = clip.timelineInMs / 1000;
       }
-
-      await registerProjectV2Media(projectV2Id, {
-        storageKey: presign.storageKey,
-        mimeType,
-        originalFileName: file.name,
-        slot: mimeType.startsWith("audio/") ? "audio" : "primary"
-      });
-
-      await Promise.all([loadProjectSurface(), loadTranscript()]);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Upload failed";
-      setPanelError(message);
-    } finally {
-      setUploading(false);
     }
   };
 
-  const onMediaFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.currentTarget.value = "";
-    if (!file) {
+  const createChatPlan = async () => {
+    if (!chatPrompt.trim()) {
       return;
     }
-    await uploadMediaAsset(file);
-  };
-
-  const planChatEdit = async () => {
-    if (chatPrompt.trim().length < 4) {
-      setPanelError("Chat prompt must be at least 4 characters.");
-      return;
-    }
-
-    const attachmentAssetIds = chatAttachmentIds
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-
-    setBusy("chat_edit");
+    setBusy("chat_plan");
     setPanelError(null);
-    setChatUndoResult(null);
-    setChatPlanResult(null);
     setChatApplyResult(null);
-
+    setChatUndoResult(null);
     try {
-      const payload = await planProjectV2ChatEdit(projectV2Id, {
-        prompt: chatPrompt.trim(),
-        attachmentAssetIds: attachmentAssetIds.length > 0 ? attachmentAssetIds : undefined
+      const plan = await planProjectV2ChatEdit(projectV2Id, {
+        prompt: chatPrompt.trim()
       });
-
-      setChatPlanResult(payload);
-      setChatUndoToken(null);
-      setChatApplyResult(null);
-      setChatJobId(null);
-      setChatJobStatus(null);
-      void trackOpenCutEvent("chat_edit_apply", "SUCCESS", {
-        executionMode: payload.executionMode,
-        plannedOperationCount: payload.opsPreview.length,
-        constrainedSuggestionCount: payload.constrainedSuggestions.length
+      setChatPlan(plan);
+      appendHistory({
+        label: "Chat plan",
+        detail: `Plan generated (${plan.executionMode}, confidence ${plan.confidence.toFixed(2)})`,
+        status: "INFO"
       });
-      void refreshOpenCutMetrics();
     } catch (error) {
-      void trackOpenCutEvent("chat_edit_apply", "ERROR", {
-        hasAttachments: attachmentAssetIds.length > 0
+      const message = error instanceof Error ? error.message : "Failed to create chat plan";
+      setPanelError(message);
+      appendHistory({
+        label: "Chat plan",
+        detail: message,
+        status: "ERROR"
       });
-      setPanelError(error instanceof Error ? error.message : "Chat edit failed");
     } finally {
       setBusy(null);
     }
   };
 
-  const applyPlannedChatEdit = async () => {
-    if (!chatPlanResult?.planId) {
-      setPanelError("Create a chat plan before applying.");
+  const applyChatPlan = async () => {
+    if (!chatPlan || !chatPlan.planRevisionHash) {
       return;
     }
-
     setBusy("chat_apply");
     setPanelError(null);
-    setChatUndoResult(null);
-
     try {
-      const payload = await applyProjectV2ChatEdit(projectV2Id, {
-        planId: chatPlanResult.planId,
+      const result = await applyProjectV2ChatEdit(projectV2Id, {
+        planId: chatPlan.planId,
+        planRevisionHash: chatPlan.planRevisionHash,
         confirmed: true
       });
-      setChatApplyResult(payload);
-      setChatUndoToken(payload.undoToken);
-      if (payload.applied) {
-        await Promise.all([loadProjectSurface(), loadTranscript()]);
-      }
+      setChatApplyResult(result);
+      setChatUndoToken(result.undoToken);
+      await Promise.all([loadProjectSurface(), loadTranscript()]);
+      appendHistory({
+        label: "Chat apply",
+        detail: result.suggestionsOnly ? "Suggestions-only path; no destructive apply" : "Plan applied successfully",
+        status: result.suggestionsOnly ? "INFO" : "SUCCESS"
+      });
+      void trackOpenCutTelemetry({
+        projectId: projectV2Id,
+        event: "chat_edit_apply",
+        outcome: result.suggestionsOnly ? "INFO" : "SUCCESS",
+        metadata: {
+          issueCount: result.issues.length,
+          suggestionsOnly: result.suggestionsOnly
+        }
+      }).catch(() => {});
     } catch (error) {
-      setPanelError(error instanceof Error ? error.message : "Chat apply failed");
+      const message = error instanceof Error ? error.message : "Failed to apply chat plan";
+      setPanelError(message);
+      appendHistory({
+        label: "Chat apply",
+        detail: message,
+        status: "ERROR"
+      });
+      void trackOpenCutTelemetry({
+        projectId: projectV2Id,
+        event: "chat_edit_apply",
+        outcome: "ERROR",
+        metadata: {
+          message
+        }
+      }).catch(() => {});
     } finally {
       setBusy(null);
     }
   };
 
-  const applyChatUndo = async () => {
+  const undoChat = async () => {
     if (!chatUndoToken) {
-      setPanelError("No undo token is available for chat undo.");
       return;
     }
-
     setBusy("chat_undo");
     setPanelError(null);
-
     try {
-      const payload = await undoProjectV2ChatEdit(projectV2Id, {
+      const response = await undoProjectV2ChatEdit(projectV2Id, {
         undoToken: chatUndoToken
       });
-      setChatUndoResult({
-        restored: payload.restored,
-        appliedRevisionId: payload.appliedRevisionId
-      });
+      setChatUndoResult(response);
+      setChatApplyResult(null);
+      setChatUndoToken(null);
       await Promise.all([loadProjectSurface(), loadTranscript()]);
+      appendHistory({
+        label: "Chat undo",
+        detail: `Restored revision ${response.appliedRevisionId.slice(0, 8)}`,
+        status: "SUCCESS"
+      });
     } catch (error) {
-      setPanelError(error instanceof Error ? error.message : "Chat undo failed");
+      const message = error instanceof Error ? error.message : "Failed to undo chat apply";
+      setPanelError(message);
+      appendHistory({
+        label: "Chat undo",
+        detail: message,
+        status: "ERROR"
+      });
     } finally {
       setBusy(null);
     }
@@ -991,7 +1098,6 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setPanelError(null);
     try {
       const payload = await startRender(projectV2Id);
-      renderCompletionEventTrackedRef.current = null;
       setRenderJobId(payload.renderJob.id);
       setRenderStatus({
         status: payload.renderJob.status as "QUEUED" | "RUNNING" | "DONE" | "ERROR",
@@ -999,15 +1105,24 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         outputUrl: null,
         errorMessage: null
       });
-      void trackOpenCutEvent("render_start", "INFO", {
-        renderJobId: payload.renderJob.id
+      appendHistory({
+        label: "Render queue",
+        detail: `Queued render job ${payload.renderJob.id.slice(0, 8)}`,
+        status: "INFO"
       });
-      void refreshOpenCutMetrics();
+      void trackOpenCutTelemetry({
+        projectId: projectV2Id,
+        event: "render_start",
+        outcome: "INFO"
+      }).catch(() => {});
     } catch (error) {
-      void trackOpenCutEvent("render_error", "ERROR", {
-        phase: "start"
+      const message = error instanceof Error ? error.message : "Render failed to start";
+      setPanelError(message);
+      appendHistory({
+        label: "Render queue",
+        detail: message,
+        status: "ERROR"
       });
-      setPanelError(error instanceof Error ? error.message : "Render failed to start");
     } finally {
       setBusy(null);
     }
@@ -1015,350 +1130,293 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
 
   const trackCount = orderedTracks.length;
   const clipCount = orderedTracks.reduce((sum, track) => sum + track.clips.length, 0);
-  const metricByEvent = useMemo(() => {
-    const map = new Map<string, OpenCutMetricsResponse["metrics"][number]>();
-    for (const metric of opencutMetrics?.metrics ?? []) {
-      map.set(metric.event, metric);
-    }
-    return map;
-  }, [opencutMetrics]);
+  const previewDurationMs = previewVideoRef.current?.duration ? Math.floor(previewVideoRef.current.duration * 1000) : 0;
+  const timelineZoomFactor = zoomPercent / 100;
 
   return (
-    <div className="-mx-2 space-y-4 md:-mx-4 lg:-mx-8">
-      <div className="rounded-xl border bg-background/95 p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">OpenCut Shell (Phase 4)</p>
-            <h1 className="text-2xl font-black" style={{ fontFamily: "var(--font-heading)" }}>
-              {title}
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Legacy bridge: {legacyProjectId ?? "not-linked"} • Status: {status}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline">Transcript-first + timeline + AI chat + media import/export</Badge>
-            <Badge variant="secondary">V2 ID: {projectV2Id.slice(0, 8)}</Badge>
-          </div>
+    <div className="flex h-[calc(100vh-120px)] min-h-[720px] flex-col gap-3">
+      <div className="flex items-center justify-between rounded-xl border bg-background/95 px-4 py-3 shadow-sm">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Descript-first editor</p>
+          <h1 className="text-2xl font-black" style={{ fontFamily: "var(--font-heading)" }}>
+            {title}
+          </h1>
+          <p className="text-xs text-muted-foreground">
+            Project V2: {projectV2Id.slice(0, 8)} • Legacy bridge: {legacyProjectId} • Status: {status}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge
+            variant={autosaveStatus === "SAVING" ? "secondary" : "outline"}
+            className={autosaveStatus === "ERROR" ? "border-destructive/70 text-destructive" : ""}
+          >
+            Autosave {autosaveStatus}
+          </Badge>
+          <Badge
+            variant={health?.status === "HEALTHY" ? "secondary" : "outline"}
+            className={health?.status === "HEALTHY" || health?.status === "WAITING_MEDIA" ? "" : "border-destructive/70 text-destructive"}
+          >
+            Health {health?.status ?? "UNKNOWN"}
+          </Badge>
+          <Badge
+            variant="outline"
+            className={health?.syncStatus === "IN_SYNC" ? "" : "border-destructive/70 text-destructive"}
+          >
+            Sync {health?.syncStatus ?? "UNKNOWN"}
+          </Badge>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.05fr_1.25fr_1fr]">
-        <Card className="min-h-[580px]">
-          <CardHeader>
-            <CardTitle className="text-lg">Transcript</CardTitle>
-            <CardDescription>Edit text first, timeline updates through safe patch operations.</CardDescription>
+      <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[300px_minmax(480px,1fr)_420px]">
+        <Card className="min-h-0">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Media + Scenes</CardTitle>
+            <CardDescription>Freeform uploads first. Quick starts remain optional macros.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Input value={language} onChange={(event) => setLanguage(event.target.value)} className="h-8 max-w-[84px]" />
-              <Button size="sm" onClick={runAutoTranscript} disabled={busy !== null}>
-                Generate
-              </Button>
+          <CardContent className="space-y-3 overflow-y-auto">
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Project assets</p>
+              <p className="text-muted-foreground">Total {project?.assets.length ?? 0}</p>
+              <div className="mt-2 max-h-[160px] space-y-1 overflow-y-auto">
+                {(project?.assets ?? []).map((asset) => (
+                  <div key={asset.id} className="rounded border px-2 py-1">
+                    <p className="font-medium">{asset.slotKey}</p>
+                    <p className="text-muted-foreground">
+                      {asset.kind} • {asset.mimeType} {asset.durationSec ? `• ${asset.durationSec.toFixed(2)}s` : ""}
+                    </p>
+                  </div>
+                ))}
+                {!project?.assets.length ? <p className="text-muted-foreground">No assets yet.</p> : null}
+              </div>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Quick actions</p>
+              <div className="mt-2 grid gap-2">
+                <Button size="sm" onClick={runAutoTranscript} disabled={busy !== null}>
+                  Generate Transcript
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => void loadProjectSurface()} disabled={busy !== null}>
+                  Refresh Project State
+                </Button>
+                <Button size="sm" variant="outline" onClick={enqueueRender} disabled={busy !== null || health?.render.readiness === "BLOCKED"}>
+                  Render MP4
+                </Button>
+              </div>
               {autoJobStatus ? (
-                <div className="min-w-[150px] flex-1">
-                  <p className="text-[11px] text-muted-foreground">
-                    AI {autoJobStatus.status} ({autoJobStatus.progress}%)
-                  </p>
+                <div className="mt-2">
+                  <p className="text-muted-foreground">ASR job {autoJobStatus.status} ({autoJobStatus.progress}%)</p>
                   <Progress value={autoJobStatus.progress} />
                 </div>
               ) : null}
             </div>
 
-            <div className="space-y-2 rounded-md border p-2">
-              <p className="text-xs font-semibold">Media Import</p>
-              <p className="text-xs text-muted-foreground">
-                Upload your own assets only. Templates are structure blueprints; you must have rights to all uploaded media.
-              </p>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="file"
-                  className="h-8"
-                  accept="video/*,image/*,audio/*"
-                  disabled={uploading}
-                  onChange={(event) => {
-                    void onMediaFileChange(event);
-                  }}
-                />
-                <span className="text-[11px] text-muted-foreground">{uploading ? "Uploading..." : "Video / image / audio"}</span>
-              </div>
-              <div className="max-h-[160px] space-y-1 overflow-y-auto rounded border p-2">
-                {mediaAssets.length > 0 ? (
-                  mediaAssets.map((asset) => (
-                    <p key={asset.id} className="text-[11px] text-muted-foreground">
-                      {asset.mimeType} • {asset.durationSec ? `${asset.durationSec.toFixed(2)}s` : "n/a"} • {asset.id.slice(0, 8)}
-                    </p>
-                  ))
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">No uploaded media yet.</p>
-                )}
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Operation history</p>
+              <div className="mt-2 max-h-[220px] space-y-1 overflow-y-auto">
+                {operationHistory.map((entry) => (
+                  <div key={entry.id} className="rounded border px-2 py-1">
+                    <p className="font-medium">{entry.label}</p>
+                    <p className="text-muted-foreground">{entry.detail}</p>
+                    <p className="text-[10px] text-muted-foreground">{new Date(entry.createdAt).toLocaleTimeString()}</p>
+                  </div>
+                ))}
+                {!operationHistory.length ? <p className="text-muted-foreground">No operations recorded yet.</p> : null}
               </div>
             </div>
 
-            <div className="max-h-[440px] space-y-2 overflow-y-auto rounded-md border p-2">
-              {transcript?.segments.length ? (
-                transcript.segments.map((segment) => (
-                  <button
-                    key={segment.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedSegmentId(segment.id);
-                      setSegmentDraft(segment.text);
-                      setSpeakerDraft(segment.speakerLabel ?? "");
-                      setDeleteStartMs(String(segment.startMs));
-                      setDeleteEndMs(String(Math.min(segment.endMs, segment.startMs + 220)));
-                    }}
-                    className={`w-full rounded-md border px-2 py-2 text-left text-xs transition ${
-                      segment.id === selectedSegmentId ? "border-primary bg-primary/10" : "hover:bg-muted"
-                    }`}
-                  >
-                    <p className="font-semibold">
-                      {formatMs(segment.startMs)} - {formatMs(segment.endMs)}
-                    </p>
-                    <p className="line-clamp-2 text-muted-foreground">{segment.text}</p>
-                  </button>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground">No transcript segments yet. Generate transcript to begin.</p>
-              )}
+            <div className="rounded-md border p-2 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground">Shortcuts</p>
+              <p>Space/J/K/L playback • Cmd/Ctrl+B split • Delete ripple delete • Shift+D duplicate • [ ] trim to playhead • Cmd/Ctrl+Shift+S split segment • Cmd/Ctrl+Shift+M merge segment.</p>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="min-h-[580px]">
-          <CardHeader>
-            <CardTitle className="text-lg">Transcript Ops</CardTitle>
-            <CardDescription>Deterministic transcript patch operations with conservative ripple safety.</CardDescription>
+        <Card className="min-h-0">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Transcript (Primary Canvas)</CardTitle>
+            <CardDescription>Edit transcript first, with preview-before-apply safety gates.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-2">
-              <Label>Segment Text</Label>
-              <Textarea
-                value={segmentDraft}
-                onChange={(event) => setSegmentDraft(event.target.value)}
-                rows={4}
-                placeholder="Select a segment to edit text"
-              />
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button size="sm" disabled={!selectedSegment || busy !== null} onClick={replaceText}>
-                Replace Text
-              </Button>
-              <Button size="sm" variant="secondary" disabled={!selectedSegment || busy !== null} onClick={splitSegment}>
-                Split Segment
-              </Button>
-              <Button size="sm" variant="secondary" disabled={!selectedSegment || busy !== null} onClick={mergeWithNext}>
-                Merge With Next
-              </Button>
-              <Button size="sm" variant="outline" disabled={busy !== null} onClick={normalizePunctuation}>
-                Normalize Punctuation
-              </Button>
-            </div>
-
-            <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+          <CardContent className="space-y-3 overflow-y-auto">
+            <div className="grid gap-2 md:grid-cols-[80px_1fr_auto]">
+              <Input value={language} onChange={(event) => setLanguage(event.target.value)} className="h-8" />
               <Input
-                value={speakerDraft}
-                onChange={(event) => setSpeakerDraft(event.target.value)}
-                placeholder="Speaker label (optional)"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search transcript..."
+                className="h-8"
               />
-              <Button size="sm" variant="secondary" disabled={!selectedSegment || busy !== null} onClick={saveSpeaker}>
-                Set Speaker
+              <Button size="sm" variant="secondary" onClick={runSearch} disabled={busy !== null}>
+                Search
               </Button>
             </div>
 
-            <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-              <Input value={deleteStartMs} onChange={(event) => setDeleteStartMs(event.target.value)} placeholder="Start ms" />
-              <Input value={deleteEndMs} onChange={(event) => setDeleteEndMs(event.target.value)} placeholder="End ms" />
-              <Button size="sm" variant="destructive" disabled={busy !== null} onClick={deleteRange}>
-                Delete Range
-              </Button>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs">
-              <input
-                id="preview-only-patch"
-                type="checkbox"
-                checked={previewOnly}
-                onChange={(event) => setPreviewOnly(event.target.checked)}
-              />
-              <Label htmlFor="preview-only-patch">Preview only (suggestions mode)</Label>
-            </div>
-
-            <div className="space-y-1">
-              <Label>Min Confidence For Ripple</Label>
-              <Input
-                type="number"
-                min={0.55}
-                max={0.99}
-                step={0.01}
-                value={minConfidenceForRipple}
-                onChange={(event) => setMinConfidenceForRipple(Number(event.target.value))}
-              />
-            </div>
-
-            <div className="space-y-2 rounded-md border p-2">
-              <p className="text-sm font-semibold">Quick Start Presets (Optional)</p>
-              <p className="text-xs text-muted-foreground">Apply a preset macro, then continue editing freeform.</p>
-              <div className="flex items-center gap-2">
-                <select
-                  className="h-9 flex-1 rounded-md border px-2 text-sm"
-                  value={presetId}
-                  onChange={(event) => setPresetId(event.target.value)}
-                >
-                  <option value="">Select preset</option>
-                  {presetCatalog.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name}
-                    </option>
+            {searchMatches.length > 0 ? (
+              <div className="rounded-md border p-2 text-xs">
+                <p className="font-semibold">Search matches ({searchMatches.length})</p>
+                <div className="mt-1 max-h-[92px] space-y-1 overflow-y-auto">
+                  {searchMatches.slice(0, 12).map((match) => (
+                    <button
+                      key={`${match.segmentId}-${match.matchStart}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedSegmentId(match.segmentId);
+                        setSegmentWindowStart(Math.max(0, (transcript?.segments.findIndex((segment) => segment.id === match.segmentId) ?? 0) - 8));
+                      }}
+                      className="w-full rounded border px-2 py-1 text-left hover:bg-muted"
+                    >
+                      <p className="font-medium">{formatMs(match.startMs)} - {formatMs(match.endMs)}</p>
+                      <p className="line-clamp-1 text-muted-foreground">{match.text}</p>
+                    </button>
                   ))}
-                </select>
-                <Button size="sm" variant="secondary" disabled={busy !== null || !presetId} onClick={applyPreset}>
-                  Apply Preset
+                </div>
+              </div>
+            ) : null}
+
+            <div className="rounded-md border p-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold">Transcript segments ({totalSegments})</p>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2"
+                    onClick={() => setSegmentWindowStart(Math.max(0, segmentWindowStart - segmentWindowSize))}
+                    disabled={segmentWindowStart === 0}
+                  >
+                    Prev
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2"
+                    onClick={() => setSegmentWindowStart(Math.min(Math.max(0, totalSegments - 1), segmentWindowStart + segmentWindowSize))}
+                    disabled={segmentWindowStart + segmentWindowSize >= totalSegments}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-2 max-h-[360px] space-y-1 overflow-y-auto">
+                {visibleSegments.map((segment) => {
+                  const badge = confidenceBadge(segment.confidenceAvg, minConfidenceForRipple);
+                  return (
+                    <button
+                      key={segment.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedSegmentId(segment.id);
+                        setSegmentDraft(segment.text);
+                        setSpeakerDraft(segment.speakerLabel ?? "");
+                        setDeleteStartMs(String(segment.startMs));
+                        setDeleteEndMs(String(Math.min(segment.endMs, segment.startMs + 220)));
+                      }}
+                      className={`w-full rounded border px-2 py-2 text-left transition ${segment.id === selectedSegmentId ? "border-primary bg-primary/10" : "hover:bg-muted"}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium">{formatMs(segment.startMs)} - {formatMs(segment.endMs)}</p>
+                        <Badge variant={badge.variant} className={badge.className}>{badge.label}</Badge>
+                      </div>
+                      <p className="line-clamp-2 text-muted-foreground">{segment.text}</p>
+                    </button>
+                  );
+                })}
+                {!visibleSegments.length ? <p className="text-muted-foreground">No transcript yet. Generate one to begin.</p> : null}
+              </div>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Segment editor</p>
+              <div className="mt-2 space-y-2">
+                <Textarea
+                  rows={4}
+                  value={segmentDraft}
+                  onChange={(event) => setSegmentDraft(event.target.value)}
+                  placeholder="Select a segment to edit text"
+                />
+                <div className="grid gap-2 grid-cols-2">
+                  <Button size="sm" onClick={applyReplaceText} disabled={!selectedSegment || busy !== null}>
+                    Replace Text
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={applySplitSegment} disabled={!selectedSegment || busy !== null}>
+                    Split Segment
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={applyMergeWithNext} disabled={!selectedSegment || busy !== null}>
+                    Merge Next
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={applyNormalizePunctuation} disabled={busy !== null}>
+                    Normalize Punctuation
+                  </Button>
+                </div>
+                <div className="grid gap-2 grid-cols-[1fr_auto]">
+                  <Input value={speakerDraft} onChange={(event) => setSpeakerDraft(event.target.value)} placeholder="Speaker label" />
+                  <Button size="sm" variant="secondary" onClick={applySpeaker} disabled={!selectedSegment || busy !== null}>
+                    Set Speaker
+                  </Button>
+                </div>
+                <div className="grid gap-2 grid-cols-2">
+                  <Input value={deleteStartMs} onChange={(event) => setDeleteStartMs(event.target.value)} placeholder="Start ms" />
+                  <Input value={deleteEndMs} onChange={(event) => setDeleteEndMs(event.target.value)} placeholder="End ms" />
+                </div>
+                <Button size="sm" variant="destructive" onClick={applyManualDeleteRange} disabled={busy !== null}>
+                  Delete Range (Manual)
                 </Button>
               </div>
             </div>
 
-            <div className="space-y-2 border-t pt-3">
-              <div>
-                <p className="text-sm font-semibold">AI Co-Editor</p>
-                <p className="text-xs text-muted-foreground">
-                  Ask for timeline edits in natural language. Plan is previewed first, then applied after confirmation.
-                </p>
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Word-range select</p>
+              <p className="text-muted-foreground">Use for Descript-style range preview before apply.</p>
+              <div className="mt-2 grid gap-2 grid-cols-2">
+                <Input
+                  type="number"
+                  value={rangeSelection.startWordIndex}
+                  onChange={(event) => setRangeSelection((previous) => ({ ...previous, startWordIndex: Number(event.target.value) || 0 }))}
+                />
+                <Input
+                  type="number"
+                  value={rangeSelection.endWordIndex}
+                  onChange={(event) => setRangeSelection((previous) => ({ ...previous, endWordIndex: Number(event.target.value) || 0 }))}
+                />
               </div>
-              <Textarea
-                value={chatPrompt}
-                onChange={(event) => setChatPrompt(event.target.value)}
-                rows={3}
-                placeholder="Example: tighten pauses, cut first second, then move the first caption clip 300ms earlier"
-              />
-              <Input
-                value={chatAttachmentIds}
-                onChange={(event) => setChatAttachmentIds(event.target.value)}
-                placeholder="Optional attachment asset IDs (comma-separated)"
-              />
-              <div className="grid grid-cols-3 gap-2">
-                <Button size="sm" disabled={busy !== null} onClick={planChatEdit}>
-                  Plan Chat Edit
+              <p className="mt-1 text-muted-foreground">
+                {transcriptRangeMs ? `Range ${transcriptRangeMs.startIndex}-${transcriptRangeMs.endIndex} => ${formatMs(transcriptRangeMs.startMs)} to ${formatMs(transcriptRangeMs.endMs)}` : "No valid range"}
+              </p>
+              <div className="mt-2 grid gap-2 grid-cols-2">
+                <Button size="sm" variant="secondary" onClick={previewRangeDelete} disabled={!transcriptRangeMs || busy !== null}>
+                  Preview Ripple Delete
                 </Button>
-                <Button size="sm" variant="secondary" disabled={busy !== null || !chatPlanResult?.planId} onClick={applyPlannedChatEdit}>
-                  Confirm + Apply
-                </Button>
-                <Button size="sm" variant="outline" disabled={busy !== null || !chatUndoToken} onClick={applyChatUndo}>
-                  Undo
+                <Button size="sm" variant="destructive" onClick={applyRangeDelete} disabled={!transcriptRangeMs || busy !== null}>
+                  Apply Ripple Delete
                 </Button>
               </div>
-
-              {chatJobStatus ? (
-                <div className="rounded-md border p-2 text-xs">
-                  <p className="text-muted-foreground">
-                    Chat job {chatJobStatus.status} ({chatJobStatus.progress}%)
-                  </p>
-                  <Progress value={chatJobStatus.progress} />
-                </div>
-              ) : null}
-
-              {chatPlanResult ? (
-                <div className="rounded-md border p-2 text-xs">
-                  <p className="font-semibold">
-                    Plan {chatPlanResult.executionMode === "APPLIED" ? "ready to apply" : "suggestions only"} • confidence{" "}
-                    {Math.round(chatPlanResult.confidence * 100)}%
-                  </p>
-                  {chatPlanResult.issues.length > 0 ? (
-                    <ul className="mt-1 space-y-1 text-muted-foreground">
-                      {chatPlanResult.issues.map((issue, index) => (
-                        <li key={`${issue.code}-${index}`}>
-                          [{issue.severity}] {issue.message}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {chatPlanResult.opsPreview.length > 0 ? (
-                    <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
-                      {summarizeOps(chatPlanResult.opsPreview).map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-1 text-muted-foreground">No operations planned.</p>
-                  )}
-                  {chatPlanResult.constrainedSuggestions.length > 0 ? (
-                    <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
-                      {chatPlanResult.constrainedSuggestions.slice(0, 4).map((suggestion) => (
-                        <li key={suggestion}>{suggestion}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {chatApplyResult ? (
-                <div className="rounded-md border p-2 text-xs">
-                  <p className="font-semibold">{chatApplyResult.applied ? "Plan applied" : "Plan not applied"}</p>
-                  <p className="text-muted-foreground">
-                    {chatApplyResult.revisionId ? `Revision ${chatApplyResult.revisionId.slice(0, 8)}` : "No revision applied"}
-                    {chatApplyResult.undoToken ? ` • undo ${chatApplyResult.undoToken.slice(0, 8)}` : ""}
-                  </p>
-                  {chatApplyResult.issues.length > 0 ? (
-                    <ul className="mt-1 space-y-1 text-muted-foreground">
-                      {chatApplyResult.issues.map((issue, index) => (
-                        <li key={`${issue.code}-${index}`}>
-                          [{issue.severity}] {issue.message}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {chatUndoResult ? (
-                <div className="rounded-md border p-2 text-xs">
-                  <p className="font-semibold">Chat undo restored timeline</p>
-                  <p className="text-muted-foreground">Revision {chatUndoResult.appliedRevisionId.slice(0, 8)}</p>
-                </div>
-              ) : null}
             </div>
 
-            {opResult ? (
+            {lastTranscriptPreview ? (
               <div className="rounded-md border p-2 text-xs">
                 <p className="font-semibold">
-                  {opResult.suggestionsOnly ? "Suggestions only" : "Applied"}{" "}
-                  {opResult.revisionId ? `(rev ${opResult.revisionId.slice(0, 8)})` : ""}
+                  {lastTranscriptPreview.suggestionsOnly ? "Suggestions-only" : "Applied/Previewed"}{" "}
+                  {lastTranscriptPreview.revisionId ? `(rev ${lastTranscriptPreview.revisionId.slice(0, 8)})` : ""}
                 </p>
-                {opResult.issues.length > 0 ? (
+                <p className="text-muted-foreground">{lastTranscriptPreview.timelineOps.length} timeline op(s)</p>
+                {lastTranscriptPreview.issues.length > 0 ? (
                   <ul className="mt-1 space-y-1 text-muted-foreground">
-                    {opResult.issues.map((issue, index) => (
-                      <li key={`${issue.code}-${index}`}>
-                        [{issue.severity}] {issue.message}
-                      </li>
+                    {lastTranscriptPreview.issues.map((issue, index) => (
+                      <li key={`${issue.code}-${index}`}>[{issue.severity}] {issue.message}</li>
                     ))}
                   </ul>
-                ) : (
-                  <p className="text-muted-foreground">No issues reported.</p>
-                )}
+                ) : null}
               </div>
             ) : null}
-
-            {timelineResult ? (
-              <div className="rounded-md border p-2 text-xs">
-                <p className="font-semibold">Timeline updated</p>
-                <p className="text-muted-foreground">
-                  Revision {timelineResult.revision}
-                  {timelineResult.revisionId ? ` (${timelineResult.revisionId.slice(0, 8)})` : ""}
-                </p>
-              </div>
-            ) : null}
-
-            {panelError ? <p className="text-xs text-destructive">{panelError}</p> : null}
           </CardContent>
         </Card>
 
-        <Card className="min-h-[580px]">
-          <CardHeader>
-            <CardTitle className="text-lg">Preview + Timeline</CardTitle>
-            <CardDescription>Interactive timeline controls plus final cloud render/export.</CardDescription>
+        <Card className="min-h-0">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Preview + Inspector + Chat</CardTitle>
+            <CardDescription>Plan → review diff → apply with explicit confirmation and one-click undo.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-3 overflow-y-auto">
             {previewAsset ? (
               <video
                 ref={previewVideoRef}
@@ -1371,60 +1429,125 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             ) : (
               <div className="rounded-md border p-4 text-xs text-muted-foreground">No preview video asset yet.</div>
             )}
-
-            <div className="rounded-md border p-2 text-xs text-muted-foreground">
-              Shortcuts: <span className="font-semibold text-foreground">Space</span> play/pause, <span className="font-semibold text-foreground">J/K/L</span>{" "}
-              seek/pause, <span className="font-semibold text-foreground">S</span> split selected clip at playhead ({formatMs(playheadMs)}).
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Inspector</p>
+              <p className="text-muted-foreground">Playhead: {formatMs(playheadMs)} / {formatMs(previewDurationMs)}</p>
+              {selectedSegment ? (
+                <p className="text-muted-foreground">
+                  Segment: {formatMs(selectedSegment.startMs)}-{formatMs(selectedSegment.endMs)}
+                </p>
+              ) : null}
+              {selectedClip ? (
+                <p className="text-muted-foreground">
+                  Clip: {(selectedClip.label ?? "Untitled").slice(0, 28)} [{formatMs(selectedClip.timelineInMs)}-{formatMs(selectedClip.timelineOutMs)}]
+                </p>
+              ) : null}
+              <div className="mt-2 flex gap-2">
+                <Button size="sm" variant="secondary" onClick={jumpSegmentToTimeline} disabled={!clipAtSelectedSegment}>
+                  Jump Segment to Clip
+                </Button>
+                <Button size="sm" onClick={splitTimelineAtPlayhead} disabled={!selectedClip || !selectedTrack || busy !== null}>
+                  Split @ Playhead
+                </Button>
+              </div>
             </div>
 
             <div className="rounded-md border p-2 text-xs">
-              <p className="font-semibold">OpenCut Rollout Metrics (24h)</p>
-              {opencutMetrics ? (
-                <div className="mt-1 space-y-1 text-muted-foreground">
-                  <p>Total events: {opencutMetrics.totalEvents}</p>
-                  <p>
-                    Chat success:{" "}
-                    {metricByEvent.get("chat_edit_apply")?.successRate !== null
-                      ? `${Math.round((metricByEvent.get("chat_edit_apply")?.successRate ?? 0) * 100)}%`
-                      : "n/a"}
-                  </p>
-                  <p>
-                    Transcript success:{" "}
-                    {metricByEvent.get("transcript_edit_apply")?.successRate !== null
-                      ? `${Math.round((metricByEvent.get("transcript_edit_apply")?.successRate ?? 0) * 100)}%`
-                      : "n/a"}
-                  </p>
-                  <p>
-                    Render starts: {metricByEvent.get("render_start")?.total ?? 0} • done: {metricByEvent.get("render_done")?.total ?? 0} • errors:{" "}
-                    {metricByEvent.get("render_error")?.total ?? 0}
-                  </p>
+              <p className="font-semibold">Timeline clip controls</p>
+              {selectedClip && selectedTrack ? (
+                <div className="mt-2 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={clipMoveInMs} onChange={(event) => setClipMoveInMs(event.target.value)} placeholder="timelineInMs" />
+                    <Input value={clipDurationMs} onChange={(event) => setClipDurationMs(event.target.value)} placeholder="durationMs" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={trimStartMs} onChange={(event) => setTrimStartMs(event.target.value)} placeholder="trimStartMs" />
+                    <Input value={trimEndMs} onChange={(event) => setTrimEndMs(event.target.value)} placeholder="trimEndMs" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" onClick={moveTimelineClip} disabled={busy !== null}>Move</Button>
+                    <Button size="sm" variant="secondary" onClick={setTimelineClipTiming} disabled={busy !== null}>Set Timing</Button>
+                    <Button size="sm" variant="secondary" onClick={trimTimeline} disabled={busy !== null}>Trim</Button>
+                    <Button size="sm" variant="secondary" onClick={splitTimelineAtPlayhead} disabled={busy !== null}>Split</Button>
+                    <Button size="sm" variant="outline" onClick={mergeTimelineClipWithNext} disabled={busy !== null}>Merge Next</Button>
+                    <Button size="sm" variant="destructive" onClick={removeTimelineClip} disabled={busy !== null}>Remove</Button>
+                  </div>
                 </div>
               ) : (
-                <p className="mt-1 text-muted-foreground">Metrics unavailable.</p>
+                <p className="mt-2 text-muted-foreground">Select a clip in timeline rail to edit.</p>
               )}
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => void loadProjectSurface()} disabled={busy !== null}>
-                Refresh Timeline
-              </Button>
-              <Button size="sm" variant="secondary" onClick={enqueueRender} disabled={busy !== null || !canRender}>
-                Render MP4
-              </Button>
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Chat co-editor</p>
+              <Textarea
+                rows={3}
+                value={chatPrompt}
+                onChange={(event) => setChatPrompt(event.target.value)}
+                placeholder="Example: tighten intro pacing, split first clip, and bold caption emphasis."
+              />
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <Button size="sm" onClick={createChatPlan} disabled={busy !== null || !chatPrompt.trim()}>
+                  Plan
+                </Button>
+                <Button size="sm" variant="secondary" onClick={applyChatPlan} disabled={busy !== null || !chatPlan?.planRevisionHash}>
+                  Apply
+                </Button>
+                <Button size="sm" variant="outline" onClick={undoChat} disabled={busy !== null || !chatUndoToken}>
+                  Undo
+                </Button>
+              </div>
+              {chatPlan ? (
+                <div className="mt-2 rounded border p-2">
+                  <p className="font-semibold">
+                    Review plan • {chatPlan.executionMode} • confidence {chatPlan.confidence.toFixed(2)} • band {chatConfidenceBand}
+                  </p>
+                  <p className="text-muted-foreground">Plan hash: {chatPlan.planRevisionHash ? chatPlan.planRevisionHash.slice(0, 12) : "missing"}</p>
+                  <div className="mt-2 max-h-[150px] space-y-1 overflow-y-auto">
+                    {chatPlan.diffGroups.map((group) => (
+                      <div key={group.group} className="rounded border px-2 py-1">
+                        <p className="font-medium">{group.title}</p>
+                        <p className="text-muted-foreground">{group.summary}</p>
+                        {group.items.slice(0, 4).map((item) => (
+                          <p key={item.id} className="text-muted-foreground">{item.label}</p>
+                        ))}
+                      </div>
+                    ))}
+                    {!chatPlan.diffGroups.length ? <p className="text-muted-foreground">No grouped diffs returned.</p> : null}
+                  </div>
+                  {chatPlan.issues.length > 0 ? (
+                    <ul className="mt-2 space-y-1 text-muted-foreground">
+                      {chatPlan.issues.map((issue, index) => (
+                        <li key={`${issue.code}-${index}`}>[{issue.severity}] {issue.message}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+              {chatApplyResult ? (
+                <div className="mt-2 rounded border p-2">
+                  <p className="font-semibold">
+                    {chatApplyResult.suggestionsOnly ? "Suggestions-only (no destructive apply)" : "Applied"}
+                  </p>
+                  <p className="text-muted-foreground">
+                    Revision {chatApplyResult.revisionId ? chatApplyResult.revisionId.slice(0, 8) : "n/a"}
+                  </p>
+                </div>
+              ) : null}
+              {chatUndoResult ? (
+                <div className="mt-2 rounded border p-2">
+                  <p className="font-semibold">Undo restored</p>
+                  <p className="text-muted-foreground">Revision {chatUndoResult.appliedRevisionId.slice(0, 8)}</p>
+                </div>
+              ) : null}
             </div>
 
-            {!canRender ? (
-              <p className="text-xs text-muted-foreground">Upload at least one media file before rendering.</p>
-            ) : null}
-
             {renderStatus ? (
-              <div className="space-y-1 rounded-md border p-2 text-xs">
-                <p>
-                  Render {renderStatus.status} ({renderStatus.progress}%)
-                </p>
+              <div className="rounded-md border p-2 text-xs">
+                <p className="font-semibold">Render {renderStatus.status} ({renderStatus.progress}%)</p>
                 <Progress value={renderStatus.progress} />
                 {renderStatus.outputUrl ? (
-                  <a href={renderStatus.outputUrl} className="font-semibold underline" target="_blank" rel="noreferrer">
+                  <a href={renderStatus.outputUrl} className="mt-1 inline-block underline" target="_blank" rel="noreferrer">
                     Download render
                   </a>
                 ) : null}
@@ -1433,100 +1556,136 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             ) : null}
 
             <div className="rounded-md border p-2 text-xs">
-              <p className="font-semibold">
-                Tracks {trackCount} • Clips {clipCount}
-              </p>
+              <p className="font-semibold">Editor health</p>
+              <p className="text-muted-foreground">Queue healthy: {health?.queue.healthy ? "yes" : "no"}</p>
+              <p className="text-muted-foreground">Render readiness: {health?.render.readiness ?? "unknown"}</p>
+              <p className="text-muted-foreground">Queues tracked: {health?.queue.queues.length ?? 0}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-              <div className="mt-2 max-h-[260px] space-y-1 overflow-y-auto">
-                {orderedTracks.map((track) => (
-                  <div key={track.id} className={`rounded border p-1 ${track.id === selectedTrackId ? "border-primary" : ""}`}>
-                    <div className="flex items-center justify-between gap-1">
+      <Card className="min-h-[230px]">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Timeline Rail</CardTitle>
+              <CardDescription>
+                {trackCount} tracks • {clipCount} clips • CapCut-style precision layer
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Zoom {zoomPercent}%</Label>
+              <Input
+                type="range"
+                min={50}
+                max={220}
+                value={zoomPercent}
+                onChange={(event) => setZoomPercent(Number(event.target.value))}
+                className="h-8 w-[120px]"
+              />
+              <Button size="sm" variant="secondary" onClick={() => setTimelineExpanded((previous) => !previous)}>
+                {timelineExpanded ? "Collapse" : "Expand"}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        {timelineExpanded ? (
+          <CardContent className="space-y-2 overflow-y-auto">
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  onClick={() => setTimelineWindowStart(Math.max(0, timelineWindowStart - timelineWindowSize))}
+                  disabled={timelineWindowStart === 0}
+                >
+                  Prev tracks
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  onClick={() => setTimelineWindowStart(Math.min(Math.max(0, orderedTracks.length - 1), timelineWindowStart + timelineWindowSize))}
+                  disabled={timelineWindowStart + timelineWindowSize >= orderedTracks.length}
+                >
+                  Next tracks
+                </Button>
+              </div>
+              {timelineResult ? (
+                <p className="text-muted-foreground">
+                  Timeline revision {timelineResult.revision} {timelineResult.revisionId ? `(${timelineResult.revisionId.slice(0, 8)})` : ""}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="max-h-[260px] space-y-2 overflow-y-auto">
+              {visibleTracks.map((track) => {
+                const collapsed = Boolean(collapsedTracks[track.id]);
+                return (
+                  <div key={track.id} className={`rounded border p-2 ${track.id === selectedTrackId ? "border-primary" : ""}`}>
+                    <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
-                        className="text-left font-medium"
                         onClick={() => {
                           setSelectedTrackId(track.id);
                           if (track.clips[0]) {
                             syncSelectedClipDraft(track.id, track.clips[0].id);
                           }
                         }}
+                        className="text-left text-xs font-semibold"
                       >
-                        {track.name} ({track.kind}) • {track.clips.length} clips
+                        {track.name} ({track.kind}) • {track.clips.length} clip(s)
                       </button>
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => void reorderTrack(track.id, track.order, -1)}>
-                          ↑
-                        </Button>
-                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => void reorderTrack(track.id, track.order, 1)}>
-                          ↓
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => reorderTrack(track.id, track.order, -1)}>↑</Button>
+                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => reorderTrack(track.id, track.order, 1)}>↓</Button>
+                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => toggleTrackCollapsed(track.id)}>
+                          {collapsed ? "Expand" : "Collapse"}
                         </Button>
                       </div>
                     </div>
-
-                    <div className="mt-1 space-y-1">
-                      {track.clips.slice(0, 8).map((clip) => (
-                        <button
-                          key={clip.id}
-                          type="button"
-                          className={`w-full rounded border px-1 py-0.5 text-left ${clip.id === selectedClipId ? "border-primary bg-primary/10" : ""}`}
-                          onClick={() => syncSelectedClipDraft(track.id, clip.id)}
-                        >
-                          {(clip.label ?? "Untitled clip").slice(0, 36)} [{formatMs(clip.timelineInMs)} - {formatMs(clip.timelineOutMs)}]
-                        </button>
-                      ))}
-                    </div>
+                    {!collapsed ? (
+                      <div className="mt-2 overflow-x-auto">
+                        <div className="flex min-w-full items-center gap-1">
+                          {track.clips.map((clip) => {
+                            const durationMs = Math.max(120, clip.timelineOutMs - clip.timelineInMs);
+                            const width = Math.max(88, Math.round(durationMs * 0.045 * timelineZoomFactor));
+                            const playheadRatio = safeRatio(playheadMs - clip.timelineInMs, durationMs);
+                            return (
+                              <button
+                                key={clip.id}
+                                type="button"
+                                onClick={() => syncSelectedClipDraft(track.id, clip.id)}
+                                className={`relative rounded border px-2 py-1 text-left text-[11px] ${clip.id === selectedClipId ? "border-primary bg-primary/10" : "hover:bg-muted"}`}
+                                style={{ width }}
+                              >
+                                <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-muted">
+                                  <div className="h-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, playheadRatio * 100))}%` }} />
+                                </div>
+                                <p className="truncate font-medium">{(clip.label ?? "Clip").slice(0, 18)}</p>
+                                <p className="text-muted-foreground">{formatMs(clip.timelineInMs)}-{formatMs(clip.timelineOutMs)}</p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                ))}
-                {!orderedTracks.length ? <p className="text-muted-foreground">Timeline is empty.</p> : null}
-              </div>
-            </div>
-
-            <div className="rounded-md border p-2 text-xs">
-              <p className="font-semibold">Selected clip controls</p>
-              {selectedTrack && selectedClip ? (
-                <div className="mt-2 space-y-2">
-                  <p className="text-muted-foreground">
-                    {selectedTrack.name} • {(selectedClip.label ?? "Untitled clip").slice(0, 40)}
-                  </p>
-
-                  <div className="grid gap-2 grid-cols-2">
-                    <Input value={clipMoveInMs} onChange={(event) => setClipMoveInMs(event.target.value)} placeholder="timelineInMs" />
-                    <Input value={clipDurationMs} onChange={(event) => setClipDurationMs(event.target.value)} placeholder="durationMs" />
-                  </div>
-
-                  <div className="grid gap-2 grid-cols-2">
-                    <Input value={trimStartMs} onChange={(event) => setTrimStartMs(event.target.value)} placeholder="trimStartMs" />
-                    <Input value={trimEndMs} onChange={(event) => setTrimEndMs(event.target.value)} placeholder="trimEndMs" />
-                  </div>
-
-                  <div className="grid gap-2 grid-cols-2">
-                    <Button size="sm" onClick={runTimelineMove} disabled={busy !== null}>
-                      Move Clip
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={runTimelineSetTiming} disabled={busy !== null}>
-                      Set Timing
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={runTimelineTrim} disabled={busy !== null}>
-                      Trim Clip
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={runTimelineSplit} disabled={busy !== null}>
-                      Split at Playhead
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={runTimelineMerge} disabled={busy !== null}>
-                      Merge Next
-                    </Button>
-                    <Button size="sm" variant="destructive" onClick={runTimelineRemove} disabled={busy !== null}>
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <p className="mt-1 text-muted-foreground">Select a clip to enable timeline controls.</p>
-              )}
+                );
+              })}
+              {!visibleTracks.length ? <p className="text-xs text-muted-foreground">Timeline is empty.</p> : null}
             </div>
           </CardContent>
-        </Card>
-      </div>
+        ) : null}
+      </Card>
+
+      {panelError ? (
+        <div className="rounded-md border border-destructive/60 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {panelError}
+        </div>
+      ) : null}
     </div>
   );
 }

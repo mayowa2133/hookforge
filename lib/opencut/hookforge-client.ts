@@ -1,5 +1,10 @@
 "use client";
 
+import type {
+  TimelineOperation as SharedTimelineOperation,
+  TimelineSelectionState as SharedTimelineSelectionState
+} from "@/lib/timeline-types";
+
 export type ApiErrorPayload = {
   error?: string;
 };
@@ -73,9 +78,13 @@ export type TimelinePayload = {
       volume: number;
       clips: Array<{
         id: string;
+        assetId?: string;
+        slotKey?: string;
         label?: string;
         timelineInMs: number;
         timelineOutMs: number;
+        sourceInMs?: number;
+        sourceOutMs?: number;
       }>;
     }>;
   };
@@ -83,48 +92,14 @@ export type TimelinePayload = {
   revision: number;
 };
 
-export type TimelineOperation =
-  | {
-      op: "split_clip";
-      trackId: string;
-      clipId: string;
-      splitMs: number;
-    }
-  | {
-      op: "trim_clip";
-      trackId: string;
-      clipId: string;
-      trimStartMs?: number;
-      trimEndMs?: number;
-    }
-  | {
-      op: "move_clip";
-      trackId: string;
-      clipId: string;
-      timelineInMs: number;
-    }
-  | {
-      op: "set_clip_timing";
-      trackId: string;
-      clipId: string;
-      timelineInMs: number;
-      durationMs: number;
-    }
-  | {
-      op: "merge_clip_with_next";
-      trackId: string;
-      clipId: string;
-    }
-  | {
-      op: "remove_clip";
-      trackId: string;
-      clipId: string;
-    }
-  | {
-      op: "reorder_track";
-      trackId: string;
-      order: number;
-    };
+export type TimelineSelectionState = SharedTimelineSelectionState;
+
+export type TranscriptRangeSelection = {
+  startWordIndex: number;
+  endWordIndex: number;
+};
+
+export type TimelineOperation = SharedTimelineOperation;
 
 export type TranscriptPayload = {
   projectId: string;
@@ -190,7 +165,13 @@ type ChatPlanRequest = {
 
 type ChatApplyRequest = {
   planId: string;
+  planRevisionHash: string;
   confirmed: true;
+};
+
+type ChatEditUndoRequest = {
+  undoToken: string;
+  force?: boolean;
 };
 
 type AssetPresignRequest = {
@@ -218,10 +199,6 @@ type MediaRegisterRequest = {
   mimeType: string;
   originalFileName?: string;
   slot?: "primary" | "broll" | "audio";
-};
-
-type ChatEditUndoRequest = {
-  undoToken: string;
 };
 
 export type AssetPresignResponse = {
@@ -307,7 +284,12 @@ export type ChatEditResponse = {
     reason?: string;
     confidence: number;
   };
-  constrainedSuggestions: string[];
+  constrainedSuggestions: Array<{
+    id: string;
+    title: string;
+    prompt: string;
+    reason: string;
+  }>;
   fallbackReason?: string;
   invariantIssues: Array<{
     code: string;
@@ -324,8 +306,23 @@ export type ChatEditUndoResponse = {
   appliedRevisionId: string;
 };
 
+export type ChatPlanDiffGroup = {
+  group: "timeline" | "transcript" | "captions";
+  title: string;
+  summary: string;
+  items: Array<{
+    id: string;
+    type: "operation" | "note";
+    label: string;
+    before?: string;
+    after?: string;
+    severity?: "INFO" | "WARN" | "ERROR";
+  }>;
+};
+
 export type ChatPlanResponse = {
   planId: string;
+  planRevisionHash: string | null;
   confidence: number;
   requiresConfirmation: true;
   executionMode: "APPLIED" | "SUGGESTIONS_ONLY";
@@ -333,7 +330,13 @@ export type ChatPlanResponse = {
     op: string;
     [key: string]: unknown;
   }>;
-  constrainedSuggestions: string[];
+  diffGroups: ChatPlanDiffGroup[];
+  constrainedSuggestions: Array<{
+    id: string;
+    title: string;
+    prompt: string;
+    reason: string;
+  }>;
   issues: Array<{
     code: string;
     message: string;
@@ -372,6 +375,88 @@ export type EditorStatePayload = {
   }>;
   timeline: TimelinePayload;
   transcript: TranscriptPayload | null;
+};
+
+export type TranscriptSearchPayload = {
+  projectId: string;
+  projectV2Id: string;
+  language: string;
+  query: string;
+  totalSegments: number;
+  totalMatches: number;
+  matches: Array<{
+    segmentId: string;
+    startMs: number;
+    endMs: number;
+    text: string;
+    confidenceAvg: number | null;
+    matchStart: number;
+    matchEnd: number;
+  }>;
+  tookMs: number;
+};
+
+export type EditorHealthStatus = {
+  projectId: string;
+  legacyProjectId: string;
+  status: "HEALTHY" | "DEGRADED" | "WAITING_MEDIA" | "ERROR";
+  syncStatus: "IN_SYNC" | "DRIFT";
+  hasRenderableMedia: boolean;
+  queue: {
+    healthy: boolean;
+    queues: Array<{
+      name: string;
+      counts: {
+        waiting?: number;
+        active?: number;
+        completed?: number;
+        failed?: number;
+        delayed?: number;
+      };
+      backlog: number;
+      healthy: boolean;
+    }>;
+  };
+  render: {
+    readiness: "READY" | "BLOCKED";
+    latest: {
+      id: string;
+      status: "QUEUED" | "RUNNING" | "DONE" | "ERROR";
+      progress: number;
+      errorMessage: string | null;
+      createdAt: string;
+      updatedAt: string;
+    } | null;
+    recent: Array<{
+      id: string;
+      status: "QUEUED" | "RUNNING" | "DONE" | "ERROR";
+      progress: number;
+      errorMessage: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
+  ai: {
+    latest: {
+      id: string;
+      type: string;
+      status: "QUEUED" | "RUNNING" | "DONE" | "ERROR" | "CANCELED";
+      progress: number;
+      errorMessage: string | null;
+      createdAt: string;
+      updatedAt: string;
+    } | null;
+    recent: Array<{
+      id: string;
+      type: string;
+      status: "QUEUED" | "RUNNING" | "DONE" | "ERROR" | "CANCELED";
+      progress: number;
+      errorMessage: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
+  updatedAt: string;
 };
 
 export type PresetCatalogResponse = {
@@ -428,7 +513,7 @@ export async function getTimeline(projectIdOrV2Id: string) {
 
 export async function patchTimeline(projectIdOrV2Id: string, operations: TimelineOperation[]) {
   return requestJson<TimelinePayload>(`/api/projects-v2/${projectIdOrV2Id}/timeline`, {
-    method: "POST",
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ operations })
   });
@@ -436,6 +521,12 @@ export async function patchTimeline(projectIdOrV2Id: string, operations: Timelin
 
 export async function getTranscript(projectV2Id: string, language: string) {
   return requestJson<TranscriptPayload>(`/api/projects-v2/${projectV2Id}/transcript?language=${encodeURIComponent(language)}`);
+}
+
+export async function searchTranscript(projectV2Id: string, language: string, q: string) {
+  return requestJson<TranscriptSearchPayload>(
+    `/api/projects-v2/${projectV2Id}/transcript/search?language=${encodeURIComponent(language)}&q=${encodeURIComponent(q)}`
+  );
 }
 
 export async function autoTranscript(projectV2Id: string, body: TranscriptAutoRequest) {
@@ -451,13 +542,40 @@ export async function patchTranscript(projectV2Id: string, body: TranscriptPatch
     applied: boolean;
     suggestionsOnly: boolean;
     revisionId: string | null;
-    issues: Array<{
-      code: string;
-      message: string;
-      severity: "INFO" | "WARN" | "ERROR";
-    }>;
+    issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
+    timelineOps?: Array<{ op: string; [key: string]: unknown }>;
   }>(`/api/projects-v2/${projectV2Id}/transcript`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function previewTranscriptOps(projectV2Id: string, body: TranscriptPatchRequest) {
+  return requestJson<{
+    mode: "PREVIEW";
+    applied: boolean;
+    suggestionsOnly: boolean;
+    revisionId: string | null;
+    issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
+    timelineOps: Array<{ op: string; [key: string]: unknown }>;
+  }>(`/api/projects-v2/${projectV2Id}/transcript/ops/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function applyTranscriptOps(projectV2Id: string, body: TranscriptPatchRequest) {
+  return requestJson<{
+    mode: "APPLY";
+    applied: boolean;
+    suggestionsOnly: boolean;
+    revisionId: string | null;
+    issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
+    timelineOps: Array<{ op: string; [key: string]: unknown }>;
+  }>(`/api/projects-v2/${projectV2Id}/transcript/ops/apply`, {
+    method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
@@ -537,6 +655,10 @@ export async function undoProjectV2ChatEdit(projectIdOrV2Id: string, body: ChatE
 
 export async function getProjectV2EditorState(projectIdOrV2Id: string) {
   return requestJson<EditorStatePayload>(`/api/projects-v2/${projectIdOrV2Id}/editor-state`);
+}
+
+export async function getProjectV2EditorHealth(projectIdOrV2Id: string) {
+  return requestJson<EditorHealthStatus>(`/api/projects-v2/${projectIdOrV2Id}/editor-health`);
 }
 
 export async function getProjectV2Presets() {
