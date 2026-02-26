@@ -32,19 +32,35 @@ export type AudioEnhancementProfile = {
   preset: "clean_voice" | "dialogue_enhance" | "broadcast_loudness" | "custom";
   denoise: boolean;
   clarity: boolean;
+  deEsser?: boolean;
   normalizeLoudness: boolean;
+  bypassEnhancement?: boolean;
+  soloPreview?: boolean;
   targetLufs: number;
   intensity: number;
   trackVolumeScale: number;
   compressionRatio: number;
   eqPresence: number;
   denoiseStrength: number;
+  deEsserStrength?: number;
 };
 
 export type AudioIssue = {
   code: string;
   message: string;
   severity: "INFO" | "WARN" | "ERROR";
+};
+
+export type AudioSafetyMode = "AUTO_APPLY" | "APPLY_WITH_CONFIRM" | "PREVIEW_ONLY";
+
+export type AudioSafetyRationale = {
+  confidenceScore: number;
+  reasons: string[];
+};
+
+export type AudioAnalysisSummary = {
+  readyForApply: boolean;
+  averageTranscriptConfidence: number;
 };
 
 export type DetectedFillerCandidate = {
@@ -59,10 +75,77 @@ export type DetectedFillerCandidate = {
   wordIds: string[];
 };
 
+export function classifyEnhancementSafetyMode(params: {
+  analysis: AudioAnalysisSummary;
+  issues: AudioIssue[];
+  profile: AudioEnhancementProfile;
+}): { safetyMode: AudioSafetyMode; rationale: AudioSafetyRationale } {
+  const reasons: string[] = [];
+  const score = clamp(params.analysis.averageTranscriptConfidence, 0, 1);
+  const hasError = params.issues.some((issue) => issue.severity === "ERROR");
+  const warnCount = params.issues.filter((issue) => issue.severity === "WARN").length;
+
+  if (params.profile.bypassEnhancement) {
+    reasons.push("Bypass enhancement is enabled.");
+    return { safetyMode: "PREVIEW_ONLY", rationale: { confidenceScore: score, reasons } };
+  }
+  if (hasError || !params.analysis.readyForApply || score < 0.7) {
+    if (hasError) reasons.push("Invariant or timeline validation errors detected.");
+    if (!params.analysis.readyForApply) reasons.push("No renderable audio/video source is available.");
+    if (score < 0.7) reasons.push("Transcript confidence is too low for safe auto-apply.");
+    return { safetyMode: "PREVIEW_ONLY", rationale: { confidenceScore: score, reasons } };
+  }
+  if (warnCount > 0 || params.profile.intensity > 1.25 || score < 0.84) {
+    if (warnCount > 0) reasons.push("Warnings were reported while building enhancement operations.");
+    if (params.profile.intensity > 1.25) reasons.push("High intensity increases risk of over-processing.");
+    if (score < 0.84) reasons.push("Transcript confidence indicates moderate risk.");
+    return { safetyMode: "APPLY_WITH_CONFIRM", rationale: { confidenceScore: score, reasons } };
+  }
+  reasons.push("Validation checks passed with strong confidence.");
+  return { safetyMode: "AUTO_APPLY", rationale: { confidenceScore: score, reasons } };
+}
+
+export function classifyFillerSafetyMode(params: {
+  analysis: AudioAnalysisSummary;
+  candidates: DetectedFillerCandidate[];
+  issues: AudioIssue[];
+}): { safetyMode: AudioSafetyMode; rationale: AudioSafetyRationale } {
+  const reasons: string[] = [];
+  const hasError = params.issues.some((issue) => issue.severity === "ERROR");
+  const confidenceValues = params.candidates
+    .map((candidate) => candidate.confidence)
+    .filter((value): value is number => typeof value === "number");
+  const avgCandidateConfidence = confidenceValues.length > 0
+    ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+    : params.analysis.averageTranscriptConfidence;
+  const score = clamp(avgCandidateConfidence, 0, 1);
+  if (hasError || params.candidates.length === 0 || score < 0.7) {
+    if (hasError) reasons.push("Transcript patch preview reported blocking errors.");
+    if (params.candidates.length === 0) reasons.push("No eligible filler candidates matched the current filter.");
+    if (score < 0.7) reasons.push("Candidate confidence is too low for safe destructive apply.");
+    return { safetyMode: "PREVIEW_ONLY", rationale: { confidenceScore: score, reasons } };
+  }
+  if (params.candidates.length > 25 || score < 0.86) {
+    if (params.candidates.length > 25) reasons.push("Large candidate batch requires explicit confirmation.");
+    if (score < 0.86) reasons.push("Candidate confidence indicates moderate risk.");
+    return { safetyMode: "APPLY_WITH_CONFIRM", rationale: { confidenceScore: score, reasons } };
+  }
+  reasons.push("Candidate confidence is high and batch size is safe.");
+  return { safetyMode: "AUTO_APPLY", rationale: { confidenceScore: score, reasons } };
+}
+
 export function buildAudioEnhancementTimelineOperations(state: TimelineState, profile: AudioEnhancementProfile) {
   const audioTracks = state.tracks.filter((track) => track.kind === "AUDIO" && track.clips.length > 0);
   const issues: AudioIssue[] = [];
   const operations: TimelineOperation[] = [];
+  if (profile.bypassEnhancement) {
+    issues.push({
+      code: "BYPASS_ENABLED",
+      message: "Bypass enhancement enabled. No timeline operations generated.",
+      severity: "INFO"
+    });
+    return { operations, issues };
+  }
   if (audioTracks.length > 0) {
     for (const track of audioTracks) {
       operations.push({
@@ -80,12 +163,15 @@ export function buildAudioEnhancementTimelineOperations(state: TimelineState, pr
             preset: profile.preset,
             denoise: profile.denoise,
             clarity: profile.clarity,
+            deEsser: profile.deEsser ?? true,
             normalizeLoudness: profile.normalizeLoudness,
             targetLufs: profile.targetLufs,
             intensity: profile.intensity,
             compressionRatio: profile.compressionRatio,
             eqPresence: profile.eqPresence,
             denoiseStrength: profile.denoiseStrength,
+            deEsserStrength: profile.deEsserStrength ?? 0.4,
+            soloPreview: profile.soloPreview ?? false,
             appliedAt: new Date().toISOString()
           }
         });
@@ -136,12 +222,15 @@ export function buildAudioEnhancementTimelineOperations(state: TimelineState, pr
         preset: profile.preset,
         denoise: profile.denoise,
         clarity: profile.clarity,
+        deEsser: profile.deEsser ?? true,
         normalizeLoudness: profile.normalizeLoudness,
         targetLufs: profile.targetLufs,
         intensity: profile.intensity,
         compressionRatio: profile.compressionRatio,
         eqPresence: profile.eqPresence,
         denoiseStrength: profile.denoiseStrength,
+        deEsserStrength: profile.deEsserStrength ?? 0.4,
+        soloPreview: profile.soloPreview ?? false,
         derivedFromVideo: true,
         appliedAt: new Date().toISOString()
       }

@@ -231,21 +231,25 @@ audio_ready=$(echo "$audio_analysis_resp" | jq -r ".analysis.readyForApply")
 audio_preview_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/audio/enhance/preview" \
   -H "Content-Type: application/json" \
-  -d '{"language":"en","preset":"dialogue_enhance","targetLufs":-14,"intensity":1}')
+  -d '{"language":"en","preset":"dialogue_enhance","deEsser":true,"targetLufs":-14,"intensity":1}')
 audio_preview_mode=$(echo "$audio_preview_resp" | jq -r ".mode")
 audio_preview_ops=$(echo "$audio_preview_resp" | jq -r ".timelineOps | length")
+audio_preview_safety=$(echo "$audio_preview_resp" | jq -r ".safetyMode")
 [ "$audio_preview_mode" = "PREVIEW" ]
 [ "$audio_preview_ops" -gt 0 ]
+[ -n "$audio_preview_safety" ] && [ "$audio_preview_safety" != "null" ]
 
 audio_apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/audio/enhance/apply" \
   -H "Content-Type: application/json" \
-  -d '{"language":"en","preset":"dialogue_enhance","targetLufs":-14,"intensity":1}')
+  -d '{"language":"en","preset":"dialogue_enhance","deEsser":true,"confirmed":true,"targetLufs":-14,"intensity":1}')
 audio_apply_mode=$(echo "$audio_apply_resp" | jq -r ".mode")
 audio_apply_ok=$(echo "$audio_apply_resp" | jq -r ".applied")
+audio_apply_run_id=$(echo "$audio_apply_resp" | jq -r ".runId")
 audio_undo_token=$(echo "$audio_apply_resp" | jq -r ".undoToken")
 [ "$audio_apply_mode" = "APPLY" ]
 [ "$audio_apply_ok" = "true" ]
+[ -n "$audio_apply_run_id" ] && [ "$audio_apply_run_id" != "null" ]
 [ -n "$audio_undo_token" ] && [ "$audio_undo_token" != "null" ]
 
 filler_preview_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
@@ -258,9 +262,16 @@ filler_preview_mode=$(echo "$filler_preview_resp" | jq -r ".mode")
 filler_apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/audio/filler/apply" \
   -H "Content-Type: application/json" \
-  -d '{"language":"en","maxCandidates":20,"maxConfidence":1,"minConfidenceForRipple":0.86}')
+  -d '{"language":"en","maxCandidates":20,"maxConfidence":1,"confirmed":true,"minConfidenceForRipple":0.86}')
 filler_apply_mode=$(echo "$filler_apply_resp" | jq -r ".mode")
 [ "$filler_apply_mode" = "APPLY" ]
+
+ab_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/audio/ab/segment" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"runId":"%s","startMs":0,"endMs":1800,"language":"en"}' "$audio_apply_run_id")")
+ab_supported=$(echo "$ab_resp" | jq -r ".audition.supported")
+[ "$ab_supported" = "true" ] || [ "$ab_supported" = "false" ]
 
 audio_undo_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/audio/enhance/undo" \

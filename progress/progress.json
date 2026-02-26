@@ -191,7 +191,7 @@
       "id": "descript_phase3_audio_quality_stack",
       "title": "Phase 3 audio quality stack",
       "status": "DONE",
-      "details": "Implemented projects-v2 audio analysis/enhance/filler preview+apply+undo APIs, persisted AudioEnhancementRun and FillerCandidate models, transcript-aware filler removal with safe timeline updates, OpenCut audio quality panel, and full validation via unit + descript-core + enterprise chain e2e"
+      "details": "Implemented projects-v2 audio analysis/enhance/filler preview+apply+undo plus segment A/B audition + run lookup APIs, added denoise/clarity/de-esser/normalize controls, confidence-aware safety modes with apply-with-confirm gates, transcript-aware filler removal with safe timeline updates, OpenCut audio quality panel integration, and full validation via unit + descript-core + enterprise chain e2e"
     },
     {
       "id": "descript_phase4_chat_editor_v2",

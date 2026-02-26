@@ -112,6 +112,7 @@ export type TranscriptIssue = {
 };
 
 export type AudioEnhancementPreset = "clean_voice" | "dialogue_enhance" | "broadcast_loudness" | "custom";
+export type AudioSafetyMode = "AUTO_APPLY" | "APPLY_WITH_CONFIRM" | "PREVIEW_ONLY";
 
 export type AudioFillerCandidate = {
   id: string;
@@ -201,7 +202,11 @@ type AudioEnhanceRequest = {
   preset: AudioEnhancementPreset;
   denoise?: boolean;
   clarity?: boolean;
+  deEsser?: boolean;
   normalizeLoudness?: boolean;
+  bypassEnhancement?: boolean;
+  soloPreview?: boolean;
+  confirmed?: boolean;
   targetLufs: number;
   intensity: number;
 };
@@ -211,6 +216,7 @@ type AudioFillerRequest = {
   candidateIds?: string[];
   maxCandidates?: number;
   maxConfidence?: number;
+  confirmed?: boolean;
   minConfidenceForRipple?: number;
 };
 
@@ -972,6 +978,9 @@ export type AudioEnhanceResultPayload = {
   runId: string;
   applied: boolean;
   suggestionsOnly: boolean;
+  safetyMode: AudioSafetyMode;
+  confidenceScore: number;
+  safetyReasons: string[];
   revisionId: string | null;
   undoToken: string | null;
   preset: AudioEnhancementPreset;
@@ -988,9 +997,38 @@ export type AudioFillerResultPayload = {
   candidates: AudioFillerCandidate[];
   applied: boolean;
   suggestionsOnly: boolean;
+  safetyMode: AudioSafetyMode;
+  confidenceScore: number;
+  safetyReasons: string[];
   revisionId: string | null;
   timelineOps: Array<{ op: string; [key: string]: unknown }>;
   issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
+};
+
+export type AudioSegmentAuditionPayload = {
+  projectId: string;
+  projectV2Id: string;
+  language: string;
+  segment: {
+    startMs: number;
+    endMs: number;
+    durationMs: number;
+  };
+  run: {
+    id: string;
+    operation: "ENHANCE" | "FILLER_REMOVE";
+    mode: "PREVIEW" | "APPLY";
+    status: "PREVIEWED" | "APPLIED" | "ERROR";
+    createdAt: string;
+  } | null;
+  audition: {
+    beforeLabel: string;
+    afterLabel: string;
+    supported: boolean;
+    transcriptSnippet: string;
+    recommendedLoopCount: number;
+    note: string;
+  };
 };
 
 export type EditorHealthStatus = {
@@ -1517,6 +1555,17 @@ export async function previewProjectV2FillerRemoval(projectV2Id: string, body: A
 
 export async function applyProjectV2FillerRemoval(projectV2Id: string, body: AudioFillerRequest) {
   return requestJson<AudioFillerResultPayload>(`/api/projects-v2/${projectV2Id}/audio/filler/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2AudioSegmentAudition(
+  projectV2Id: string,
+  body: { runId?: string; startMs: number; endMs: number; language?: string }
+) {
+  return requestJson<AudioSegmentAuditionPayload>(`/api/projects-v2/${projectV2Id}/audio/ab/segment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)

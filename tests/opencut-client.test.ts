@@ -18,6 +18,7 @@ import {
   getProjectV2Presets,
   getProjectV2,
   getProjectV2AudioAnalysis,
+  getProjectV2AudioSegmentAudition,
   getProjectV2ChatSessions,
   getTranscriptConflicts,
   getOpenCutMetrics,
@@ -714,6 +715,9 @@ describe("opencut hookforge client", () => {
           runId: "run_preview",
           applied: false,
           suggestionsOnly: false,
+          safetyMode: "AUTO_APPLY",
+          confidenceScore: 0.92,
+          safetyReasons: ["Validation checks passed with strong confidence."],
           revisionId: null,
           undoToken: null,
           preset: "dialogue_enhance",
@@ -753,6 +757,9 @@ describe("opencut hookforge client", () => {
           runId: "run_apply",
           applied: true,
           suggestionsOnly: false,
+          safetyMode: "AUTO_APPLY",
+          confidenceScore: 0.92,
+          safetyReasons: ["Validation checks passed with strong confidence."],
           revisionId: "rev_audio",
           undoToken: "undo_audio_1",
           preset: "dialogue_enhance",
@@ -794,6 +801,9 @@ describe("opencut hookforge client", () => {
           candidates: [],
           applied: false,
           suggestionsOnly: true,
+          safetyMode: "APPLY_WITH_CONFIRM",
+          confidenceScore: 0.8,
+          safetyReasons: ["Large candidate batch requires explicit confirmation."],
           revisionId: null,
           timelineOps: [],
           issues: []
@@ -807,9 +817,39 @@ describe("opencut hookforge client", () => {
           candidates: [],
           applied: true,
           suggestionsOnly: false,
+          safetyMode: "AUTO_APPLY",
+          confidenceScore: 0.9,
+          safetyReasons: ["Candidate confidence is high and batch size is safe."],
           revisionId: "rev_filler",
           timelineOps: [{ op: "delete_range" }],
           issues: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_2",
+          projectV2Id: "pv2_audio",
+          language: "en",
+          segment: {
+            startMs: 0,
+            endMs: 1800,
+            durationMs: 1800
+          },
+          run: {
+            id: "run_apply",
+            operation: "ENHANCE",
+            mode: "APPLY",
+            status: "APPLIED",
+            createdAt: new Date().toISOString()
+          },
+          audition: {
+            beforeLabel: "Original",
+            afterLabel: "Enhanced",
+            supported: true,
+            transcriptSnippet: "hello world",
+            recommendedLoopCount: 3,
+            note: "Use solo preview for focused audition and bypass to compare against original."
+          }
         })
       )
       .mockResolvedValueOnce(
@@ -823,12 +863,14 @@ describe("opencut hookforge client", () => {
     const previewEnhance = await previewProjectV2AudioEnhancement("pv2_audio", {
       language: "en",
       preset: "dialogue_enhance",
+      deEsser: true,
       targetLufs: -14,
       intensity: 1
     });
     const applyEnhance = await applyProjectV2AudioEnhancement("pv2_audio", {
       language: "en",
       preset: "dialogue_enhance",
+      confirmed: true,
       targetLufs: -14,
       intensity: 1
     });
@@ -838,7 +880,14 @@ describe("opencut hookforge client", () => {
     });
     const applyFiller = await applyProjectV2FillerRemoval("pv2_audio", {
       language: "en",
-      maxCandidates: 40
+      maxCandidates: 40,
+      confirmed: true
+    });
+    const ab = await getProjectV2AudioSegmentAudition("pv2_audio", {
+      runId: "run_apply",
+      startMs: 0,
+      endMs: 1800,
+      language: "en"
     });
     const undo = await undoProjectV2AudioEnhancement("pv2_audio", "undo_audio_1");
 
@@ -847,6 +896,7 @@ describe("opencut hookforge client", () => {
     expect(applyEnhance.undoToken).toBe("undo_audio_1");
     expect(previewFiller.mode).toBe("PREVIEW");
     expect(applyFiller.mode).toBe("APPLY");
+    expect(ab.audition.supported).toBe(true);
     expect(undo.restored).toBe(true);
 
     expect(fetchSpy).toHaveBeenNthCalledWith(
@@ -876,6 +926,11 @@ describe("opencut hookforge client", () => {
     );
     expect(fetchSpy).toHaveBeenNthCalledWith(
       6,
+      "/api/projects-v2/pv2_audio/audio/ab/segment",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      7,
       "/api/projects-v2/pv2_audio/audio/enhance/undo",
       expect.objectContaining({ method: "POST" })
     );

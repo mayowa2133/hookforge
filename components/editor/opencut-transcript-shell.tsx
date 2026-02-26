@@ -14,6 +14,7 @@ import {
   applyProjectV2AudioEnhancement,
   applyProjectV2ChatEdit,
   applyProjectV2FillerRemoval,
+  getProjectV2AudioSegmentAudition,
   createProjectV2ReviewComment,
   createProjectV2ShareLink,
   applyTranscriptRangeDelete,
@@ -74,6 +75,7 @@ import {
   type AudioEnhanceResultPayload,
   type AudioEnhancementPreset,
   type AudioFillerResultPayload,
+  type AudioSegmentAuditionPayload,
   type ChatApplyResponse,
   type ChatPlanOperationDecision,
   type ChatPlanResponse,
@@ -304,14 +306,25 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [audioPreset, setAudioPreset] = useState<AudioEnhancementPreset>("dialogue_enhance");
   const [audioTargetLufs, setAudioTargetLufs] = useState("-14");
   const [audioIntensity, setAudioIntensity] = useState("1");
+  const [audioDenoise, setAudioDenoise] = useState(true);
+  const [audioClarity, setAudioClarity] = useState(true);
+  const [audioDeEsser, setAudioDeEsser] = useState(true);
+  const [audioNormalizeLoudness, setAudioNormalizeLoudness] = useState(true);
+  const [audioBypassEnhancement, setAudioBypassEnhancement] = useState(false);
+  const [audioSoloPreview, setAudioSoloPreview] = useState(false);
+  const [audioConfirmApply, setAudioConfirmApply] = useState(false);
   const [audioPreviewResult, setAudioPreviewResult] = useState<AudioEnhanceResultPayload | null>(null);
   const [audioApplyResult, setAudioApplyResult] = useState<AudioEnhanceResultPayload | null>(null);
   const [audioUndoToken, setAudioUndoToken] = useState<string | null>(null);
   const [audioUndoResult, setAudioUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
+  const [audioSegmentAbStartMs, setAudioSegmentAbStartMs] = useState("0");
+  const [audioSegmentAbEndMs, setAudioSegmentAbEndMs] = useState("1200");
+  const [audioSegmentAbResult, setAudioSegmentAbResult] = useState<AudioSegmentAuditionPayload | null>(null);
   const [fillerPreviewResult, setFillerPreviewResult] = useState<AudioFillerResultPayload | null>(null);
   const [fillerApplyResult, setFillerApplyResult] = useState<AudioFillerResultPayload | null>(null);
   const [fillerMaxCandidates, setFillerMaxCandidates] = useState("60");
   const [fillerMaxConfidence, setFillerMaxConfidence] = useState("0.92");
+  const [fillerConfirmApply, setFillerConfirmApply] = useState(false);
   const [speakerBatchFromLabel, setSpeakerBatchFromLabel] = useState("");
   const [speakerBatchToLabel, setSpeakerBatchToLabel] = useState("");
   const [speakerBatchMaxConfidence, setSpeakerBatchMaxConfidence] = useState("0.86");
@@ -505,6 +518,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setSpeakerDraft(active.speakerLabel ?? "");
     setDeleteStartMs(String(active.startMs));
     setDeleteEndMs(String(Math.min(active.endMs, active.startMs + 240)));
+    setAudioSegmentAbStartMs(String(active.startMs));
+    setAudioSegmentAbEndMs(String(Math.max(active.startMs + 200, Math.min(active.endMs, active.startMs + 1800))));
   }, [language, minConfidenceForRipple, projectV2Id, selectedSegmentId]);
 
   const loadTranscriptDocumentState = useCallback(async () => {
@@ -1944,6 +1959,12 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       const payload = await previewProjectV2AudioEnhancement(projectV2Id, {
         language,
         preset: audioPreset,
+        denoise: audioDenoise,
+        clarity: audioClarity,
+        deEsser: audioDeEsser,
+        normalizeLoudness: audioNormalizeLoudness,
+        bypassEnhancement: audioBypassEnhancement,
+        soloPreview: audioSoloPreview,
         targetLufs: Number.isFinite(targetLufs) ? targetLufs : -14,
         intensity: Number.isFinite(intensity) ? intensity : 1
       });
@@ -1953,7 +1974,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Audio preview",
-        detail: `${payload.preset} preview generated (${payload.timelineOps.length} ops)`,
+        detail: `${payload.preset} preview generated (${payload.timelineOps.length} ops, ${payload.safetyMode})`,
         status: "INFO"
       });
     } catch (error) {
@@ -1980,6 +2001,13 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       const payload = await applyProjectV2AudioEnhancement(projectV2Id, {
         language,
         preset: audioPreset,
+        denoise: audioDenoise,
+        clarity: audioClarity,
+        deEsser: audioDeEsser,
+        normalizeLoudness: audioNormalizeLoudness,
+        bypassEnhancement: audioBypassEnhancement,
+        soloPreview: audioSoloPreview,
+        confirmed: audioConfirmApply,
         targetLufs: Number.isFinite(targetLufs) ? targetLufs : -14,
         intensity: Number.isFinite(intensity) ? intensity : 1
       });
@@ -1991,8 +2019,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       appendHistory({
         label: "Audio apply",
         detail: payload.suggestionsOnly
-          ? `Suggestions-only (${payload.issues.length} issues)`
-          : `Applied ${payload.preset} (rev ${payload.revisionId?.slice(0, 8) ?? "n/a"})`,
+          ? `Suggestions-only (${payload.issues.length} issues, ${payload.safetyMode})`
+          : `Applied ${payload.preset} (rev ${payload.revisionId?.slice(0, 8) ?? "n/a"}, ${payload.safetyMode})`,
         status: payload.suggestionsOnly ? "INFO" : "SUCCESS"
       });
     } catch (error) {
@@ -2087,6 +2115,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         language,
         maxCandidates,
         maxConfidence: Number.isFinite(maxConfidence) ? Math.max(0, Math.min(1, maxConfidence)) : 0.92,
+        confirmed: fillerConfirmApply,
         minConfidenceForRipple
       });
       setFillerApplyResult(payload);
@@ -2095,8 +2124,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       appendHistory({
         label: "Filler apply",
         detail: payload.suggestionsOnly
-          ? `Suggestions-only (${payload.issues.length} issue(s))`
-          : `Applied ${payload.candidateCount} filler deletion(s)`,
+          ? `Suggestions-only (${payload.issues.length} issue(s), ${payload.safetyMode})`
+          : `Applied ${payload.candidateCount} filler deletion(s), ${payload.safetyMode}`,
         status: payload.suggestionsOnly ? "INFO" : "SUCCESS"
       });
     } catch (error) {
@@ -2105,6 +2134,37 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setAutosaveStatus("ERROR");
       appendHistory({
         label: "Filler apply",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const loadAudioSegmentAb = async () => {
+    setBusy("audio_ab_segment");
+    setPanelError(null);
+    try {
+      const startMs = Math.max(0, Math.floor(Number(audioSegmentAbStartMs) || 0));
+      const endMs = Math.max(startMs + 1, Math.floor(Number(audioSegmentAbEndMs) || startMs + 1200));
+      const payload = await getProjectV2AudioSegmentAudition(projectV2Id, {
+        runId: audioApplyResult?.runId ?? audioPreviewResult?.runId ?? undefined,
+        startMs,
+        endMs,
+        language
+      });
+      setAudioSegmentAbResult(payload);
+      appendHistory({
+        label: "Audio A/B audition",
+        detail: `${formatMs(startMs)}-${formatMs(endMs)} (${payload.audition.supported ? "ready" : "run required"})`,
+        status: "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Audio A/B lookup failed";
+      setPanelError(message);
+      appendHistory({
+        label: "Audio A/B audition",
         detail: message,
         status: "ERROR"
       });
@@ -3483,6 +3543,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                         setSpeakerDraft(segment.speakerLabel ?? "");
                         setDeleteStartMs(String(segment.startMs));
                         setDeleteEndMs(String(Math.min(segment.endMs, segment.startMs + 220)));
+                        setAudioSegmentAbStartMs(String(segment.startMs));
+                        setAudioSegmentAbEndMs(String(Math.max(segment.startMs + 200, Math.min(segment.endMs, segment.startMs + 1800))));
                       }}
                       className={`w-full rounded border px-2 py-2 text-left transition ${segment.id === selectedSegmentId ? "border-primary bg-primary/10" : "hover:bg-muted"}`}
                     >
@@ -3899,6 +3961,52 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   <Label className="text-[11px]">Intensity</Label>
                   <Input value={audioIntensity} onChange={(event) => setAudioIntensity(event.target.value)} />
                 </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <label className="flex items-center gap-2 rounded border px-2 py-1">
+                    <input type="checkbox" checked={audioDenoise} onChange={(event) => setAudioDenoise(event.target.checked)} />
+                    Denoise
+                  </label>
+                  <label className="flex items-center gap-2 rounded border px-2 py-1">
+                    <input type="checkbox" checked={audioClarity} onChange={(event) => setAudioClarity(event.target.checked)} />
+                    Clarity EQ/Comp
+                  </label>
+                  <label className="flex items-center gap-2 rounded border px-2 py-1">
+                    <input type="checkbox" checked={audioDeEsser} onChange={(event) => setAudioDeEsser(event.target.checked)} />
+                    De-esser
+                  </label>
+                  <label className="flex items-center gap-2 rounded border px-2 py-1">
+                    <input
+                      type="checkbox"
+                      checked={audioNormalizeLoudness}
+                      onChange={(event) => setAudioNormalizeLoudness(event.target.checked)}
+                    />
+                    Loudness normalize
+                  </label>
+                  <label className="flex items-center gap-2 rounded border px-2 py-1">
+                    <input
+                      type="checkbox"
+                      checked={audioSoloPreview}
+                      onChange={(event) => setAudioSoloPreview(event.target.checked)}
+                    />
+                    Solo preview
+                  </label>
+                  <label className="flex items-center gap-2 rounded border px-2 py-1">
+                    <input
+                      type="checkbox"
+                      checked={audioBypassEnhancement}
+                      onChange={(event) => setAudioBypassEnhancement(event.target.checked)}
+                    />
+                    Bypass enhancement
+                  </label>
+                </div>
+                <label className="flex items-center gap-2 rounded border px-2 py-1 text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={audioConfirmApply}
+                    onChange={(event) => setAudioConfirmApply(event.target.checked)}
+                  />
+                  Confirm apply for gated safety modes
+                </label>
                 <div className="grid grid-cols-3 gap-2">
                   <Button size="sm" variant="secondary" onClick={previewAudioEnhancement} disabled={busy !== null}>
                     Preview
@@ -3934,6 +4042,38 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                     Apply Filler Cut
                   </Button>
                 </div>
+                <label className="mt-2 flex items-center gap-2 rounded border px-2 py-1 text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={fillerConfirmApply}
+                    onChange={(event) => setFillerConfirmApply(event.target.checked)}
+                  />
+                  Confirm filler apply for gated safety modes
+                </label>
+              </div>
+
+              <div className="mt-3 rounded border p-2">
+                <p className="font-semibold">Segment A/B audition</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Input value={audioSegmentAbStartMs} onChange={(event) => setAudioSegmentAbStartMs(event.target.value)} placeholder="Start ms" />
+                  <Input value={audioSegmentAbEndMs} onChange={(event) => setAudioSegmentAbEndMs(event.target.value)} placeholder="End ms" />
+                </div>
+                <Button size="sm" variant="secondary" className="mt-2" onClick={loadAudioSegmentAb} disabled={busy !== null}>
+                  Load A/B metadata
+                </Button>
+                {audioSegmentAbResult ? (
+                  <div className="mt-2 rounded border p-2 text-muted-foreground">
+                    <p>
+                      {audioSegmentAbResult.audition.beforeLabel} vs {audioSegmentAbResult.audition.afterLabel} •
+                      {" "}{audioSegmentAbResult.audition.supported ? "ready" : "preview first"}
+                    </p>
+                    <p>
+                      Range {formatMs(audioSegmentAbResult.segment.startMs)} - {formatMs(audioSegmentAbResult.segment.endMs)} •
+                      {" "}loop x{audioSegmentAbResult.audition.recommendedLoopCount}
+                    </p>
+                    <p className="line-clamp-2">{audioSegmentAbResult.audition.transcriptSnippet || "No transcript snippet in this range."}</p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-3 rounded border p-2 text-muted-foreground">
@@ -3947,6 +4087,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <div className="mt-2 rounded border p-2 text-muted-foreground">
                   <p className="font-semibold text-foreground">Audio preview ready</p>
                   <p>Ops: {audioPreviewResult.timelineOps.length} • Issues: {audioPreviewResult.issues.length}</p>
+                  <p>Safety: {audioPreviewResult.safetyMode} • confidence {audioPreviewResult.confidenceScore.toFixed(2)}</p>
                   <p>Noise {audioPreviewResult.analysisBefore.estimatedNoiseLevel} → {audioPreviewResult.analysisAfter.estimatedNoiseLevel}</p>
                   <p>Loudness {audioPreviewResult.analysisBefore.estimatedLoudnessLufs} → {audioPreviewResult.analysisAfter.estimatedLoudnessLufs} LUFS</p>
                 </div>
@@ -3957,6 +4098,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   <p className="font-semibold text-foreground">
                     {audioApplyResult.suggestionsOnly ? "Suggestions-only" : "Audio apply complete"}
                   </p>
+                  <p>Safety: {audioApplyResult.safetyMode} • confidence {audioApplyResult.confidenceScore.toFixed(2)}</p>
                   <p>Revision: {audioApplyResult.revisionId ? audioApplyResult.revisionId.slice(0, 8) : "n/a"}</p>
                   <p>Undo token: {audioApplyResult.undoToken ? audioApplyResult.undoToken.slice(0, 8) : "n/a"}</p>
                 </div>
@@ -3973,6 +4115,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <div className="mt-2 rounded border p-2 text-muted-foreground">
                   <p className="font-semibold text-foreground">Filler preview</p>
                   <p>Candidates: {fillerPreviewResult.candidateCount} • Issues: {fillerPreviewResult.issues.length}</p>
+                  <p>Safety: {fillerPreviewResult.safetyMode} • confidence {fillerPreviewResult.confidenceScore.toFixed(2)}</p>
                 </div>
               ) : null}
 
@@ -3981,6 +4124,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   <p className="font-semibold text-foreground">
                     {fillerApplyResult.suggestionsOnly ? "Filler suggestions-only" : "Filler apply complete"}
                   </p>
+                  <p>Safety: {fillerApplyResult.safetyMode} • confidence {fillerApplyResult.confidenceScore.toFixed(2)}</p>
                   <p>Candidates: {fillerApplyResult.candidateCount}</p>
                   <p>Revision: {fillerApplyResult.revisionId ? fillerApplyResult.revisionId.slice(0, 8) : "n/a"}</p>
                 </div>

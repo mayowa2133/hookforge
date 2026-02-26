@@ -55,7 +55,11 @@ export type AudioEnhancementInput = {
   preset: AudioEnhancementPresetInput;
   denoise?: boolean;
   clarity?: boolean;
+  deEsser?: boolean;
   normalizeLoudness?: boolean;
+  bypassEnhancement?: boolean;
+  soloPreview?: boolean;
+  confirmed?: boolean;
   targetLufs: number;
   intensity: number;
 };
@@ -65,6 +69,7 @@ export type AudioFillerInput = {
   candidateIds?: string[];
   maxCandidates: number;
   maxConfidence: number;
+  confirmed?: boolean;
   minConfidenceForRipple: number;
 };
 
@@ -72,6 +77,13 @@ export type AudioIssue = {
   code: string;
   message: string;
   severity: "INFO" | "WARN" | "ERROR";
+};
+
+export type AudioSafetyMode = "AUTO_APPLY" | "APPLY_WITH_CONFIRM" | "PREVIEW_ONLY";
+
+export type AudioSafetyRationale = {
+  confidenceScore: number;
+  reasons: string[];
 };
 
 export type DetectedFillerCandidate = {
@@ -90,13 +102,17 @@ type AudioEnhancementProfile = {
   preset: AudioEnhancementPresetInput;
   denoise: boolean;
   clarity: boolean;
+  deEsser: boolean;
   normalizeLoudness: boolean;
+  bypassEnhancement: boolean;
+  soloPreview: boolean;
   targetLufs: number;
   intensity: number;
   trackVolumeScale: number;
   compressionRatio: number;
   eqPresence: number;
   denoiseStrength: number;
+  deEsserStrength: number;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -234,18 +250,25 @@ function estimateTimelineDurationMs(state: TimelineState, assets: Array<{ durati
 function buildAudioProfile(input: AudioEnhancementInput): AudioEnhancementProfile {
   const preset = input.preset;
   const intensity = clamp(input.intensity, 0.2, 1.6);
+  const deEsser = input.deEsser ?? true;
+  const bypassEnhancement = input.bypassEnhancement ?? false;
+  const soloPreview = input.soloPreview ?? false;
   if (preset === "clean_voice") {
     return {
       preset,
       denoise: input.denoise ?? true,
       clarity: input.clarity ?? true,
+      deEsser,
       normalizeLoudness: input.normalizeLoudness ?? true,
+      bypassEnhancement,
+      soloPreview,
       targetLufs: clamp(input.targetLufs, -24, -10),
       intensity,
       trackVolumeScale: clamp(0.96 + intensity * 0.04, 0.75, 1.25),
       compressionRatio: clamp(2 + intensity * 0.7, 1.5, 4.2),
       eqPresence: clamp(1.6 + intensity * 1.1, 0.5, 4.5),
-      denoiseStrength: clamp(0.5 + intensity * 0.35, 0.2, 0.95)
+      denoiseStrength: clamp(0.5 + intensity * 0.35, 0.2, 0.95),
+      deEsserStrength: clamp(0.45 + intensity * 0.3, 0.1, 0.95)
     };
   }
   if (preset === "broadcast_loudness") {
@@ -253,13 +276,17 @@ function buildAudioProfile(input: AudioEnhancementInput): AudioEnhancementProfil
       preset,
       denoise: input.denoise ?? true,
       clarity: input.clarity ?? true,
+      deEsser,
       normalizeLoudness: input.normalizeLoudness ?? true,
+      bypassEnhancement,
+      soloPreview,
       targetLufs: clamp(input.targetLufs, -16, -10),
       intensity,
       trackVolumeScale: clamp(1 + intensity * 0.06, 0.78, 1.35),
       compressionRatio: clamp(2.6 + intensity * 0.8, 1.7, 4.5),
       eqPresence: clamp(2 + intensity * 1.2, 0.8, 5),
-      denoiseStrength: clamp(0.45 + intensity * 0.3, 0.2, 0.9)
+      denoiseStrength: clamp(0.45 + intensity * 0.3, 0.2, 0.9),
+      deEsserStrength: clamp(0.4 + intensity * 0.26, 0.1, 0.9)
     };
   }
   if (preset === "custom") {
@@ -267,26 +294,34 @@ function buildAudioProfile(input: AudioEnhancementInput): AudioEnhancementProfil
       preset,
       denoise: input.denoise ?? true,
       clarity: input.clarity ?? true,
+      deEsser,
       normalizeLoudness: input.normalizeLoudness ?? true,
+      bypassEnhancement,
+      soloPreview,
       targetLufs: clamp(input.targetLufs, -24, -10),
       intensity,
       trackVolumeScale: clamp(1, 0.75, 1.25),
       compressionRatio: clamp(2.4, 1.5, 4.5),
       eqPresence: clamp(2.4, 0.6, 5),
-      denoiseStrength: clamp(0.55, 0.2, 0.95)
+      denoiseStrength: clamp(0.55, 0.2, 0.95),
+      deEsserStrength: clamp(0.5, 0.1, 0.95)
     };
   }
   return {
     preset: "dialogue_enhance",
     denoise: input.denoise ?? true,
     clarity: input.clarity ?? true,
+    deEsser,
     normalizeLoudness: input.normalizeLoudness ?? true,
+    bypassEnhancement,
+    soloPreview,
     targetLufs: clamp(input.targetLufs, -24, -10),
     intensity,
     trackVolumeScale: clamp(1 + intensity * 0.03, 0.75, 1.28),
     compressionRatio: clamp(2.3 + intensity * 0.65, 1.5, 4.3),
     eqPresence: clamp(2 + intensity * 1.05, 0.7, 4.7),
-    denoiseStrength: clamp(0.42 + intensity * 0.35, 0.2, 0.95)
+    denoiseStrength: clamp(0.42 + intensity * 0.35, 0.2, 0.95),
+    deEsserStrength: clamp(0.38 + intensity * 0.3, 0.1, 0.92)
   };
 }
 
@@ -294,6 +329,14 @@ export function buildAudioEnhancementTimelineOperations(state: TimelineState, pr
   const audioTracks = state.tracks.filter((track) => track.kind === "AUDIO" && track.clips.length > 0);
   const issues: AudioIssue[] = [];
   const operations: TimelineOperation[] = [];
+  if (profile.bypassEnhancement) {
+    issues.push({
+      code: "BYPASS_ENABLED",
+      message: "Bypass enhancement enabled. No timeline operations generated.",
+      severity: "INFO"
+    });
+    return { operations, issues };
+  }
   if (audioTracks.length > 0) {
     for (const track of audioTracks) {
       operations.push({
@@ -311,12 +354,15 @@ export function buildAudioEnhancementTimelineOperations(state: TimelineState, pr
             preset: profile.preset,
             denoise: profile.denoise,
             clarity: profile.clarity,
+            deEsser: profile.deEsser,
             normalizeLoudness: profile.normalizeLoudness,
             targetLufs: profile.targetLufs,
             intensity: profile.intensity,
             compressionRatio: profile.compressionRatio,
             eqPresence: profile.eqPresence,
             denoiseStrength: profile.denoiseStrength,
+            deEsserStrength: profile.deEsserStrength,
+            soloPreview: profile.soloPreview,
             appliedAt: new Date().toISOString()
           }
         });
@@ -369,12 +415,15 @@ export function buildAudioEnhancementTimelineOperations(state: TimelineState, pr
         preset: profile.preset,
         denoise: profile.denoise,
         clarity: profile.clarity,
+        deEsser: profile.deEsser,
         normalizeLoudness: profile.normalizeLoudness,
         targetLufs: profile.targetLufs,
         intensity: profile.intensity,
         compressionRatio: profile.compressionRatio,
         eqPresence: profile.eqPresence,
         denoiseStrength: profile.denoiseStrength,
+        deEsserStrength: profile.deEsserStrength,
+        soloPreview: profile.soloPreview,
         derivedFromVideo: true,
         appliedAt: new Date().toISOString()
       }
@@ -519,13 +568,105 @@ function summarizeAnalysis(params: {
 }
 
 function predictPostEnhancementAnalysis(analysis: ReturnType<typeof summarizeAnalysis>, profile: AudioEnhancementProfile) {
+  if (profile.bypassEnhancement) {
+    return {
+      ...analysis
+    };
+  }
   const noiseDelta = profile.denoise ? 0.12 * profile.intensity : 0;
+  const deEsserNoiseDelta = profile.deEsser ? 0.04 * profile.intensity : 0;
   const lufsDelta = profile.normalizeLoudness ? (profile.targetLufs - analysis.estimatedLoudnessLufs) * 0.65 : 0;
   return {
     ...analysis,
-    estimatedNoiseLevel: Number(clamp(analysis.estimatedNoiseLevel - noiseDelta, 0.01, 0.98).toFixed(3)),
+    estimatedNoiseLevel: Number(clamp(analysis.estimatedNoiseLevel - noiseDelta - deEsserNoiseDelta, 0.01, 0.98).toFixed(3)),
     estimatedLoudnessLufs: Number((analysis.estimatedLoudnessLufs + lufsDelta).toFixed(2)),
     averageTrackVolume: Number(clamp(analysis.averageTrackVolume * profile.trackVolumeScale, 0, 1.5).toFixed(3))
+  };
+}
+
+export function classifyEnhancementSafetyMode(params: {
+  analysis: ReturnType<typeof summarizeAnalysis>;
+  issues: AudioIssue[];
+  profile: AudioEnhancementProfile;
+}): { safetyMode: AudioSafetyMode; rationale: AudioSafetyRationale } {
+  const reasons: string[] = [];
+  const score = clamp(params.analysis.averageTranscriptConfidence, 0, 1);
+  const hasError = params.issues.some((issue) => issue.severity === "ERROR");
+  const warnCount = params.issues.filter((issue) => issue.severity === "WARN").length;
+
+  if (params.profile.bypassEnhancement) {
+    reasons.push("Bypass enhancement is enabled.");
+    return {
+      safetyMode: "PREVIEW_ONLY",
+      rationale: { confidenceScore: score, reasons }
+    };
+  }
+
+  if (hasError || !params.analysis.readyForApply || score < 0.7) {
+    if (hasError) reasons.push("Invariant or timeline validation errors detected.");
+    if (!params.analysis.readyForApply) reasons.push("No renderable audio/video source is available.");
+    if (score < 0.7) reasons.push("Transcript confidence is too low for safe auto-apply.");
+    return {
+      safetyMode: "PREVIEW_ONLY",
+      rationale: { confidenceScore: score, reasons }
+    };
+  }
+
+  if (warnCount > 0 || params.profile.intensity > 1.25 || score < 0.84) {
+    if (warnCount > 0) reasons.push("Warnings were reported while building enhancement operations.");
+    if (params.profile.intensity > 1.25) reasons.push("High intensity increases risk of over-processing.");
+    if (score < 0.84) reasons.push("Transcript confidence indicates moderate risk.");
+    return {
+      safetyMode: "APPLY_WITH_CONFIRM",
+      rationale: { confidenceScore: score, reasons }
+    };
+  }
+
+  reasons.push("Validation checks passed with strong confidence.");
+  return {
+    safetyMode: "AUTO_APPLY",
+    rationale: { confidenceScore: score, reasons }
+  };
+}
+
+export function classifyFillerSafetyMode(params: {
+  analysis: ReturnType<typeof summarizeAnalysis>;
+  candidates: DetectedFillerCandidate[];
+  issues: AudioIssue[];
+}): { safetyMode: AudioSafetyMode; rationale: AudioSafetyRationale } {
+  const reasons: string[] = [];
+  const hasError = params.issues.some((issue) => issue.severity === "ERROR");
+  const confidenceValues = params.candidates
+    .map((candidate) => candidate.confidence)
+    .filter((value): value is number => typeof value === "number");
+  const avgCandidateConfidence = confidenceValues.length > 0
+    ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+    : params.analysis.averageTranscriptConfidence;
+  const score = clamp(avgCandidateConfidence, 0, 1);
+
+  if (hasError || params.candidates.length === 0 || score < 0.7) {
+    if (hasError) reasons.push("Transcript patch preview reported blocking errors.");
+    if (params.candidates.length === 0) reasons.push("No eligible filler candidates matched the current filter.");
+    if (score < 0.7) reasons.push("Candidate confidence is too low for safe destructive apply.");
+    return {
+      safetyMode: "PREVIEW_ONLY",
+      rationale: { confidenceScore: score, reasons }
+    };
+  }
+
+  if (params.candidates.length > 25 || score < 0.86) {
+    if (params.candidates.length > 25) reasons.push("Large candidate batch requires explicit confirmation.");
+    if (score < 0.86) reasons.push("Candidate confidence indicates moderate risk.");
+    return {
+      safetyMode: "APPLY_WITH_CONFIRM",
+      rationale: { confidenceScore: score, reasons }
+    };
+  }
+
+  reasons.push("Candidate confidence is high and batch size is safe.");
+  return {
+    safetyMode: "AUTO_APPLY",
+    rationale: { confidenceScore: score, reasons }
   };
 }
 
@@ -664,6 +805,11 @@ export async function previewAudioEnhancement(projectIdOrV2Id: string, input: Au
       severity: "ERROR" as const
     }))
   ];
+  const safety = classifyEnhancementSafetyMode({
+    analysis: context.analysis,
+    issues,
+    profile
+  });
 
   const run = await prisma.audioEnhancementRun.create({
     data: {
@@ -682,7 +828,10 @@ export async function previewAudioEnhancement(projectIdOrV2Id: string, input: Au
         issues,
         timelineOpCount: built.operations.length,
         analysisBefore: context.analysis,
-        analysisAfter: predicted
+        analysisAfter: predicted,
+        safetyMode: safety.safetyMode,
+        confidenceScore: safety.rationale.confidenceScore,
+        safetyReasons: safety.rationale.reasons
       }
     }
   });
@@ -691,10 +840,13 @@ export async function previewAudioEnhancement(projectIdOrV2Id: string, input: Au
     mode: "PREVIEW" as const,
     runId: run.id,
     applied: false,
-    suggestionsOnly: !preview.valid,
+    suggestionsOnly: !preview.valid || safety.safetyMode === "PREVIEW_ONLY",
     revisionId: null as string | null,
     undoToken: null as string | null,
     preset: profile.preset,
+    safetyMode: safety.safetyMode,
+    confidenceScore: safety.rationale.confidenceScore,
+    safetyReasons: safety.rationale.reasons,
     timelineOps: built.operations,
     issues,
     analysisBefore: context.analysis,
@@ -719,6 +871,64 @@ export async function applyAudioEnhancement(projectIdOrV2Id: string, input: Audi
       severity: "ERROR" as const
     }))
   ];
+  const safety = classifyEnhancementSafetyMode({
+    analysis: context.analysis,
+    issues,
+    profile
+  });
+
+  if (safety.safetyMode === "PREVIEW_ONLY" || (safety.safetyMode === "APPLY_WITH_CONFIRM" && input.confirmed !== true)) {
+    const gatedIssues: AudioIssue[] = [
+      ...issues,
+      {
+        code: safety.safetyMode === "APPLY_WITH_CONFIRM" ? "CONFIRMATION_REQUIRED" : "PREVIEW_ONLY_SAFETY_GATE",
+        message: safety.safetyMode === "APPLY_WITH_CONFIRM"
+          ? "Apply-with-confirm safety mode requires confirmed=true."
+          : "Safety mode requires preview-only path for this operation.",
+        severity: "WARN"
+      }
+    ];
+    const gatedRun = await prisma.audioEnhancementRun.create({
+      data: {
+        workspaceId: context.ctx.workspace.id,
+        projectId: context.ctx.projectV2.id,
+        createdByUserId: context.ctx.user.id,
+        mode: "APPLY",
+        operation: "ENHANCE",
+        preset: toPresetEnum(profile.preset),
+        status: "ERROR",
+        config: {
+          input,
+          profile
+        },
+        summary: {
+          issues: gatedIssues,
+          timelineOpCount: built.operations.length,
+          analysisBefore: context.analysis,
+          analysisAfter: predicted,
+          safetyMode: safety.safetyMode,
+          confidenceScore: safety.rationale.confidenceScore,
+          safetyReasons: safety.rationale.reasons
+        }
+      }
+    });
+    return {
+      mode: "APPLY" as const,
+      runId: gatedRun.id,
+      applied: false,
+      suggestionsOnly: true,
+      revisionId: null as string | null,
+      undoToken: null as string | null,
+      preset: profile.preset,
+      safetyMode: safety.safetyMode,
+      confidenceScore: safety.rationale.confidenceScore,
+      safetyReasons: safety.rationale.reasons,
+      timelineOps: built.operations,
+      issues: gatedIssues,
+      analysisBefore: context.analysis,
+      analysisAfter: predicted
+    };
+  }
 
   if (!preview.valid || !preview.nextState) {
     const failedRun = await prisma.audioEnhancementRun.create({
@@ -738,7 +948,10 @@ export async function applyAudioEnhancement(projectIdOrV2Id: string, input: Audi
           issues,
           timelineOpCount: built.operations.length,
           analysisBefore: context.analysis,
-          analysisAfter: predicted
+          analysisAfter: predicted,
+          safetyMode: safety.safetyMode,
+          confidenceScore: safety.rationale.confidenceScore,
+          safetyReasons: safety.rationale.reasons
         }
       }
     });
@@ -751,6 +964,9 @@ export async function applyAudioEnhancement(projectIdOrV2Id: string, input: Audi
       revisionId: null as string | null,
       undoToken: null as string | null,
       preset: profile.preset,
+      safetyMode: safety.safetyMode,
+      confidenceScore: safety.rationale.confidenceScore,
+      safetyReasons: safety.rationale.reasons,
       timelineOps: built.operations,
       issues,
       analysisBefore: context.analysis,
@@ -817,7 +1033,10 @@ export async function applyAudioEnhancement(projectIdOrV2Id: string, input: Audi
         issues,
         timelineOpCount: built.operations.length,
         analysisBefore: context.analysis,
-        analysisAfter: predicted
+        analysisAfter: predicted,
+        safetyMode: safety.safetyMode,
+        confidenceScore: safety.rationale.confidenceScore,
+        safetyReasons: safety.rationale.reasons
       }
     }
   });
@@ -830,6 +1049,9 @@ export async function applyAudioEnhancement(projectIdOrV2Id: string, input: Audi
     revisionId: revision.id,
     undoToken,
     preset: profile.preset,
+    safetyMode: safety.safetyMode,
+    confidenceScore: safety.rationale.confidenceScore,
+    safetyReasons: safety.rationale.reasons,
     timelineOps: built.operations,
     issues,
     analysisBefore: context.analysis,
@@ -925,6 +1147,17 @@ export async function previewFillerRemoval(projectIdOrV2Id: string, input: Audio
         ],
         revisionId: null as string | null
       };
+  const baseIssues = (transcriptResult.issues as Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>)
+    .map((issue) => ({
+      code: issue.code,
+      message: issue.message,
+      severity: issue.severity
+    }));
+  const safety = classifyFillerSafetyMode({
+    analysis: context.analysis,
+    candidates: selectedCandidates,
+    issues: baseIssues
+  });
 
   const run = await prisma.audioEnhancementRun.create({
     data: {
@@ -939,7 +1172,10 @@ export async function previewFillerRemoval(projectIdOrV2Id: string, input: Audio
       },
       summary: {
         selectedCandidateCount: selectedCandidates.length,
-        issueCount: transcriptResult.issues.length
+        issueCount: transcriptResult.issues.length,
+        safetyMode: safety.safetyMode,
+        confidenceScore: safety.rationale.confidenceScore,
+        safetyReasons: safety.rationale.reasons
       }
     }
   });
@@ -958,6 +1194,9 @@ export async function previewFillerRemoval(projectIdOrV2Id: string, input: Audio
     runId: run.id,
     candidateCount: selectedCandidates.length,
     candidates: selectedCandidates,
+    safetyMode: safety.safetyMode,
+    confidenceScore: safety.rationale.confidenceScore,
+    safetyReasons: safety.rationale.reasons,
     ...transcriptResult
   };
 }
@@ -991,6 +1230,73 @@ export async function applyFillerRemoval(projectIdOrV2Id: string, input: AudioFi
         ],
         revisionId: null as string | null
       };
+  const baseIssues = (transcriptResult.issues as Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>)
+    .map((issue) => ({
+      code: issue.code,
+      message: issue.message,
+      severity: issue.severity
+    }));
+  const safety = classifyFillerSafetyMode({
+    analysis: context.analysis,
+    candidates: selectedCandidates,
+    issues: baseIssues
+  });
+
+  if (safety.safetyMode === "PREVIEW_ONLY" || (safety.safetyMode === "APPLY_WITH_CONFIRM" && input.confirmed !== true)) {
+    const issues = [
+      ...baseIssues,
+      {
+        code: safety.safetyMode === "APPLY_WITH_CONFIRM" ? "CONFIRMATION_REQUIRED" : "PREVIEW_ONLY_SAFETY_GATE",
+        message: safety.safetyMode === "APPLY_WITH_CONFIRM"
+          ? "Apply-with-confirm safety mode requires confirmed=true."
+          : "Safety mode requires preview-only path for filler removal.",
+        severity: "WARN" as const
+      }
+    ];
+    const run = await prisma.audioEnhancementRun.create({
+      data: {
+        workspaceId: context.ctx.workspace.id,
+        projectId: context.ctx.projectV2.id,
+        createdByUserId: context.ctx.user.id,
+        mode: "APPLY",
+        operation: "FILLER_REMOVE",
+        status: "ERROR",
+        config: {
+          input
+        },
+        summary: {
+          selectedCandidateCount: selectedCandidates.length,
+          issueCount: issues.length,
+          suggestionsOnly: true,
+          safetyMode: safety.safetyMode,
+          confidenceScore: safety.rationale.confidenceScore,
+          safetyReasons: safety.rationale.reasons
+        }
+      }
+    });
+    await storeFillerCandidates({
+      runId: run.id,
+      workspaceId: context.ctx.workspace.id,
+      projectId: context.ctx.projectV2.id,
+      language: input.language,
+      candidates: selectedCandidates,
+      status: "SKIPPED"
+    });
+    return {
+      mode: "APPLY" as const,
+      runId: run.id,
+      candidateCount: selectedCandidates.length,
+      candidates: selectedCandidates,
+      applied: false,
+      suggestionsOnly: true,
+      revisionId: null as string | null,
+      timelineOps: transcriptResult.timelineOps,
+      issues,
+      safetyMode: safety.safetyMode,
+      confidenceScore: safety.rationale.confidenceScore,
+      safetyReasons: safety.rationale.reasons
+    };
+  }
 
   const run = await prisma.audioEnhancementRun.create({
     data: {
@@ -1007,7 +1313,10 @@ export async function applyFillerRemoval(projectIdOrV2Id: string, input: AudioFi
       summary: {
         selectedCandidateCount: selectedCandidates.length,
         issueCount: transcriptResult.issues.length,
-        suggestionsOnly: transcriptResult.suggestionsOnly
+        suggestionsOnly: transcriptResult.suggestionsOnly,
+        safetyMode: safety.safetyMode,
+        confidenceScore: safety.rationale.confidenceScore,
+        safetyReasons: safety.rationale.reasons
       }
     }
   });
@@ -1026,6 +1335,91 @@ export async function applyFillerRemoval(projectIdOrV2Id: string, input: AudioFi
     runId: run.id,
     candidateCount: selectedCandidates.length,
     candidates: selectedCandidates,
+    safetyMode: safety.safetyMode,
+    confidenceScore: safety.rationale.confidenceScore,
+    safetyReasons: safety.rationale.reasons,
     ...transcriptResult
+  };
+}
+
+export async function getAudioSegmentAudition(params: {
+  projectIdOrV2Id: string;
+  runId?: string;
+  startMs: number;
+  endMs: number;
+  language?: string;
+}) {
+  const ctx = await requireProjectContext(params.projectIdOrV2Id);
+  const startMs = Math.max(0, Math.min(params.startMs, params.endMs));
+  const endMs = Math.max(startMs + 1, Math.max(params.startMs, params.endMs));
+  const language = (params.language ?? "en").trim().toLowerCase();
+
+  const run = params.runId
+    ? await prisma.audioEnhancementRun.findFirst({
+        where: {
+          id: params.runId,
+          workspaceId: ctx.workspace.id,
+          projectId: ctx.projectV2.id
+        }
+      })
+    : await prisma.audioEnhancementRun.findFirst({
+        where: {
+          workspaceId: ctx.workspace.id,
+          projectId: ctx.projectV2.id,
+          status: {
+            in: ["PREVIEWED", "APPLIED"]
+          }
+        },
+        orderBy: {
+          createdAt: "desc"
+        }
+      });
+
+  const overlappingSegments = await prisma.transcriptSegment.findMany({
+    where: {
+      projectId: ctx.projectV2.id,
+      language,
+      OR: [
+        { startMs: { lte: endMs }, endMs: { gte: startMs } }
+      ]
+    },
+    orderBy: {
+      startMs: "asc"
+    },
+    take: 6
+  });
+  const transcriptSnippet = sanitizeOverlayText(
+    overlappingSegments.map((segment) => segment.text).join(" ").slice(0, 280),
+    "audio_segment"
+  );
+
+  return {
+    projectId: ctx.legacyProject.id,
+    projectV2Id: ctx.projectV2.id,
+    language,
+    segment: {
+      startMs,
+      endMs,
+      durationMs: endMs - startMs
+    },
+    run: run
+      ? {
+          id: run.id,
+          operation: run.operation,
+          mode: run.mode,
+          status: run.status,
+          createdAt: run.createdAt.toISOString()
+        }
+      : null,
+    audition: {
+      beforeLabel: "Original",
+      afterLabel: "Enhanced",
+      supported: Boolean(run),
+      transcriptSnippet,
+      recommendedLoopCount: endMs - startMs <= 3000 ? 3 : 2,
+      note: run
+        ? "Use solo preview for focused audition and bypass to compare against original."
+        : "Run audio preview/apply first to compare before/after audition metadata."
+    }
   };
 }

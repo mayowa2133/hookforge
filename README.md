@@ -551,15 +551,18 @@ Implemented on `/opencut/projects-v2/[id]` and projects-v2 APIs:
   - `POST /api/projects-v2/:id/audio/enhance/undo`
   - `POST /api/projects-v2/:id/audio/filler/preview`
   - `POST /api/projects-v2/:id/audio/filler/apply`
+  - `POST /api/projects-v2/:id/audio/ab/segment`
+  - `GET /api/projects-v2/:id/audio/runs/:runId`
 - Non-destructive revision flow:
   - enhancement applies as timeline-safe ops with rollback/undo lineage
   - filler removal runs transcript-aware preview before apply
-  - low-confidence paths remain suggestions/preview-first
+  - confidence-aware safety mode (`AUTO_APPLY`, `APPLY_WITH_CONFIRM`, `PREVIEW_ONLY`)
+  - apply-with-confirm gate enforced for medium-confidence destructive ops
 - Persistence and traceability:
   - `AudioEnhancementRun` records enhancement preview/apply runs
   - `FillerCandidate` records detected filler spans and status
 - UI integration:
-  - OpenCut shell Audio Quality panel with presets, intensity/target controls, preview/apply/undo, and operation history
+  - OpenCut shell Audio Quality panel with denoise/clarity/de-esser/normalize toggles, solo+bypass audition switches, segment A/B metadata preview, and preview/apply/undo operation history
 
 Validation:
 
