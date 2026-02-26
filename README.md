@@ -91,6 +91,18 @@ If you pulled the parity scaffold update into an existing local DB, run migratio
 pnpm db:deploy
 ```
 
+If Prisma migration bookkeeping is out of sync with an already-reconciled local schema
+(for example: schema objects exist but `_prisma_migrations` has a failed/pending row),
+run the local repair utility once and then continue with normal commands:
+
+```bash
+pnpm db:repair:migration-state
+pnpm db:deploy
+```
+
+`db:repair:migration-state` is for local development recovery only and should not be
+used as a substitute for normal migration rollout in production environments.
+
 To backfill only active legacy projects (default statuses: `DRAFT,READY,RENDERING`) into `ProjectV2`:
 
 ```bash

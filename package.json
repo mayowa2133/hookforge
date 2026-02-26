@@ -15,6 +15,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
+    "db:repair:migration-state": "tsx scripts/repair-local-migration-state.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:backfill:projects-v2": "tsx scripts/backfill-projects-v2.ts",
     "db:backfill:transcript-segments": "tsx scripts/backfill-transcript-segments.ts",
