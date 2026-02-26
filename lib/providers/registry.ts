@@ -1,63 +1,117 @@
 import { env } from "../env";
 import { createMockProvider } from "./mock";
-import type { ProviderCapability, ProviderRegistry } from "./types";
+import type { ProviderAdapter, ProviderCapability, ProviderRegistry } from "./types";
+import {
+  createDeepgramAsrAdapter,
+  createElevenLabsTtsAdapter,
+  createElevenLabsVoiceCloneAdapter,
+  createGenerativeMediaAdapter,
+  createLipSyncAdapter,
+  createMusicSfxAdapter,
+  createOpenAiTranslationAdapter
+} from "./runtime-adapters";
 
-const capabilityDefaults: Record<ProviderCapability, string[]> = {
-  asr: ["deepgram", "whisper-fallback"],
-  translation: ["llm-translation", "deterministic-fallback"],
-  tts: ["elevenlabs", "tts-fallback"],
-  voice_clone: ["elevenlabs-voice-clone"],
-  lip_sync: ["sync-api", "lip-sync-fallback"],
-  generative_media: ["gen-media-api", "gen-media-fallback"],
-  music_sfx: ["music-sfx-provider", "music-sfx-fallback"]
-};
+const PROVIDER_TIMEOUT_MS = env.PROVIDER_HTTP_TIMEOUT_MS;
 
-const configuredFlags: Record<string, boolean> = {
-  deepgram: Boolean(env.DEEPGRAM_API_KEY),
-  whisperFallback: true,
-  llmTranslation: Boolean(env.OPENAI_API_KEY),
-  deterministicFallback: true,
-  elevenlabs: Boolean(env.ELEVENLABS_API_KEY),
-  ttsFallback: true,
-  elevenlabsVoiceClone: Boolean(env.ELEVENLABS_API_KEY),
-  syncApi: Boolean(env.LIPSYNC_API_KEY),
-  lipSyncFallback: true,
-  genMediaApi: Boolean(env.GENERATIVE_MEDIA_API_KEY),
-  genMediaFallback: true,
-  musicSfxProvider: Boolean(env.GENERATIVE_MEDIA_API_KEY),
-  musicSfxFallback: true
-};
+function runtimeIsNonDev() {
+  const value = (process.env.NODE_ENV ?? "").trim().toLowerCase();
+  if (!value) {
+    return false;
+  }
+  return value !== "development" && value !== "test";
+}
 
-function isConfigured(providerName: string) {
-  if (providerName.startsWith("deepgram")) return configuredFlags.deepgram;
-  if (providerName.startsWith("whisper")) return configuredFlags.whisperFallback;
-  if (providerName.startsWith("llm")) return configuredFlags.llmTranslation;
-  if (providerName.startsWith("deterministic")) return configuredFlags.deterministicFallback;
-  if (providerName.startsWith("elevenlabs-voice")) return configuredFlags.elevenlabsVoiceClone;
-  if (providerName.startsWith("elevenlabs")) return configuredFlags.elevenlabs;
-  if (providerName.startsWith("sync")) return configuredFlags.syncApi;
-  if (providerName.startsWith("lip-sync")) return configuredFlags.lipSyncFallback;
-  if (providerName.startsWith("gen-media-api")) return configuredFlags.genMediaApi;
-  if (providerName.startsWith("gen-media")) return configuredFlags.genMediaFallback;
-  if (providerName.startsWith("music-sfx-provider")) return configuredFlags.musicSfxProvider;
-  if (providerName.startsWith("music-sfx")) return configuredFlags.musicSfxFallback;
-  return false;
+export function realProviderEnforcementEnabled() {
+  return runtimeIsNonDev() && !env.ALLOW_MOCK_PROVIDERS;
 }
 
 export const providerRegistry: ProviderRegistry = {
-  asr: capabilityDefaults.asr.map((name) => createMockProvider(name, "asr", isConfigured(name))),
-  translation: capabilityDefaults.translation.map((name) => createMockProvider(name, "translation", isConfigured(name))),
-  tts: capabilityDefaults.tts.map((name) => createMockProvider(name, "tts", isConfigured(name))),
-  voice_clone: capabilityDefaults.voice_clone.map((name) => createMockProvider(name, "voice_clone", isConfigured(name))),
-  lip_sync: capabilityDefaults.lip_sync.map((name) => createMockProvider(name, "lip_sync", isConfigured(name))),
-  generative_media: capabilityDefaults.generative_media.map((name) => createMockProvider(name, "generative_media", isConfigured(name))),
-  music_sfx: capabilityDefaults.music_sfx.map((name) => createMockProvider(name, "music_sfx", isConfigured(name)))
+  asr: [
+    createDeepgramAsrAdapter({
+      apiKey: env.DEEPGRAM_API_KEY,
+      baseUrl: env.DEEPGRAM_API_BASE_URL,
+      timeoutMs: PROVIDER_TIMEOUT_MS
+    }),
+    createMockProvider("whisper-fallback", "asr", true)
+  ],
+  translation: [
+    createOpenAiTranslationAdapter({
+      apiKey: env.OPENAI_API_KEY,
+      baseUrl: env.OPENAI_API_BASE_URL,
+      timeoutMs: PROVIDER_TIMEOUT_MS
+    }),
+    createMockProvider("deterministic-fallback", "translation", true)
+  ],
+  tts: [
+    createElevenLabsTtsAdapter({
+      apiKey: env.ELEVENLABS_API_KEY,
+      baseUrl: env.ELEVENLABS_API_BASE_URL,
+      timeoutMs: PROVIDER_TIMEOUT_MS
+    }),
+    createMockProvider("tts-fallback", "tts", true)
+  ],
+  voice_clone: [
+    createElevenLabsVoiceCloneAdapter({
+      apiKey: env.ELEVENLABS_API_KEY,
+      baseUrl: env.ELEVENLABS_VOICE_CLONE_BASE_URL,
+      timeoutMs: PROVIDER_TIMEOUT_MS
+    }),
+    createMockProvider("voice-clone-fallback", "voice_clone", true)
+  ],
+  lip_sync: [
+    createLipSyncAdapter({
+      apiKey: env.LIPSYNC_API_KEY,
+      endpointUrl: env.LIPSYNC_API_URL,
+      timeoutMs: PROVIDER_TIMEOUT_MS
+    }),
+    createMockProvider("lip-sync-fallback", "lip_sync", true)
+  ],
+  generative_media: [
+    createGenerativeMediaAdapter({
+      apiKey: env.GENERATIVE_MEDIA_API_KEY,
+      endpointUrl: env.GENERATIVE_MEDIA_API_URL,
+      timeoutMs: PROVIDER_TIMEOUT_MS
+    }),
+    createMockProvider("gen-media-fallback", "generative_media", true)
+  ],
+  music_sfx: [
+    createMusicSfxAdapter({
+      apiKey: env.GENERATIVE_MEDIA_API_KEY,
+      endpointUrl: env.MUSIC_SFX_API_URL,
+      timeoutMs: PROVIDER_TIMEOUT_MS
+    }),
+    createMockProvider("music-sfx-fallback", "music_sfx", true)
+  ]
 };
 
+function selectPreferredProvider(providers: ProviderAdapter[]) {
+  const configuredReal = providers.find((provider) => provider.configured && !provider.isMock);
+  if (configuredReal) {
+    return configuredReal;
+  }
+  const configuredAny = providers.find((provider) => provider.configured);
+  if (configuredAny) {
+    return configuredAny;
+  }
+  return providers[0];
+}
+
+export function assertProviderAllowed(provider: ProviderAdapter, capability: ProviderCapability) {
+  if (!realProviderEnforcementEnabled()) {
+    return;
+  }
+  if (provider.isMock) {
+    throw new Error(`Mock provider '${provider.name}' selected for '${capability}' in non-dev runtime.`);
+  }
+  if (!provider.configured) {
+    throw new Error(`Provider '${provider.name}' for '${capability}' is not configured in non-dev runtime.`);
+  }
+}
+
 export function getPrimaryProvider(capability: ProviderCapability) {
-  const providers = providerRegistry[capability];
-  const configured = providers.find((provider) => provider.configured);
-  return configured ?? providers[0];
+  const provider = selectPreferredProvider(providerRegistry[capability]);
+  assertProviderAllowed(provider, capability);
+  return provider;
 }
 
 export function getProviderByName(capability: ProviderCapability, providerName: string) {
@@ -66,6 +120,7 @@ export function getProviderByName(capability: ProviderCapability, providerName: 
   if (!matched) {
     return null;
   }
+  assertProviderAllowed(matched, capability);
   return matched;
 }
 
@@ -74,14 +129,42 @@ export function listProviders(capability: ProviderCapability) {
 }
 
 export function getFallbackProvider(capability: ProviderCapability, excludeProviderName?: string) {
-  const providers = providerRegistry[capability];
-  const configured = providers.find(
-    (provider) => provider.configured && provider.name !== excludeProviderName
-  );
+  const providers = providerRegistry[capability].filter((provider) => provider.name !== excludeProviderName);
+  const configuredReal = providers.find((provider) => provider.configured && !provider.isMock);
+  if (configuredReal) {
+    return configuredReal;
+  }
+  if (realProviderEnforcementEnabled()) {
+    return null;
+  }
+  const configured = providers.find((provider) => provider.configured);
   if (configured) {
     return configured;
   }
+  return providers[0] ?? null;
+}
 
-  const firstAvailable = providers.find((provider) => provider.name !== excludeProviderName);
-  return firstAvailable ?? null;
+export function summarizeProviderReadiness() {
+  const capabilities = Object.keys(providerRegistry) as ProviderCapability[];
+  const rows = capabilities.map((capability) => {
+    const providers = providerRegistry[capability];
+    const configuredRealCount = providers.filter((provider) => provider.configured && !provider.isMock).length;
+    const configuredMockCount = providers.filter((provider) => provider.configured && provider.isMock).length;
+    const primary = selectPreferredProvider(providers);
+    return {
+      capability,
+      primaryProvider: primary?.name ?? null,
+      primaryConfigured: primary?.configured ?? false,
+      primaryIsMock: primary?.isMock ?? true,
+      configuredRealCount,
+      configuredMockCount,
+      providerCount: providers.length
+    };
+  });
+
+  return {
+    enforcementEnabled: realProviderEnforcementEnabled(),
+    allCapabilitiesHaveConfiguredRealProvider: rows.every((row) => row.configuredRealCount > 0),
+    rows
+  };
 }
