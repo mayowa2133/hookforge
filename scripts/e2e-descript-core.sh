@@ -127,6 +127,40 @@ word_count=$(echo "$transcript_resp" | jq -r '.words | length')
 [ "$word_count" -gt 0 ]
 echo "transcript_segments=$segment_count transcript_words=$word_count"
 
+ranges_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/transcript/ranges?language=en&offset=0&limit=20")
+ranges_count=$(echo "$ranges_resp" | jq -r '.ranges | length')
+[ "$ranges_count" -gt 0 ]
+start_word_index=$(echo "$ranges_resp" | jq -r '.ranges[0].startWordIndex')
+end_word_index=$(echo "$ranges_resp" | jq -r '.ranges[0].endWordIndex')
+[ "$start_word_index" -ge 0 ]
+[ "$end_word_index" -ge "$start_word_index" ]
+
+range_preview_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/ranges/preview" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"language":"en","selection":{"startWordIndex":%s,"endWordIndex":%s},"minConfidenceForRipple":0.86}' "$start_word_index" "$end_word_index")")
+range_preview_mode=$(echo "$range_preview_resp" | jq -r ".mode")
+[ "$range_preview_mode" = "PREVIEW" ]
+
+range_apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/ranges/apply" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"language":"en","selection":{"startWordIndex":%s,"endWordIndex":%s},"minConfidenceForRipple":0.86}' "$start_word_index" "$end_word_index")")
+range_apply_mode=$(echo "$range_apply_resp" | jq -r ".mode")
+[ "$range_apply_mode" = "APPLY" ]
+
+speaker_batch_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/speakers/batch" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","speakerLabel":"Host","maxConfidence":1}')
+speaker_batch_affected=$(echo "$speaker_batch_resp" | jq -r ".affectedSegments")
+[ "$speaker_batch_affected" -gt 0 ]
+
+issues_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/transcript/issues?language=en&minConfidence=0.86&limit=200")
+issues_total=$(echo "$issues_resp" | jq -r ".totalIssues")
+[ "$issues_total" -ge 0 ]
+echo "range_ops_ok=true speaker_batch_affected=$speaker_batch_affected transcript_issues=$issues_total"
+
 chat_plan_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/chat/plan" \
   -H "Content-Type: application/json" \

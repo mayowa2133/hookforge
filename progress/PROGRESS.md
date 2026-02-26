@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-26T01:14:48.352Z
+Last updated: 2026-02-26T01:51:44.568Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -62,5 +62,7 @@ Last updated: 2026-02-26T01:14:48.352Z
   - Program launched with Descript-first interaction model: transcript primary, timeline precision layer, chat plan/apply/undo safety flow, and recording-first path wired through projects-v2 routes
 - [x] Phase 1 recording core and ingest reliability
   - Implemented browser recording controls in OpenCut shell, projects-v2 recording session/chunk/finalize/cancel APIs, resumable multipart upload path with fallback registration, auto-transcribe on finalize, dashboard New Recording CTA, and descript-core end-to-end script coverage
+- [x] Phase 2 transcript-first editing at scale
+  - Implemented transcript ranges APIs (list/preview/apply), batch speaker relabel API, transcript issue queue API, low-confidence review queue + batch speaker tools in OpenCut shell, and validated with client/unit/e2e coverage
 
 Status legend: `[x]=DONE`, `[-]=IN_PROGRESS`, `[ ]=TODO`

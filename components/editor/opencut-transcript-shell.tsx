@@ -11,11 +11,15 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
   applyProjectV2ChatEdit,
+  applyTranscriptRangeDelete,
   applyTranscriptOps,
   autoTranscript,
+  batchSetTranscriptSpeaker,
   cancelProjectV2RecordingSession,
   finalizeProjectV2RecordingSession,
   getAiJob,
+  getTranscriptIssues,
+  getTranscriptRanges,
   getLegacyProject,
   getProjectV2RecordingSession,
   getProjectV2EditorHealth,
@@ -26,6 +30,7 @@ import {
   patchTimeline,
   planProjectV2ChatEdit,
   postProjectV2RecordingChunk,
+  previewTranscriptRangeDelete,
   previewTranscriptOps,
   registerProjectV2Media,
   searchTranscript,
@@ -38,6 +43,7 @@ import {
   type EditorHealthStatus,
   type LegacyProjectPayload,
   type RecordingMode,
+  type TranscriptIssue,
   type TimelineOperation,
   type TimelinePayload,
   type TranscriptPayload,
@@ -189,6 +195,10 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     startWordIndex: 0,
     endWordIndex: 0
   });
+  const [transcriptIssues, setTranscriptIssues] = useState<TranscriptIssue[]>([]);
+  const [speakerBatchFromLabel, setSpeakerBatchFromLabel] = useState("");
+  const [speakerBatchToLabel, setSpeakerBatchToLabel] = useState("");
+  const [speakerBatchMaxConfidence, setSpeakerBatchMaxConfidence] = useState("0.86");
   const [lastTranscriptPreview, setLastTranscriptPreview] = useState<{
     applied: boolean;
     suggestionsOnly: boolean;
@@ -303,8 +313,12 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   }, [projectV2Id]);
 
   const loadTranscript = useCallback(async () => {
-    const next = await getTranscript(projectV2Id, language);
+    const [next, issuesPayload] = await Promise.all([
+      getTranscript(projectV2Id, language),
+      getTranscriptIssues(projectV2Id, language, minConfidenceForRipple)
+    ]);
     setTranscript(next);
+    setTranscriptIssues(issuesPayload.issues);
     if (next.segments.length === 0) {
       setSelectedSegmentId("");
       setSegmentDraft("");
@@ -318,7 +332,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setSpeakerDraft(active.speakerLabel ?? "");
     setDeleteStartMs(String(active.startMs));
     setDeleteEndMs(String(Math.min(active.endMs, active.startMs + 240)));
-  }, [language, projectV2Id, selectedSegmentId]);
+  }, [language, minConfidenceForRipple, projectV2Id, selectedSegmentId]);
 
   useEffect(() => {
     let canceled = false;
@@ -679,6 +693,11 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }
     return null;
   }, [orderedTracks, selectedSegment]);
+
+  const lowConfidenceIssues = useMemo(
+    () => transcriptIssues.filter((issue) => issue.type === "LOW_CONFIDENCE"),
+    [transcriptIssues]
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1134,24 +1153,108 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     );
   };
 
+  const applySpeakerBatch = async () => {
+    setBusy("set_speaker_batch");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const maxConfidence = Number(speakerBatchMaxConfidence);
+      const payload = await batchSetTranscriptSpeaker(projectV2Id, {
+        language,
+        fromSpeakerLabel: speakerBatchFromLabel.trim() || undefined,
+        speakerLabel: speakerBatchToLabel.trim() || null,
+        maxConfidence: Number.isFinite(maxConfidence) ? Math.max(0, Math.min(1, maxConfidence)) : undefined,
+        minConfidenceForRipple
+      });
+      setLastTranscriptPreview(payload);
+      await Promise.all([loadTranscript(), loadProjectSurface()]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Speaker batch",
+        detail: `Updated ${payload.affectedSegments} segment(s)`,
+        status: payload.suggestionsOnly ? "INFO" : "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Speaker batch update failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Speaker batch",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const previewRangeDelete = async () => {
-    if (!transcriptRangeMs) {
+    if (!transcript || transcript.words.length === 0) {
       return;
     }
-    await runTranscriptPreview(
-      [{ op: "delete_range", startMs: transcriptRangeMs.startMs, endMs: transcriptRangeMs.endMs }],
-      "delete_range_preview"
-    );
+    setBusy("delete_range_preview");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await previewTranscriptRangeDelete(projectV2Id, {
+        language,
+        selection: rangeSelection,
+        minConfidenceForRipple
+      });
+      setLastTranscriptPreview(payload);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Transcript preview",
+        detail: `Word-range preview ${payload.selection.startWordIndex}-${payload.selection.endWordIndex}`,
+        status: "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Range preview failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Transcript preview",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
   };
 
   const applyRangeDelete = async () => {
-    if (!transcriptRangeMs) {
+    if (!transcript || transcript.words.length === 0) {
       return;
     }
-    await runTranscriptApply(
-      [{ op: "delete_range", startMs: transcriptRangeMs.startMs, endMs: transcriptRangeMs.endMs }],
-      "delete_range_apply"
-    );
+    setBusy("delete_range_apply");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await applyTranscriptRangeDelete(projectV2Id, {
+        language,
+        selection: rangeSelection,
+        minConfidenceForRipple
+      });
+      setLastTranscriptPreview(payload);
+      await Promise.all([loadTranscript(), loadProjectSurface()]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Transcript apply",
+        detail: `Word-range apply ${payload.selection.startWordIndex}-${payload.selection.endWordIndex} (${payload.suggestionsOnly ? "suggestions only" : "applied"})`,
+        status: payload.suggestionsOnly ? "INFO" : "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Range apply failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Transcript apply",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
   };
 
   const applyManualDeleteRange = async () => {
@@ -1285,6 +1388,29 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       if (previewVideoRef.current) {
         previewVideoRef.current.currentTime = clip.timelineInMs / 1000;
       }
+    }
+  };
+
+  const syncRangeFromSelectedSegment = async () => {
+    if (!selectedSegment || !transcript) {
+      return;
+    }
+    const segmentIndex = transcript.segments.findIndex((segment) => segment.id === selectedSegment.id);
+    if (segmentIndex < 0) {
+      return;
+    }
+    try {
+      const payload = await getTranscriptRanges(projectV2Id, language, segmentIndex, 1);
+      const range = payload.ranges[0];
+      if (!range || range.startWordIndex < 0 || range.endWordIndex < 0) {
+        return;
+      }
+      setRangeSelection({
+        startWordIndex: range.startWordIndex,
+        endWordIndex: range.endWordIndex
+      });
+    } catch {
+      // noop, this sync utility should not interrupt editing flow
     }
   };
 
@@ -1714,6 +1840,35 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                     Set Speaker
                   </Button>
                 </div>
+                <div className="rounded border p-2">
+                  <p className="font-semibold">Batch speaker relabel</p>
+                  <div className="mt-2 grid gap-2 grid-cols-2">
+                    <Input
+                      value={speakerBatchFromLabel}
+                      onChange={(event) => setSpeakerBatchFromLabel(event.target.value)}
+                      placeholder="From speaker (optional)"
+                    />
+                    <Input
+                      value={speakerBatchToLabel}
+                      onChange={(event) => setSpeakerBatchToLabel(event.target.value)}
+                      placeholder="To speaker (empty clears)"
+                    />
+                  </div>
+                  <div className="mt-2 grid gap-2 grid-cols-[1fr_auto]">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={speakerBatchMaxConfidence}
+                      onChange={(event) => setSpeakerBatchMaxConfidence(event.target.value)}
+                      placeholder="Max confidence"
+                    />
+                    <Button size="sm" variant="secondary" onClick={applySpeakerBatch} disabled={busy !== null}>
+                      Apply Batch
+                    </Button>
+                  </div>
+                </div>
                 <div className="grid gap-2 grid-cols-2">
                   <Input value={deleteStartMs} onChange={(event) => setDeleteStartMs(event.target.value)} placeholder="Start ms" />
                   <Input value={deleteEndMs} onChange={(event) => setDeleteEndMs(event.target.value)} placeholder="End ms" />
@@ -1749,6 +1904,39 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <Button size="sm" variant="destructive" onClick={applyRangeDelete} disabled={!transcriptRangeMs || busy !== null}>
                   Apply Ripple Delete
                 </Button>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 w-full"
+                onClick={syncRangeFromSelectedSegment}
+                disabled={!selectedSegment || busy !== null}
+              >
+                Sync Range From Selected Segment
+              </Button>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Low-confidence review queue ({lowConfidenceIssues.length})</p>
+              <div className="mt-2 max-h-[130px] space-y-1 overflow-y-auto">
+                {lowConfidenceIssues.slice(0, 40).map((issue) => (
+                  <button
+                    key={issue.id}
+                    type="button"
+                    className="w-full rounded border px-2 py-1 text-left hover:bg-muted"
+                    onClick={() => {
+                      setSelectedSegmentId(issue.segmentId);
+                      const segmentIndex = transcript?.segments.findIndex((segment) => segment.id === issue.segmentId) ?? 0;
+                      setSegmentWindowStart(Math.max(0, segmentIndex - 8));
+                    }}
+                  >
+                    <p className="font-medium">{formatMs(issue.startMs)} - {formatMs(issue.endMs)}</p>
+                    <p className="line-clamp-1 text-muted-foreground">{issue.message}</p>
+                  </button>
+                ))}
+                {lowConfidenceIssues.length === 0 ? (
+                  <p className="text-muted-foreground">No low-confidence segments for the current threshold.</p>
+                ) : null}
               </div>
             </div>
 

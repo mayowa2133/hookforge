@@ -9,13 +9,18 @@ import {
   getProjectV2,
   getOpenCutMetrics,
   importProjectV2Media,
+  getTranscriptIssues,
+  getTranscriptRanges,
   patchTimeline,
   patchTranscript,
+  previewTranscriptRangeDelete,
   previewTranscriptOps,
   registerProjectV2Media,
   searchTranscript,
   planProjectV2ChatEdit,
   applyProjectV2Preset,
+  applyTranscriptRangeDelete,
+  batchSetTranscriptSpeaker,
   cancelProjectV2RecordingSession,
   finalizeProjectV2RecordingSession,
   startRender,
@@ -209,6 +214,158 @@ describe("opencut hookforge client", () => {
       3,
       "/api/projects-v2/pv2_4/transcript/ops/apply",
       expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("supports transcript ranges, issues, and speaker batch endpoints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_4",
+          language: "en",
+          totalWords: 120,
+          totalRanges: 12,
+          offset: 0,
+          limit: 50,
+          hasMore: false,
+          nextOffset: null,
+          ranges: [
+            {
+              segmentId: "seg_1",
+              startWordIndex: 0,
+              endWordIndex: 6,
+              startMs: 0,
+              endMs: 1200,
+              text: "first segment",
+              speakerLabel: "Speaker A",
+              confidenceAvg: 0.84
+            }
+          ]
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "PREVIEW",
+          selection: {
+            startWordIndex: 0,
+            endWordIndex: 6,
+            startMs: 0,
+            endMs: 1200,
+            wordCount: 7,
+            textPreview: "first segment"
+          },
+          applied: false,
+          suggestionsOnly: false,
+          revisionId: null,
+          issues: [],
+          timelineOps: [{ op: "trim_clip" }]
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "APPLY",
+          selection: {
+            startWordIndex: 0,
+            endWordIndex: 6,
+            startMs: 0,
+            endMs: 1200,
+            wordCount: 7,
+            textPreview: "first segment"
+          },
+          applied: true,
+          suggestionsOnly: false,
+          revisionId: "rev_22",
+          issues: [],
+          timelineOps: [{ op: "trim_clip" }]
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          affectedSegments: 3,
+          applied: true,
+          suggestionsOnly: false,
+          revisionId: "rev_23",
+          issues: [],
+          timelineOps: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_4",
+          language: "en",
+          minConfidence: 0.86,
+          totalIssues: 1,
+          byType: {
+            LOW_CONFIDENCE: 1,
+            OVERLAP: 0,
+            TIMING_DRIFT: 0
+          },
+          issues: [
+            {
+              id: "low_confidence:seg_1",
+              type: "LOW_CONFIDENCE",
+              severity: "WARN",
+              segmentId: "seg_1",
+              startMs: 0,
+              endMs: 1200,
+              message: "low confidence",
+              confidenceAvg: 0.8,
+              speakerLabel: "Speaker A"
+            }
+          ]
+        })
+      );
+
+    const ranges = await getTranscriptRanges("pv2_4", "en", 0, 50);
+    const rangePreview = await previewTranscriptRangeDelete("pv2_4", {
+      language: "en",
+      selection: { startWordIndex: 0, endWordIndex: 6 },
+      minConfidenceForRipple: 0.86
+    });
+    const rangeApply = await applyTranscriptRangeDelete("pv2_4", {
+      language: "en",
+      selection: { startWordIndex: 0, endWordIndex: 6 },
+      minConfidenceForRipple: 0.86
+    });
+    const batch = await batchSetTranscriptSpeaker("pv2_4", {
+      language: "en",
+      fromSpeakerLabel: "Speaker A",
+      speakerLabel: "Host",
+      maxConfidence: 0.9
+    });
+    const issues = await getTranscriptIssues("pv2_4", "en", 0.86, 200);
+
+    expect(ranges.totalRanges).toBe(12);
+    expect(rangePreview.mode).toBe("PREVIEW");
+    expect(rangeApply.mode).toBe("APPLY");
+    expect(batch.affectedSegments).toBe(3);
+    expect(issues.totalIssues).toBe(1);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "/api/projects-v2/pv2_4/transcript/ranges?language=en&offset=0&limit=50",
+      undefined
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects-v2/pv2_4/transcript/ranges/preview",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects-v2/pv2_4/transcript/ranges/apply",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
+      "/api/projects-v2/pv2_4/transcript/speakers/batch",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      5,
+      "/api/projects-v2/pv2_4/transcript/issues?language=en&minConfidence=0.86&limit=200",
+      undefined
     );
   });
 

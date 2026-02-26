@@ -180,6 +180,12 @@
       "title": "Phase 1 recording core and ingest reliability",
       "status": "DONE",
       "details": "Implemented browser recording controls in OpenCut shell, projects-v2 recording session/chunk/finalize/cancel APIs, resumable multipart upload path with fallback registration, auto-transcribe on finalize, dashboard New Recording CTA, and descript-core end-to-end script coverage"
+    },
+    {
+      "id": "descript_phase2_transcript_scale",
+      "title": "Phase 2 transcript-first editing at scale",
+      "status": "DONE",
+      "details": "Implemented transcript ranges APIs (list/preview/apply), batch speaker relabel API, transcript issue queue API, low-confidence review queue + batch speaker tools in OpenCut shell, and validated with client/unit/e2e coverage"
     }
   ]
 }

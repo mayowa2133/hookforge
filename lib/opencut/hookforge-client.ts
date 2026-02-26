@@ -99,6 +99,18 @@ export type TranscriptRangeSelection = {
   endWordIndex: number;
 };
 
+export type TranscriptIssue = {
+  id: string;
+  type: "LOW_CONFIDENCE" | "OVERLAP" | "TIMING_DRIFT";
+  severity: "INFO" | "WARN" | "ERROR";
+  segmentId: string;
+  startMs: number;
+  endMs: number;
+  message: string;
+  confidenceAvg: number | null;
+  speakerLabel: string | null;
+};
+
 export type TimelineOperation = SharedTimelineOperation;
 
 export type TranscriptPayload = {
@@ -140,6 +152,21 @@ type TranscriptPatchRequest = {
   operations: TranscriptPatchOperation[];
   minConfidenceForRipple?: number;
   previewOnly?: boolean;
+};
+
+type TranscriptRangeOpRequest = {
+  language: string;
+  selection: TranscriptRangeSelection;
+  minConfidenceForRipple?: number;
+};
+
+type TranscriptSpeakerBatchRequest = {
+  language: string;
+  speakerLabel: string | null;
+  fromSpeakerLabel?: string;
+  segmentIds?: string[];
+  maxConfidence?: number;
+  minConfidenceForRipple?: number;
 };
 
 type TranscriptAutoRequest = {
@@ -506,6 +533,66 @@ export type TranscriptSearchPayload = {
   tookMs: number;
 };
 
+export type TranscriptRangesPayload = {
+  projectId: string;
+  projectV2Id: string;
+  language: string;
+  totalWords: number;
+  totalRanges: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+  ranges: Array<{
+    segmentId: string;
+    startWordIndex: number;
+    endWordIndex: number;
+    startMs: number;
+    endMs: number;
+    text: string;
+    speakerLabel: string | null;
+    confidenceAvg: number | null;
+  }>;
+};
+
+export type TranscriptOperationResult = {
+  applied: boolean;
+  suggestionsOnly: boolean;
+  revisionId: string | null;
+  issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
+  timelineOps: Array<{ op: string; [key: string]: unknown }>;
+};
+
+export type TranscriptRangeOperationPayload = TranscriptOperationResult & {
+  mode: "PREVIEW" | "APPLY";
+  selection: {
+    startWordIndex: number;
+    endWordIndex: number;
+    startMs: number;
+    endMs: number;
+    wordCount: number;
+    textPreview: string;
+  };
+};
+
+export type TranscriptSpeakerBatchPayload = TranscriptOperationResult & {
+  affectedSegments: number;
+};
+
+export type TranscriptIssuesPayload = {
+  projectId: string;
+  projectV2Id: string;
+  language: string;
+  minConfidence: number;
+  totalIssues: number;
+  byType: {
+    LOW_CONFIDENCE: number;
+    OVERLAP: number;
+    TIMING_DRIFT: number;
+  };
+  issues: TranscriptIssue[];
+};
+
 export type EditorHealthStatus = {
   projectId: string;
   legacyProjectId: string;
@@ -639,6 +726,18 @@ export async function searchTranscript(projectV2Id: string, language: string, q:
   );
 }
 
+export async function getTranscriptRanges(projectV2Id: string, language: string, offset = 0, limit = 200) {
+  return requestJson<TranscriptRangesPayload>(
+    `/api/projects-v2/${projectV2Id}/transcript/ranges?language=${encodeURIComponent(language)}&offset=${offset}&limit=${limit}`
+  );
+}
+
+export async function getTranscriptIssues(projectV2Id: string, language: string, minConfidence = 0.86, limit = 1200) {
+  return requestJson<TranscriptIssuesPayload>(
+    `/api/projects-v2/${projectV2Id}/transcript/issues?language=${encodeURIComponent(language)}&minConfidence=${minConfidence}&limit=${limit}`
+  );
+}
+
 export async function autoTranscript(projectV2Id: string, body: TranscriptAutoRequest) {
   return requestJson<{ aiJobId: string; status: string; trackId: string }>(`/api/projects-v2/${projectV2Id}/transcript/auto`, {
     method: "POST",
@@ -648,28 +747,42 @@ export async function autoTranscript(projectV2Id: string, body: TranscriptAutoRe
 }
 
 export async function patchTranscript(projectV2Id: string, body: TranscriptPatchRequest) {
-  return requestJson<{
-    applied: boolean;
-    suggestionsOnly: boolean;
-    revisionId: string | null;
-    issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
-    timelineOps?: Array<{ op: string; [key: string]: unknown }>;
-  }>(`/api/projects-v2/${projectV2Id}/transcript`, {
-    method: "PATCH",
+  return requestJson<Omit<TranscriptOperationResult, "timelineOps"> & { timelineOps?: Array<{ op: string; [key: string]: unknown }> }>(
+    `/api/projects-v2/${projectV2Id}/transcript`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+}
+
+export async function previewTranscriptRangeDelete(projectV2Id: string, body: TranscriptRangeOpRequest) {
+  return requestJson<TranscriptRangeOperationPayload>(`/api/projects-v2/${projectV2Id}/transcript/ranges/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function applyTranscriptRangeDelete(projectV2Id: string, body: TranscriptRangeOpRequest) {
+  return requestJson<TranscriptRangeOperationPayload>(`/api/projects-v2/${projectV2Id}/transcript/ranges/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function batchSetTranscriptSpeaker(projectV2Id: string, body: TranscriptSpeakerBatchRequest) {
+  return requestJson<TranscriptSpeakerBatchPayload>(`/api/projects-v2/${projectV2Id}/transcript/speakers/batch`, {
+    method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
 }
 
 export async function previewTranscriptOps(projectV2Id: string, body: TranscriptPatchRequest) {
-  return requestJson<{
-    mode: "PREVIEW";
-    applied: boolean;
-    suggestionsOnly: boolean;
-    revisionId: string | null;
-    issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
-    timelineOps: Array<{ op: string; [key: string]: unknown }>;
-  }>(`/api/projects-v2/${projectV2Id}/transcript/ops/preview`, {
+  return requestJson<TranscriptOperationResult & { mode: "PREVIEW" }>(`/api/projects-v2/${projectV2Id}/transcript/ops/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
@@ -677,14 +790,7 @@ export async function previewTranscriptOps(projectV2Id: string, body: Transcript
 }
 
 export async function applyTranscriptOps(projectV2Id: string, body: TranscriptPatchRequest) {
-  return requestJson<{
-    mode: "APPLY";
-    applied: boolean;
-    suggestionsOnly: boolean;
-    revisionId: string | null;
-    issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
-    timelineOps: Array<{ op: string; [key: string]: unknown }>;
-  }>(`/api/projects-v2/${projectV2Id}/transcript/ops/apply`, {
+  return requestJson<TranscriptOperationResult & { mode: "APPLY" }>(`/api/projects-v2/${projectV2Id}/transcript/ops/apply`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)

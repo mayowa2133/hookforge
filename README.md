@@ -184,6 +184,11 @@ Implemented route handlers:
 - `POST /api/projects-v2/:id/transcript/auto` projects-v2 alias of transcript auto
 - `PATCH /api/projects-v2/:id/transcript` projects-v2 alias of transcript patch
 - `GET /api/projects-v2/:id/transcript/search` transcript segment search with match offsets
+- `GET /api/projects-v2/:id/transcript/ranges` transcript segment-to-word range windows for long-form editing
+- `POST /api/projects-v2/:id/transcript/ranges/preview` preview delete-range operation from word indices
+- `POST /api/projects-v2/:id/transcript/ranges/apply` apply delete-range operation from word indices
+- `POST /api/projects-v2/:id/transcript/speakers/batch` batch speaker relabel with optional confidence filter
+- `GET /api/projects-v2/:id/transcript/issues` low-confidence/overlap/timing-drift issue queue
 - `POST /api/projects-v2/:id/transcript/ops/preview` transcript op preview (no destructive apply)
 - `POST /api/projects-v2/:id/transcript/ops/apply` transcript op apply path
 - `POST /api/projects/:id/ai-edit` queue one-click AI edit pipeline
