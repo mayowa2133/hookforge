@@ -161,6 +161,53 @@ issues_total=$(echo "$issues_resp" | jq -r ".totalIssues")
 [ "$issues_total" -ge 0 ]
 echo "range_ops_ok=true speaker_batch_affected=$speaker_batch_affected transcript_issues=$issues_total"
 
+audio_analysis_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/audio/analysis?language=en&maxCandidates=60&maxConfidence=0.92")
+audio_tracks=$(echo "$audio_analysis_resp" | jq -r ".analysis.audioTrackCount")
+audio_ready=$(echo "$audio_analysis_resp" | jq -r ".analysis.readyForApply")
+[ "$audio_ready" = "true" ]
+
+audio_preview_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/audio/enhance/preview" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","preset":"dialogue_enhance","targetLufs":-14,"intensity":1}')
+audio_preview_mode=$(echo "$audio_preview_resp" | jq -r ".mode")
+audio_preview_ops=$(echo "$audio_preview_resp" | jq -r ".timelineOps | length")
+[ "$audio_preview_mode" = "PREVIEW" ]
+[ "$audio_preview_ops" -gt 0 ]
+
+audio_apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/audio/enhance/apply" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","preset":"dialogue_enhance","targetLufs":-14,"intensity":1}')
+audio_apply_mode=$(echo "$audio_apply_resp" | jq -r ".mode")
+audio_apply_ok=$(echo "$audio_apply_resp" | jq -r ".applied")
+audio_undo_token=$(echo "$audio_apply_resp" | jq -r ".undoToken")
+[ "$audio_apply_mode" = "APPLY" ]
+[ "$audio_apply_ok" = "true" ]
+[ -n "$audio_undo_token" ] && [ "$audio_undo_token" != "null" ]
+
+filler_preview_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/audio/filler/preview" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","maxCandidates":20,"maxConfidence":1,"minConfidenceForRipple":0.86}')
+filler_preview_mode=$(echo "$filler_preview_resp" | jq -r ".mode")
+[ "$filler_preview_mode" = "PREVIEW" ]
+
+filler_apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/audio/filler/apply" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","maxCandidates":20,"maxConfidence":1,"minConfidenceForRipple":0.86}')
+filler_apply_mode=$(echo "$filler_apply_resp" | jq -r ".mode")
+[ "$filler_apply_mode" = "APPLY" ]
+
+audio_undo_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/audio/enhance/undo" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"undoToken":"%s"}' "$audio_undo_token")")
+audio_restored=$(echo "$audio_undo_resp" | jq -r ".restored")
+[ "$audio_restored" = "true" ]
+echo "phase3_audio_ok=true tracks=$audio_tracks"
+
 chat_plan_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/chat/plan" \
   -H "Content-Type: application/json" \

@@ -111,6 +111,20 @@ export type TranscriptIssue = {
   speakerLabel: string | null;
 };
 
+export type AudioEnhancementPreset = "clean_voice" | "dialogue_enhance" | "broadcast_loudness" | "custom";
+
+export type AudioFillerCandidate = {
+  id: string;
+  segmentId: string | null;
+  wordId: string | null;
+  startMs: number;
+  endMs: number;
+  text: string;
+  confidence: number | null;
+  reason: "TOKEN" | "BIGRAM";
+  wordIds: string[];
+};
+
 export type TimelineOperation = SharedTimelineOperation;
 
 export type TranscriptPayload = {
@@ -165,6 +179,24 @@ type TranscriptSpeakerBatchRequest = {
   speakerLabel: string | null;
   fromSpeakerLabel?: string;
   segmentIds?: string[];
+  maxConfidence?: number;
+  minConfidenceForRipple?: number;
+};
+
+type AudioEnhanceRequest = {
+  language?: string;
+  preset: AudioEnhancementPreset;
+  denoise?: boolean;
+  clarity?: boolean;
+  normalizeLoudness?: boolean;
+  targetLufs: number;
+  intensity: number;
+};
+
+type AudioFillerRequest = {
+  language?: string;
+  candidateIds?: string[];
+  maxCandidates?: number;
   maxConfidence?: number;
   minConfidenceForRipple?: number;
 };
@@ -593,6 +625,60 @@ export type TranscriptIssuesPayload = {
   issues: TranscriptIssue[];
 };
 
+export type AudioAnalysisPayload = {
+  projectId: string;
+  projectV2Id: string;
+  language: string;
+  analysis: {
+    timelineDurationMs: number;
+    audioTrackCount: number;
+    audioClipCount: number;
+    transcriptWordCount: number;
+    averageTrackVolume: number;
+    averageTranscriptConfidence: number;
+    estimatedNoiseLevel: number;
+    estimatedLoudnessLufs: number;
+    fillerCandidateCount: number;
+    recommendedPreset: AudioEnhancementPreset;
+    readyForApply: boolean;
+  };
+  fillerCandidates: AudioFillerCandidate[];
+  lastRun: {
+    id: string;
+    operation: "ENHANCE" | "FILLER_REMOVE";
+    mode: "PREVIEW" | "APPLY";
+    status: "PREVIEWED" | "APPLIED" | "ERROR";
+    preset: "CLEAN_VOICE" | "DIALOGUE_ENHANCE" | "BROADCAST_LOUDNESS" | "CUSTOM" | null;
+    createdAt: string;
+  } | null;
+};
+
+export type AudioEnhanceResultPayload = {
+  mode: "PREVIEW" | "APPLY";
+  runId: string;
+  applied: boolean;
+  suggestionsOnly: boolean;
+  revisionId: string | null;
+  undoToken: string | null;
+  preset: AudioEnhancementPreset;
+  timelineOps: TimelineOperation[];
+  issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
+  analysisBefore: AudioAnalysisPayload["analysis"];
+  analysisAfter: AudioAnalysisPayload["analysis"];
+};
+
+export type AudioFillerResultPayload = {
+  mode: "PREVIEW" | "APPLY";
+  runId: string;
+  candidateCount: number;
+  candidates: AudioFillerCandidate[];
+  applied: boolean;
+  suggestionsOnly: boolean;
+  revisionId: string | null;
+  timelineOps: Array<{ op: string; [key: string]: unknown }>;
+  issues: Array<{ code: string; message: string; severity: "INFO" | "WARN" | "ERROR" }>;
+};
+
 export type EditorHealthStatus = {
   projectId: string;
   legacyProjectId: string;
@@ -720,6 +806,12 @@ export async function getTranscript(projectV2Id: string, language: string) {
   return requestJson<TranscriptPayload>(`/api/projects-v2/${projectV2Id}/transcript?language=${encodeURIComponent(language)}`);
 }
 
+export async function getProjectV2AudioAnalysis(projectV2Id: string, language: string, maxCandidates = 120, maxConfidence = 0.94) {
+  return requestJson<AudioAnalysisPayload>(
+    `/api/projects-v2/${projectV2Id}/audio/analysis?language=${encodeURIComponent(language)}&maxCandidates=${maxCandidates}&maxConfidence=${maxConfidence}`
+  );
+}
+
 export async function searchTranscript(projectV2Id: string, language: string, q: string) {
   return requestJson<TranscriptSearchPayload>(
     `/api/projects-v2/${projectV2Id}/transcript/search?language=${encodeURIComponent(language)}&q=${encodeURIComponent(q)}`
@@ -775,6 +867,46 @@ export async function applyTranscriptRangeDelete(projectV2Id: string, body: Tran
 
 export async function batchSetTranscriptSpeaker(projectV2Id: string, body: TranscriptSpeakerBatchRequest) {
   return requestJson<TranscriptSpeakerBatchPayload>(`/api/projects-v2/${projectV2Id}/transcript/speakers/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function previewProjectV2AudioEnhancement(projectV2Id: string, body: AudioEnhanceRequest) {
+  return requestJson<AudioEnhanceResultPayload>(`/api/projects-v2/${projectV2Id}/audio/enhance/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function applyProjectV2AudioEnhancement(projectV2Id: string, body: AudioEnhanceRequest) {
+  return requestJson<AudioEnhanceResultPayload>(`/api/projects-v2/${projectV2Id}/audio/enhance/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function undoProjectV2AudioEnhancement(projectV2Id: string, undoToken: string, force = false) {
+  return requestJson<{ restored: boolean; appliedRevisionId: string }>(`/api/projects-v2/${projectV2Id}/audio/enhance/undo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ undoToken, force })
+  });
+}
+
+export async function previewProjectV2FillerRemoval(projectV2Id: string, body: AudioFillerRequest) {
+  return requestJson<AudioFillerResultPayload>(`/api/projects-v2/${projectV2Id}/audio/filler/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function applyProjectV2FillerRemoval(projectV2Id: string, body: AudioFillerRequest) {
+  return requestJson<AudioFillerResultPayload>(`/api/projects-v2/${projectV2Id}/audio/filler/apply`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)

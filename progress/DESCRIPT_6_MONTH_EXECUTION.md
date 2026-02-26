@@ -10,7 +10,7 @@ Last updated: 2026-02-26
 ## Phase tracking
 - Phase 1 (Weeks 1-4) Recording Core + Ingest Reliability: `DONE`
 - Phase 2 (Weeks 5-8) Transcript-First Editing at Scale: `DONE`
-- Phase 3 (Weeks 9-12) Audio Quality Stack: `TODO`
+- Phase 3 (Weeks 9-12) Audio Quality Stack: `DONE`
 - Phase 4 (Weeks 13-16) Chat Co-Editor V2: `IN_PROGRESS`
 - Phase 5 (Weeks 17-20) Collaboration/Review/Publishing: `TODO`
 - Phase 6 (Weeks 21-24) Desktop Shell + Hard Cutover: `TODO`
@@ -28,9 +28,20 @@ Last updated: 2026-02-26
   - `/api/projects-v2/:id/transcript/ranges/apply`
   - `/api/projects-v2/:id/transcript/speakers/batch`
   - `/api/projects-v2/:id/transcript/issues`
+- Audio Quality Stack APIs:
+  - `/api/projects-v2/:id/audio/analysis`
+  - `/api/projects-v2/:id/audio/enhance/preview`
+  - `/api/projects-v2/:id/audio/enhance/apply`
+  - `/api/projects-v2/:id/audio/enhance/undo`
+  - `/api/projects-v2/:id/audio/filler/preview`
+  - `/api/projects-v2/:id/audio/filler/apply`
 - Recording-first editor UX:
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/components/editor/opencut-transcript-shell.tsx`
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/components/dashboard/create-recording-project-button.tsx`
+- Audio stack implementation:
+  - `/Users/mayowaadesanya/Documents/Projects/hookforge/lib/audio/phase3.ts`
+  - `/Users/mayowaadesanya/Documents/Projects/hookforge/lib/audio/schemas.ts`
+  - `/Users/mayowaadesanya/Documents/Projects/hookforge/app/api/projects-v2/[id]/audio/*`
 - Regression harness:
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/scripts/e2e-descript-core.sh`
   - `pnpm test:e2e:descript-core`

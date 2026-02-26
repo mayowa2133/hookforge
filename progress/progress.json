@@ -186,6 +186,12 @@
       "title": "Phase 2 transcript-first editing at scale",
       "status": "DONE",
       "details": "Implemented transcript ranges APIs (list/preview/apply), batch speaker relabel API, transcript issue queue API, low-confidence review queue + batch speaker tools in OpenCut shell, and validated with client/unit/e2e coverage"
+    },
+    {
+      "id": "descript_phase3_audio_quality_stack",
+      "title": "Phase 3 audio quality stack",
+      "status": "DONE",
+      "details": "Implemented projects-v2 audio analysis/enhance/filler preview+apply+undo APIs, persisted AudioEnhancementRun and FillerCandidate models, transcript-aware filler removal with safe timeline updates, OpenCut audio quality panel, and full validation via unit + descript-core + enterprise chain e2e"
     }
   ]
 }

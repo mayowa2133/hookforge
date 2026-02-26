@@ -10,7 +10,9 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  applyProjectV2AudioEnhancement,
   applyProjectV2ChatEdit,
+  applyProjectV2FillerRemoval,
   applyTranscriptRangeDelete,
   applyTranscriptOps,
   autoTranscript,
@@ -18,6 +20,7 @@ import {
   cancelProjectV2RecordingSession,
   finalizeProjectV2RecordingSession,
   getAiJob,
+  getProjectV2AudioAnalysis,
   getTranscriptIssues,
   getTranscriptRanges,
   getLegacyProject,
@@ -30,6 +33,8 @@ import {
   patchTimeline,
   planProjectV2ChatEdit,
   postProjectV2RecordingChunk,
+  previewProjectV2AudioEnhancement,
+  previewProjectV2FillerRemoval,
   previewTranscriptRangeDelete,
   previewTranscriptOps,
   registerProjectV2Media,
@@ -37,7 +42,12 @@ import {
   startProjectV2RecordingSession,
   startRender,
   trackOpenCutTelemetry,
+  undoProjectV2AudioEnhancement,
   undoProjectV2ChatEdit,
+  type AudioAnalysisPayload,
+  type AudioEnhanceResultPayload,
+  type AudioEnhancementPreset,
+  type AudioFillerResultPayload,
   type ChatApplyResponse,
   type ChatPlanResponse,
   type EditorHealthStatus,
@@ -196,6 +206,18 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     endWordIndex: 0
   });
   const [transcriptIssues, setTranscriptIssues] = useState<TranscriptIssue[]>([]);
+  const [audioAnalysis, setAudioAnalysis] = useState<AudioAnalysisPayload | null>(null);
+  const [audioPreset, setAudioPreset] = useState<AudioEnhancementPreset>("dialogue_enhance");
+  const [audioTargetLufs, setAudioTargetLufs] = useState("-14");
+  const [audioIntensity, setAudioIntensity] = useState("1");
+  const [audioPreviewResult, setAudioPreviewResult] = useState<AudioEnhanceResultPayload | null>(null);
+  const [audioApplyResult, setAudioApplyResult] = useState<AudioEnhanceResultPayload | null>(null);
+  const [audioUndoToken, setAudioUndoToken] = useState<string | null>(null);
+  const [audioUndoResult, setAudioUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
+  const [fillerPreviewResult, setFillerPreviewResult] = useState<AudioFillerResultPayload | null>(null);
+  const [fillerApplyResult, setFillerApplyResult] = useState<AudioFillerResultPayload | null>(null);
+  const [fillerMaxCandidates, setFillerMaxCandidates] = useState("60");
+  const [fillerMaxConfidence, setFillerMaxConfidence] = useState("0.92");
   const [speakerBatchFromLabel, setSpeakerBatchFromLabel] = useState("");
   const [speakerBatchToLabel, setSpeakerBatchToLabel] = useState("");
   const [speakerBatchMaxConfidence, setSpeakerBatchMaxConfidence] = useState("0.86");
@@ -334,12 +356,25 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setDeleteEndMs(String(Math.min(active.endMs, active.startMs + 240)));
   }, [language, minConfidenceForRipple, projectV2Id, selectedSegmentId]);
 
+  const loadAudioAnalysis = useCallback(async () => {
+    const maxCandidates = Math.max(1, Math.floor(Number(fillerMaxCandidates) || 60));
+    const parsedConfidence = Number(fillerMaxConfidence);
+    const maxConfidence = Number.isFinite(parsedConfidence) ? Math.max(0, Math.min(1, parsedConfidence)) : 0.92;
+    const payload = await getProjectV2AudioAnalysis(
+      projectV2Id,
+      language,
+      maxCandidates,
+      maxConfidence
+    );
+    setAudioAnalysis(payload);
+  }, [fillerMaxCandidates, fillerMaxConfidence, language, projectV2Id]);
+
   useEffect(() => {
     let canceled = false;
     const load = async () => {
       try {
         setPanelError(null);
-        await Promise.all([loadProjectSurface(), loadTranscript()]);
+        await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
       } catch (error) {
         if (!canceled) {
           setPanelError(error instanceof Error ? error.message : "Failed to load editor surface");
@@ -350,7 +385,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     return () => {
       canceled = true;
     };
-  }, [loadProjectSurface, loadTranscript]);
+  }, [loadAudioAnalysis, loadProjectSurface, loadTranscript]);
 
   useEffect(() => {
     if (openedTelemetryRef.current) {
@@ -435,7 +470,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         const payload = await getAiJob(autoJobId);
         setAutoJobStatus({ status: payload.aiJob.status, progress: payload.aiJob.progress });
         if (payload.aiJob.status === "DONE") {
-          await Promise.all([loadTranscript(), loadProjectSurface()]);
+          await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
           appendHistory({
             label: "Transcript auto generation",
             detail: "Auto transcript completed",
@@ -459,7 +494,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       }
     }, 2200);
     return () => clearInterval(interval);
-  }, [appendHistory, autoJobId, loadProjectSurface, loadTranscript]);
+  }, [appendHistory, autoJobId, loadAudioAnalysis, loadProjectSurface, loadTranscript]);
 
   useEffect(() => {
     if (!renderJobId) {
@@ -547,7 +582,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         revisionId: payload.revisionId,
         revision: payload.revision
       });
-      await Promise.all([loadTranscript(), loadProjectSurface()]);
+      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Timeline edit",
@@ -566,7 +601,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     } finally {
       setBusy(null);
     }
-  }, [appendHistory, loadProjectSurface, loadTranscript, projectV2Id, timelineSelectionContext]);
+  }, [appendHistory, loadAudioAnalysis, loadProjectSurface, loadTranscript, projectV2Id, timelineSelectionContext]);
 
   const runTranscriptPreview = useCallback(async (operations: Array<{
     op: "replace_text" | "split_segment" | "merge_segments" | "delete_range" | "set_speaker" | "normalize_punctuation";
@@ -616,7 +651,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setLastTranscriptPreview(payload);
-      await Promise.all([loadTranscript(), loadProjectSurface()]);
+      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Transcript apply",
@@ -645,7 +680,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     } finally {
       setBusy(null);
     }
-  }, [appendHistory, language, loadProjectSurface, loadTranscript, minConfidenceForRipple, projectV2Id]);
+  }, [appendHistory, language, loadAudioAnalysis, loadProjectSurface, loadTranscript, minConfidenceForRipple, projectV2Id]);
 
   const transcriptRangeMs = useMemo(() => {
     const words = transcript?.words ?? [];
@@ -986,7 +1021,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
           detail: "Uploaded using fallback single PUT path",
           status: "INFO"
         });
-        await loadProjectSurface();
+        await Promise.all([loadProjectSurface(), loadAudioAnalysis()]);
         return;
       }
 
@@ -1001,7 +1036,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         setAutoJobId(finalized.aiJobId);
         setAutoJobStatus({ status: "QUEUED", progress: 0 });
       }
-      await Promise.all([loadProjectSurface(), loadTranscript()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
       appendHistory({
         label: "Recording finalized",
         detail: finalized.aiJobId ? "Recording uploaded and transcription queued" : "Recording uploaded",
@@ -1019,7 +1054,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     } finally {
       setRecordingBusy(false);
     }
-  }, [appendHistory, language, loadProjectSurface, loadTranscript, projectV2Id, uploadRecordingWithSinglePutFallback]);
+  }, [appendHistory, language, loadAudioAnalysis, loadProjectSurface, loadTranscript, projectV2Id, uploadRecordingWithSinglePutFallback]);
 
   const startCaptureRecording = useCallback(async () => {
     if (isRecording || recordingBusy) {
@@ -1107,6 +1142,185 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }
   };
 
+  const previewAudioEnhancement = async () => {
+    setBusy("audio_enhance_preview");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const targetLufs = Number(audioTargetLufs);
+      const intensity = Number(audioIntensity);
+      const payload = await previewProjectV2AudioEnhancement(projectV2Id, {
+        language,
+        preset: audioPreset,
+        targetLufs: Number.isFinite(targetLufs) ? targetLufs : -14,
+        intensity: Number.isFinite(intensity) ? intensity : 1
+      });
+      setAudioPreviewResult(payload);
+      setAudioApplyResult(null);
+      setAudioUndoResult(null);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Audio preview",
+        detail: `${payload.preset} preview generated (${payload.timelineOps.length} ops)`,
+        status: "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Audio preview failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Audio preview",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyAudioEnhancement = async () => {
+    setBusy("audio_enhance_apply");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const targetLufs = Number(audioTargetLufs);
+      const intensity = Number(audioIntensity);
+      const payload = await applyProjectV2AudioEnhancement(projectV2Id, {
+        language,
+        preset: audioPreset,
+        targetLufs: Number.isFinite(targetLufs) ? targetLufs : -14,
+        intensity: Number.isFinite(intensity) ? intensity : 1
+      });
+      setAudioApplyResult(payload);
+      setAudioUndoToken(payload.undoToken);
+      setAudioUndoResult(null);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Audio apply",
+        detail: payload.suggestionsOnly
+          ? `Suggestions-only (${payload.issues.length} issues)`
+          : `Applied ${payload.preset} (rev ${payload.revisionId?.slice(0, 8) ?? "n/a"})`,
+        status: payload.suggestionsOnly ? "INFO" : "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Audio apply failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Audio apply",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const undoAudioEnhancement = async () => {
+    if (!audioUndoToken) {
+      return;
+    }
+    setBusy("audio_enhance_undo");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await undoProjectV2AudioEnhancement(projectV2Id, audioUndoToken);
+      setAudioUndoResult(payload);
+      setAudioUndoToken(null);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Audio undo",
+        detail: `Restored revision ${payload.appliedRevisionId.slice(0, 8)}`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Audio undo failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Audio undo",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const previewFillerRemoval = async () => {
+    setBusy("audio_filler_preview");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const maxCandidates = Math.max(1, Math.floor(Number(fillerMaxCandidates) || 60));
+      const maxConfidence = Number(fillerMaxConfidence);
+      const payload = await previewProjectV2FillerRemoval(projectV2Id, {
+        language,
+        maxCandidates,
+        maxConfidence: Number.isFinite(maxConfidence) ? Math.max(0, Math.min(1, maxConfidence)) : 0.92,
+        minConfidenceForRipple
+      });
+      setFillerPreviewResult(payload);
+      setFillerApplyResult(null);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Filler preview",
+        detail: `Detected ${payload.candidateCount} candidate(s)`,
+        status: "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Filler preview failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Filler preview",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyFillerRemoval = async () => {
+    setBusy("audio_filler_apply");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const maxCandidates = Math.max(1, Math.floor(Number(fillerMaxCandidates) || 60));
+      const maxConfidence = Number(fillerMaxConfidence);
+      const payload = await applyProjectV2FillerRemoval(projectV2Id, {
+        language,
+        maxCandidates,
+        maxConfidence: Number.isFinite(maxConfidence) ? Math.max(0, Math.min(1, maxConfidence)) : 0.92,
+        minConfidenceForRipple
+      });
+      setFillerApplyResult(payload);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Filler apply",
+        detail: payload.suggestionsOnly
+          ? `Suggestions-only (${payload.issues.length} issue(s))`
+          : `Applied ${payload.candidateCount} filler deletion(s)`,
+        status: payload.suggestionsOnly ? "INFO" : "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Filler apply failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Filler apply",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const applyReplaceText = async () => {
     if (!selectedSegment || !segmentDraft.trim()) {
       return;
@@ -1167,7 +1381,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setLastTranscriptPreview(payload);
-      await Promise.all([loadTranscript(), loadProjectSurface()]);
+      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Speaker batch",
@@ -1236,7 +1450,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setLastTranscriptPreview(payload);
-      await Promise.all([loadTranscript(), loadProjectSurface()]);
+      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Transcript apply",
@@ -1459,7 +1673,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       });
       setChatApplyResult(result);
       setChatUndoToken(result.undoToken);
-      await Promise.all([loadProjectSurface(), loadTranscript()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
       appendHistory({
         label: "Chat apply",
         detail: result.suggestionsOnly ? "Suggestions-only path; no destructive apply" : "Plan applied successfully",
@@ -1508,7 +1722,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setChatUndoResult(response);
       setChatApplyResult(null);
       setChatUndoToken(null);
-      await Promise.all([loadProjectSurface(), loadTranscript()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
       appendHistory({
         label: "Chat undo",
         detail: `Restored revision ${response.appliedRevisionId.slice(0, 8)}`,
@@ -1630,7 +1844,12 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <Button size="sm" onClick={runAutoTranscript} disabled={busy !== null}>
                   Generate Transcript
                 </Button>
-                <Button size="sm" variant="secondary" onClick={() => void loadProjectSurface()} disabled={busy !== null}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()])}
+                  disabled={busy !== null}
+                >
                   Refresh Project State
                 </Button>
                 <Button size="sm" variant="outline" onClick={enqueueRender} disabled={busy !== null || health?.render.readiness === "BLOCKED"}>
@@ -2024,6 +2243,121 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               ) : (
                 <p className="mt-2 text-muted-foreground">Select a clip in timeline rail to edit.</p>
               )}
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Audio Quality Stack (Phase 3)</p>
+              <p className="text-muted-foreground">Preview before apply. Every apply creates a new revision and undo token.</p>
+              <div className="mt-2 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-[11px]">Preset</Label>
+                    <select
+                      value={audioPreset}
+                      onChange={(event) => setAudioPreset(event.target.value as AudioEnhancementPreset)}
+                      className="mt-1 h-8 w-full rounded-md border bg-background px-2 text-xs"
+                    >
+                      <option value="dialogue_enhance">Dialogue Enhance</option>
+                      <option value="clean_voice">Clean Voice</option>
+                      <option value="broadcast_loudness">Broadcast Loudness</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-[11px]">Target Loudness (LUFS)</Label>
+                    <Input value={audioTargetLufs} onChange={(event) => setAudioTargetLufs(event.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-[11px]">Intensity</Label>
+                  <Input value={audioIntensity} onChange={(event) => setAudioIntensity(event.target.value)} />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button size="sm" variant="secondary" onClick={previewAudioEnhancement} disabled={busy !== null}>
+                    Preview
+                  </Button>
+                  <Button size="sm" onClick={applyAudioEnhancement} disabled={busy !== null || !audioAnalysis?.analysis.readyForApply}>
+                    Apply
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={undoAudioEnhancement} disabled={busy !== null || !audioUndoToken}>
+                    Undo
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded border p-2">
+                <p className="font-semibold">Filler removal</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Input
+                    value={fillerMaxCandidates}
+                    onChange={(event) => setFillerMaxCandidates(event.target.value)}
+                    placeholder="Max candidates"
+                  />
+                  <Input
+                    value={fillerMaxConfidence}
+                    onChange={(event) => setFillerMaxConfidence(event.target.value)}
+                    placeholder="Max confidence"
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Button size="sm" variant="secondary" onClick={previewFillerRemoval} disabled={busy !== null}>
+                    Preview Filler Cut
+                  </Button>
+                  <Button size="sm" onClick={applyFillerRemoval} disabled={busy !== null}>
+                    Apply Filler Cut
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded border p-2 text-muted-foreground">
+                <p>Tracks: {audioAnalysis?.analysis.audioTrackCount ?? 0} • Clips: {audioAnalysis?.analysis.audioClipCount ?? 0}</p>
+                <p>Noise score: {audioAnalysis?.analysis.estimatedNoiseLevel ?? 0} • Loudness: {audioAnalysis?.analysis.estimatedLoudnessLufs ?? 0} LUFS</p>
+                <p>Recommended preset: {audioAnalysis?.analysis.recommendedPreset ?? "n/a"}</p>
+                <p>Filler candidates: {audioAnalysis?.analysis.fillerCandidateCount ?? 0}</p>
+              </div>
+
+              {audioPreviewResult ? (
+                <div className="mt-2 rounded border p-2 text-muted-foreground">
+                  <p className="font-semibold text-foreground">Audio preview ready</p>
+                  <p>Ops: {audioPreviewResult.timelineOps.length} • Issues: {audioPreviewResult.issues.length}</p>
+                  <p>Noise {audioPreviewResult.analysisBefore.estimatedNoiseLevel} → {audioPreviewResult.analysisAfter.estimatedNoiseLevel}</p>
+                  <p>Loudness {audioPreviewResult.analysisBefore.estimatedLoudnessLufs} → {audioPreviewResult.analysisAfter.estimatedLoudnessLufs} LUFS</p>
+                </div>
+              ) : null}
+
+              {audioApplyResult ? (
+                <div className="mt-2 rounded border p-2 text-muted-foreground">
+                  <p className="font-semibold text-foreground">
+                    {audioApplyResult.suggestionsOnly ? "Suggestions-only" : "Audio apply complete"}
+                  </p>
+                  <p>Revision: {audioApplyResult.revisionId ? audioApplyResult.revisionId.slice(0, 8) : "n/a"}</p>
+                  <p>Undo token: {audioApplyResult.undoToken ? audioApplyResult.undoToken.slice(0, 8) : "n/a"}</p>
+                </div>
+              ) : null}
+
+              {audioUndoResult ? (
+                <div className="mt-2 rounded border p-2 text-muted-foreground">
+                  <p className="font-semibold text-foreground">Audio rollback complete</p>
+                  <p>Revision: {audioUndoResult.appliedRevisionId.slice(0, 8)}</p>
+                </div>
+              ) : null}
+
+              {fillerPreviewResult ? (
+                <div className="mt-2 rounded border p-2 text-muted-foreground">
+                  <p className="font-semibold text-foreground">Filler preview</p>
+                  <p>Candidates: {fillerPreviewResult.candidateCount} • Issues: {fillerPreviewResult.issues.length}</p>
+                </div>
+              ) : null}
+
+              {fillerApplyResult ? (
+                <div className="mt-2 rounded border p-2 text-muted-foreground">
+                  <p className="font-semibold text-foreground">
+                    {fillerApplyResult.suggestionsOnly ? "Filler suggestions-only" : "Filler apply complete"}
+                  </p>
+                  <p>Candidates: {fillerApplyResult.candidateCount}</p>
+                  <p>Revision: {fillerApplyResult.revisionId ? fillerApplyResult.revisionId.slice(0, 8) : "n/a"}</p>
+                </div>
+              ) : null}
             </div>
 
             <div className="rounded-md border p-2 text-xs">

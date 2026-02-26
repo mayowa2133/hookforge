@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  applyProjectV2AudioEnhancement,
   applyTranscriptOps,
   applyProjectV2ChatEdit,
+  applyProjectV2FillerRemoval,
   autoTranscript,
   getProjectV2EditorHealth,
   getProjectV2EditorState,
   getProjectV2Presets,
   getProjectV2,
+  getProjectV2AudioAnalysis,
   getOpenCutMetrics,
   importProjectV2Media,
   getTranscriptIssues,
@@ -14,6 +17,8 @@ import {
   patchTimeline,
   patchTranscript,
   previewTranscriptRangeDelete,
+  previewProjectV2AudioEnhancement,
+  previewProjectV2FillerRemoval,
   previewTranscriptOps,
   registerProjectV2Media,
   searchTranscript,
@@ -26,6 +31,7 @@ import {
   startRender,
   startProjectV2RecordingSession,
   trackOpenCutTelemetry,
+  undoProjectV2AudioEnhancement,
   undoProjectV2ChatEdit,
   postProjectV2RecordingChunk,
   getProjectV2RecordingSession
@@ -366,6 +372,203 @@ describe("opencut hookforge client", () => {
       5,
       "/api/projects-v2/pv2_4/transcript/issues?language=en&minConfidence=0.86&limit=200",
       undefined
+    );
+  });
+
+  it("supports phase3 audio analysis, enhance, filler, and undo endpoints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_2",
+          projectV2Id: "pv2_audio",
+          language: "en",
+          analysis: {
+            timelineDurationMs: 5400,
+            audioTrackCount: 1,
+            audioClipCount: 1,
+            transcriptWordCount: 120,
+            averageTrackVolume: 1,
+            averageTranscriptConfidence: 0.9,
+            estimatedNoiseLevel: 0.1,
+            estimatedLoudnessLufs: -15.2,
+            fillerCandidateCount: 5,
+            recommendedPreset: "dialogue_enhance",
+            readyForApply: true
+          },
+          fillerCandidates: [],
+          lastRun: null
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "PREVIEW",
+          runId: "run_preview",
+          applied: false,
+          suggestionsOnly: false,
+          revisionId: null,
+          undoToken: null,
+          preset: "dialogue_enhance",
+          timelineOps: [{ op: "upsert_effect" }],
+          issues: [],
+          analysisBefore: {
+            timelineDurationMs: 5400,
+            audioTrackCount: 1,
+            audioClipCount: 1,
+            transcriptWordCount: 120,
+            averageTrackVolume: 1,
+            averageTranscriptConfidence: 0.9,
+            estimatedNoiseLevel: 0.1,
+            estimatedLoudnessLufs: -15.2,
+            fillerCandidateCount: 5,
+            recommendedPreset: "dialogue_enhance",
+            readyForApply: true
+          },
+          analysisAfter: {
+            timelineDurationMs: 5400,
+            audioTrackCount: 1,
+            audioClipCount: 1,
+            transcriptWordCount: 120,
+            averageTrackVolume: 1.03,
+            averageTranscriptConfidence: 0.9,
+            estimatedNoiseLevel: 0.05,
+            estimatedLoudnessLufs: -14.4,
+            fillerCandidateCount: 5,
+            recommendedPreset: "dialogue_enhance",
+            readyForApply: true
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "APPLY",
+          runId: "run_apply",
+          applied: true,
+          suggestionsOnly: false,
+          revisionId: "rev_audio",
+          undoToken: "undo_audio_1",
+          preset: "dialogue_enhance",
+          timelineOps: [{ op: "upsert_effect" }],
+          issues: [],
+          analysisBefore: {
+            timelineDurationMs: 5400,
+            audioTrackCount: 1,
+            audioClipCount: 1,
+            transcriptWordCount: 120,
+            averageTrackVolume: 1,
+            averageTranscriptConfidence: 0.9,
+            estimatedNoiseLevel: 0.1,
+            estimatedLoudnessLufs: -15.2,
+            fillerCandidateCount: 5,
+            recommendedPreset: "dialogue_enhance",
+            readyForApply: true
+          },
+          analysisAfter: {
+            timelineDurationMs: 5400,
+            audioTrackCount: 1,
+            audioClipCount: 1,
+            transcriptWordCount: 120,
+            averageTrackVolume: 1.03,
+            averageTranscriptConfidence: 0.9,
+            estimatedNoiseLevel: 0.05,
+            estimatedLoudnessLufs: -14.4,
+            fillerCandidateCount: 5,
+            recommendedPreset: "dialogue_enhance",
+            readyForApply: true
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "PREVIEW",
+          runId: "run_filler_preview",
+          candidateCount: 2,
+          candidates: [],
+          applied: false,
+          suggestionsOnly: true,
+          revisionId: null,
+          timelineOps: [],
+          issues: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "APPLY",
+          runId: "run_filler_apply",
+          candidateCount: 2,
+          candidates: [],
+          applied: true,
+          suggestionsOnly: false,
+          revisionId: "rev_filler",
+          timelineOps: [{ op: "delete_range" }],
+          issues: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          restored: true,
+          appliedRevisionId: "rev_undo_audio"
+        })
+      );
+
+    const analysis = await getProjectV2AudioAnalysis("pv2_audio", "en", 80, 0.9);
+    const previewEnhance = await previewProjectV2AudioEnhancement("pv2_audio", {
+      language: "en",
+      preset: "dialogue_enhance",
+      targetLufs: -14,
+      intensity: 1
+    });
+    const applyEnhance = await applyProjectV2AudioEnhancement("pv2_audio", {
+      language: "en",
+      preset: "dialogue_enhance",
+      targetLufs: -14,
+      intensity: 1
+    });
+    const previewFiller = await previewProjectV2FillerRemoval("pv2_audio", {
+      language: "en",
+      maxCandidates: 40
+    });
+    const applyFiller = await applyProjectV2FillerRemoval("pv2_audio", {
+      language: "en",
+      maxCandidates: 40
+    });
+    const undo = await undoProjectV2AudioEnhancement("pv2_audio", "undo_audio_1");
+
+    expect(analysis.analysis.audioTrackCount).toBe(1);
+    expect(previewEnhance.mode).toBe("PREVIEW");
+    expect(applyEnhance.undoToken).toBe("undo_audio_1");
+    expect(previewFiller.mode).toBe("PREVIEW");
+    expect(applyFiller.mode).toBe("APPLY");
+    expect(undo.restored).toBe(true);
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "/api/projects-v2/pv2_audio/audio/analysis?language=en&maxCandidates=80&maxConfidence=0.9",
+      undefined
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects-v2/pv2_audio/audio/enhance/preview",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects-v2/pv2_audio/audio/enhance/apply",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
+      "/api/projects-v2/pv2_audio/audio/filler/preview",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      5,
+      "/api/projects-v2/pv2_audio/audio/filler/apply",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      6,
+      "/api/projects-v2/pv2_audio/audio/enhance/undo",
+      expect.objectContaining({ method: "POST" })
     );
   });
 

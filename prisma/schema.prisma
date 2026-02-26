@@ -185,6 +185,36 @@ enum SsoSessionStatus {
   FAILED
 }
 
+enum AudioEnhancementPreset {
+  CLEAN_VOICE
+  DIALOGUE_ENHANCE
+  BROADCAST_LOUDNESS
+  CUSTOM
+}
+
+enum AudioEnhancementMode {
+  PREVIEW
+  APPLY
+}
+
+enum AudioEnhancementOperation {
+  ENHANCE
+  FILLER_REMOVE
+}
+
+enum AudioEnhancementRunStatus {
+  PREVIEWED
+  APPLIED
+  ERROR
+}
+
+enum FillerCandidateStatus {
+  DETECTED
+  PREVIEWED
+  APPLIED
+  SKIPPED
+}
+
 model User {
   id                 String                @id @default(cuid())
   email              String                @unique
@@ -210,6 +240,7 @@ model User {
   auditEventsActed   AuditEvent[]          @relation("AuditEventActor")
   identityProvidersCreated IdentityProviderConfig[] @relation("IdentityProviderConfigCreatedBy")
   incidentsResolved  SystemIncident[]      @relation("SystemIncidentResolvedBy")
+  audioEnhancementRunsCreated AudioEnhancementRun[] @relation("AudioEnhancementRunCreatedBy")
 }
 
 model Workspace {
@@ -248,6 +279,8 @@ model Workspace {
   auditEvents         AuditEvent[]
   ssoSessions         SsoSession[]
   systemIncidents     SystemIncident[]
+  audioEnhancementRuns AudioEnhancementRun[]
+  fillerCandidates    FillerCandidate[]
 
   @@index([ownerId])
 }
@@ -420,6 +453,8 @@ model ProjectV2 {
   captionSegments  CaptionSegment[]
   aiJobs           AIJob[]
   qualityFeedback  QualityFeedback[]
+  audioEnhancementRuns AudioEnhancementRun[]
+  fillerCandidates FillerCandidate[]
 
   @@index([workspaceId])
   @@index([createdByUserId])
@@ -438,6 +473,7 @@ model TimelineRevision {
   currentForProject ProjectV2[]     @relation("CurrentRevision")
   createdBy         User?           @relation("TimelineRevisionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   tracks            TimelineTrack[]
+  audioEnhancementRuns AudioEnhancementRun[]
 
   @@unique([projectId, revisionNumber])
   @@index([projectId])
@@ -581,6 +617,7 @@ model TranscriptWord {
 
   project      ProjectV2   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   segment      TranscriptSegment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  fillerCandidates FillerCandidate[]
 
   @@index([projectId, startMs])
   @@index([segmentId])
@@ -601,8 +638,64 @@ model TranscriptSegment {
 
   project       ProjectV2   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   words         TranscriptWord[]
+  fillerCandidates FillerCandidate[]
 
   @@index([projectId, language, startMs])
+}
+
+model AudioEnhancementRun {
+  id               String                    @id @default(cuid())
+  workspaceId      String
+  projectId        String
+  createdByUserId  String?
+  timelineRevisionId String?
+  mode             AudioEnhancementMode
+  operation        AudioEnhancementOperation
+  preset           AudioEnhancementPreset?
+  status           AudioEnhancementRunStatus @default(PREVIEWED)
+  config           Json
+  summary          Json?
+  undoToken        String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  workspace        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          ProjectV2                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy        User?                     @relation("AudioEnhancementRunCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  timelineRevision TimelineRevision?         @relation(fields: [timelineRevisionId], references: [id], onDelete: SetNull)
+  fillerCandidates FillerCandidate[]
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([timelineRevisionId])
+}
+
+model FillerCandidate {
+  id             String                @id @default(cuid())
+  runId          String
+  workspaceId    String
+  projectId      String
+  language       String
+  segmentId      String?
+  wordId         String?
+  text           String
+  startMs        Int
+  endMs          Int
+  confidence     Float?
+  status         FillerCandidateStatus @default(DETECTED)
+  createdAt      DateTime              @default(now())
+
+  run            AudioEnhancementRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  workspace      Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project        ProjectV2             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  segment        TranscriptSegment?    @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  word           TranscriptWord?       @relation(fields: [wordId], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@index([workspaceId, createdAt])
+  @@index([projectId, language, startMs])
+  @@index([segmentId])
+  @@index([wordId])
 }
 
 model CaptionStylePreset {

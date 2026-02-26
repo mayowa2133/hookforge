@@ -497,6 +497,33 @@ Validation:
 - `pnpm test:e2e:slice12`
 - `pnpm test:e2e:phase01234567-enterprise`
 
+## Descript 6-Month Phase 3 Audio Quality Stack (Implemented)
+
+Implemented on `/opencut/projects-v2/[id]` and projects-v2 APIs:
+
+- Audio analysis and quality controls:
+  - `GET /api/projects-v2/:id/audio/analysis`
+  - `POST /api/projects-v2/:id/audio/enhance/preview`
+  - `POST /api/projects-v2/:id/audio/enhance/apply`
+  - `POST /api/projects-v2/:id/audio/enhance/undo`
+  - `POST /api/projects-v2/:id/audio/filler/preview`
+  - `POST /api/projects-v2/:id/audio/filler/apply`
+- Non-destructive revision flow:
+  - enhancement applies as timeline-safe ops with rollback/undo lineage
+  - filler removal runs transcript-aware preview before apply
+  - low-confidence paths remain suggestions/preview-first
+- Persistence and traceability:
+  - `AudioEnhancementRun` records enhancement preview/apply runs
+  - `FillerCandidate` records detected filler spans and status
+- UI integration:
+  - OpenCut shell Audio Quality panel with presets, intensity/target controls, preview/apply/undo, and operation history
+
+Validation:
+
+- `pnpm test`
+- `pnpm test:e2e:descript-core`
+- `pnpm test:e2e:phase01234567-enterprise`
+
 ## Freeform + Chat-First Cutover (Implemented)
 
 Implemented:
