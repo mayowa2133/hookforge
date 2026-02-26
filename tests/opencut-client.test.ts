@@ -37,10 +37,17 @@ import {
   applyTranscriptRangeDelete,
   batchSetTranscriptSpeaker,
   cancelProjectV2RecordingSession,
+  createProjectV2StudioRoom,
   finalizeProjectV2RecordingSession,
+  getProjectV2StudioRoom,
   startRender,
   submitProjectV2ReviewDecision,
+  issueProjectV2StudioJoinToken,
+  listProjectV2StudioRooms,
+  recoverProjectV2RecordingSession,
   startProjectV2RecordingSession,
+  startProjectV2StudioRecording,
+  stopProjectV2StudioRecording,
   trackOpenCutTelemetry,
   trackDesktopEvent,
   undoProjectV2AudioEnhancement,
@@ -799,7 +806,8 @@ describe("opencut hookforge client", () => {
             chunkEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1/chunk",
             statusEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1",
             finalizeEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1/finalize",
-            cancelEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1/cancel"
+            cancelEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1/cancel",
+            recoverEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1/recover"
           }
         })
       )
@@ -866,7 +874,25 @@ describe("opencut hookforge client", () => {
           }
         })
       )
-      .mockResolvedValueOnce(mockResponse({ canceled: true, status: "CANCELED" }));
+      .mockResolvedValueOnce(mockResponse({ canceled: true, status: "CANCELED" }))
+      .mockResolvedValueOnce(mockResponse({
+        sessionId: "rec_1",
+        recoverable: true,
+        resumed: true,
+        status: "ACTIVE",
+        progress: {
+          totalParts: 2,
+          completedParts: 1,
+          remainingParts: 1,
+          missingPartNumbers: [2],
+          uploadedPartNumbers: [1],
+          progressPct: 50
+        },
+        state: {
+          phase: "RESUMED",
+          failedReason: null
+        }
+      }));
 
     const started = await startProjectV2RecordingSession("pv2_7", {
       mode: "SCREEN_CAMERA",
@@ -883,11 +909,13 @@ describe("opencut hookforge client", () => {
       language: "en"
     });
     const canceled = await cancelProjectV2RecordingSession("pv2_7", started.session.id);
+    const recovered = await recoverProjectV2RecordingSession("pv2_7", started.session.id, { mode: "resume" });
 
     expect(chunk.mode).toBe("UPLOAD_URL");
     expect(status.progress.progressPct).toBe(50);
     expect(finalized.status).toBe("COMPLETED");
     expect(canceled.canceled).toBe(true);
+    expect(recovered.resumed).toBe(true);
     expect(fetchSpy).toHaveBeenNthCalledWith(
       1,
       "/api/projects-v2/pv2_7/recordings/session",
@@ -907,6 +935,150 @@ describe("opencut hookforge client", () => {
     expect(fetchSpy).toHaveBeenNthCalledWith(
       5,
       "/api/projects-v2/pv2_7/recordings/session/rec_1/cancel",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      6,
+      "/api/projects-v2/pv2_7/recordings/session/rec_1/recover",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("supports studio room list/create/join/start/stop APIs", async () => {
+    const now = new Date().toISOString();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(mockResponse({
+        projectId: "pv2_8",
+        rooms: [
+          {
+            id: "room_1",
+            projectId: "pv2_8",
+            provider: "LIVEKIT_MANAGED",
+            roomName: "team-standup",
+            status: "ACTIVE",
+            metadata: {},
+            startedAt: null,
+            endedAt: null,
+            createdAt: now,
+            updatedAt: now,
+            participantCount: 1,
+            artifactCount: 0
+          }
+        ]
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        room: {
+          id: "room_2",
+          projectId: "pv2_8",
+          provider: "LIVEKIT_MANAGED",
+          roomName: "launch-room",
+          status: "ACTIVE",
+          metadata: {},
+          createdAt: now
+        }
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        room: {
+          id: "room_2",
+          projectId: "pv2_8",
+          provider: "LIVEKIT_MANAGED",
+          roomName: "launch-room",
+          status: "ACTIVE",
+          metadata: {},
+          startedAt: now,
+          endedAt: null,
+          createdAt: now,
+          updatedAt: now
+        },
+        participants: [
+          {
+            id: "participant_1",
+            userId: "user_1",
+            role: "HOST",
+            displayName: "Host",
+            externalParticipantId: "studio-abc",
+            joinedAt: now,
+            leftAt: null,
+            trackMetadata: {}
+          }
+        ]
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        join: {
+          roomId: "room_2",
+          roomName: "launch-room",
+          provider: "LIVEKIT_MANAGED",
+          livekitUrl: "wss://livekit.test",
+          token: "lk_test_token",
+          expiresInSec: 3600,
+          participant: {
+            id: "participant_2",
+            identity: "studio-def",
+            displayName: "Guest",
+            role: "GUEST"
+          }
+        }
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        started: true,
+        room: {
+          id: "room_2",
+          status: "ACTIVE",
+          startedAt: now
+        }
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        stopped: true,
+        room: {
+          id: "room_2",
+          status: "CLOSED",
+          endedAt: now
+        },
+        artifactsCreated: 3,
+        timeline: {
+          linked: true,
+          generatedClipCount: 3,
+          durationSec: 12
+        }
+      }));
+
+    const listed = await listProjectV2StudioRooms("pv2_8");
+    const created = await createProjectV2StudioRoom("pv2_8", { name: "Launch Room", region: "us-east" });
+    const details = await getProjectV2StudioRoom("pv2_8", "room_2");
+    const token = await issueProjectV2StudioJoinToken("pv2_8", "room_2", {
+      participantName: "Guest",
+      role: "GUEST",
+      ttlSec: 3600
+    });
+    const started = await startProjectV2StudioRecording("pv2_8", "room_2");
+    const stopped = await stopProjectV2StudioRecording("pv2_8", "room_2");
+
+    expect(listed.rooms).toHaveLength(1);
+    expect(created.room.id).toBe("room_2");
+    expect(details.participants).toHaveLength(1);
+    expect(token.join.participant.role).toBe("GUEST");
+    expect(started.started).toBe(true);
+    expect(stopped.timeline.generatedClipCount).toBe(3);
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/projects-v2/pv2_8/studio/rooms", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects-v2/pv2_8/studio/rooms",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/projects-v2/pv2_8/studio/rooms/room_2", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
+      "/api/projects-v2/pv2_8/studio/rooms/room_2/join-token",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      5,
+      "/api/projects-v2/pv2_8/studio/rooms/room_2/start-recording",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      6,
+      "/api/projects-v2/pv2_8/studio/rooms/room_2/stop-recording",
       expect.objectContaining({ method: "POST" })
     );
   });

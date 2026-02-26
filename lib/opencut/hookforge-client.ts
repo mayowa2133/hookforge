@@ -408,6 +408,7 @@ export type RecordingSessionStartResponse = {
     statusEndpoint: string;
     finalizeEndpoint: string;
     cancelEndpoint: string;
+    recoverEndpoint: string;
   };
 };
 
@@ -473,6 +474,123 @@ export type RecordingSessionFinalizeResponse = {
   finalizedAssetId?: string | null;
   aiJobId?: string | null;
   media?: MediaRegisterResponse;
+};
+
+export type RecordingSessionRecoverResponse = {
+  sessionId: string;
+  recoverable: boolean;
+  resumed: boolean;
+  status: "ACTIVE" | "FINALIZING" | "COMPLETED" | "CANCELED" | "FAILED";
+  progress: {
+    totalParts: number;
+    completedParts: number;
+    remainingParts: number;
+    missingPartNumbers: number[];
+    uploadedPartNumbers: number[];
+    progressPct: number;
+  };
+  state: {
+    phase: "RESUMED" | "RECOVERABLE" | "TERMINAL";
+    failedReason: string | null;
+  };
+};
+
+export type StudioRoomSummary = {
+  id: string;
+  projectId: string;
+  provider: string;
+  roomName: string;
+  status: "ACTIVE" | "CLOSED";
+  metadata: unknown;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  participantCount: number;
+  artifactCount: number;
+};
+
+export type StudioRoomsListResponse = {
+  projectId: string;
+  rooms: StudioRoomSummary[];
+};
+
+export type StudioRoomCreateResponse = {
+  room: {
+    id: string;
+    projectId: string;
+    provider: string;
+    roomName: string;
+    status: "ACTIVE" | "CLOSED";
+    metadata: unknown;
+    createdAt: string;
+  };
+};
+
+export type StudioRoomDetailsResponse = {
+  room: {
+    id: string;
+    projectId: string;
+    provider: string;
+    roomName: string;
+    status: "ACTIVE" | "CLOSED";
+    metadata: unknown;
+    startedAt: string | null;
+    endedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  participants: Array<{
+    id: string;
+    userId: string | null;
+    role: "HOST" | "GUEST";
+    displayName: string;
+    externalParticipantId: string | null;
+    joinedAt: string;
+    leftAt: string | null;
+    trackMetadata: unknown;
+  }>;
+};
+
+export type StudioJoinTokenResponse = {
+  join: {
+    roomId: string;
+    roomName: string;
+    provider: string;
+    livekitUrl: string | null;
+    token: string;
+    expiresInSec: number;
+    participant: {
+      id: string;
+      identity: string;
+      displayName: string;
+      role: "HOST" | "GUEST";
+    };
+  };
+};
+
+export type StudioStartRecordingResponse = {
+  started: boolean;
+  room: {
+    id: string;
+    status: "ACTIVE" | "CLOSED";
+    startedAt: string | null;
+  };
+};
+
+export type StudioStopRecordingResponse = {
+  stopped: boolean;
+  room: {
+    id: string;
+    status: "ACTIVE" | "CLOSED";
+    endedAt: string | null;
+  };
+  artifactsCreated: number;
+  timeline: {
+    linked: boolean;
+    generatedClipCount: number;
+    durationSec: number;
+  };
 };
 
 export type ChatEditResponse = {
@@ -1332,6 +1450,70 @@ export async function finalizeProjectV2RecordingSession(
 export async function cancelProjectV2RecordingSession(projectIdOrV2Id: string, sessionId: string) {
   return requestJson<{ canceled: boolean; status: "ACTIVE" | "FINALIZING" | "COMPLETED" | "CANCELED" | "FAILED" }>(
     `/api/projects-v2/${projectIdOrV2Id}/recordings/session/${sessionId}/cancel`,
+    {
+      method: "POST"
+    }
+  );
+}
+
+export async function recoverProjectV2RecordingSession(
+  projectIdOrV2Id: string,
+  sessionId: string,
+  body: { mode?: "resume" | "status_only"; reason?: string } = {}
+) {
+  return requestJson<RecordingSessionRecoverResponse>(
+    `/api/projects-v2/${projectIdOrV2Id}/recordings/session/${sessionId}/recover`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+}
+
+export async function listProjectV2StudioRooms(projectIdOrV2Id: string) {
+  return requestJson<StudioRoomsListResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/rooms`);
+}
+
+export async function createProjectV2StudioRoom(
+  projectIdOrV2Id: string,
+  body: { name?: string; region?: string; metadata?: Record<string, unknown> }
+) {
+  return requestJson<StudioRoomCreateResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/rooms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2StudioRoom(projectIdOrV2Id: string, roomId: string) {
+  return requestJson<StudioRoomDetailsResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/rooms/${roomId}`);
+}
+
+export async function issueProjectV2StudioJoinToken(
+  projectIdOrV2Id: string,
+  roomId: string,
+  body: { participantName: string; role: "HOST" | "GUEST"; ttlSec?: number }
+) {
+  return requestJson<StudioJoinTokenResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/rooms/${roomId}/join-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function startProjectV2StudioRecording(projectIdOrV2Id: string, roomId: string) {
+  return requestJson<StudioStartRecordingResponse>(
+    `/api/projects-v2/${projectIdOrV2Id}/studio/rooms/${roomId}/start-recording`,
+    {
+      method: "POST"
+    }
+  );
+}
+
+export async function stopProjectV2StudioRecording(projectIdOrV2Id: string, roomId: string) {
+  return requestJson<StudioStopRecordingResponse>(
+    `/api/projects-v2/${projectIdOrV2Id}/studio/rooms/${roomId}/stop-recording`,
     {
       method: "POST"
     }

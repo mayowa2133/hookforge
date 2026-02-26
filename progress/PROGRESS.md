@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-26T14:16:46.536Z
+Last updated: 2026-02-26T14:51:27.586Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -76,5 +76,7 @@ Last updated: 2026-02-26T14:16:46.536Z
   - Program scaffolding is active: parity scorecard + benchmark APIs, CI parity gate script, LiveKit Studio room APIs, transcript search-replace/checkpoint APIs, autopilot namespace, review request decision logs, publish connector jobs, and runtime validation via descript-plus + full regression E2E chains
 - [x] Descript+ Phase 0-5 backend foundation
   - Implemented additive schema/migration for StudioRoom/RemoteTrack/Recovery, transcript checkpoints/conflicts, AudioEnhancementRunV2 + preset profiles, Autopilot session/action lineage, review request logs, publish connector jobs, and parity benchmark persistence
+- [x] Descript+ Phase 1 recording parity (local + remote multi-guest)
+  - Completed local recording reliability plus remote Studio Rooms flow: room list/create/details/join-token/start/stop, deterministic remote artifact -> timeline linkage, recording recovery endpoint integration, OpenCut shell remote controls, and e2e assertions for timeline linkage and recovery resume
 
 Status legend: `[x]=DONE`, `[-]=IN_PROGRESS`, `[ ]=TODO`

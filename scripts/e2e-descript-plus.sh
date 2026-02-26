@@ -28,6 +28,10 @@ studio_create=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
 room_id=$(echo "$studio_create" | jq -r ".room.id")
 [ -n "$room_id" ] && [ "$room_id" != "null" ]
 
+studio_list=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/studio/rooms")
+listed_room_id=$(echo "$studio_list" | jq -r ".rooms[0].id")
+[ -n "$listed_room_id" ] && [ "$listed_room_id" != "null" ]
+
 studio_join=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/studio/rooms/$room_id/join-token" \
   -H "Content-Type: application/json" \
@@ -43,6 +47,28 @@ studio_stop=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -H "Content-Type: application/json")
 artifacts_created=$(echo "$studio_stop" | jq -r ".artifactsCreated")
 [ "$artifacts_created" -ge 1 ]
+timeline_linked=$(echo "$studio_stop" | jq -r ".timeline.linked")
+generated_clip_count=$(echo "$studio_stop" | jq -r ".timeline.generatedClipCount")
+[ "$timeline_linked" = "true" ]
+[ "$generated_clip_count" -ge 1 ]
+
+recording_session=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/recordings/session" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"SCREEN_CAMERA","fileName":"recoverable.webm","mimeType":"video/webm","sizeBytes":6291456,"totalParts":2,"partSizeBytes":5242880,"autoTranscribe":false,"language":"en"}')
+recording_session_id=$(echo "$recording_session" | jq -r ".session.id")
+[ -n "$recording_session_id" ] && [ "$recording_session_id" != "null" ]
+curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/recordings/session/$recording_session_id/cancel" \
+  -H "Content-Type: application/json" >/dev/null
+recovery_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/recordings/session/$recording_session_id/recover" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"resume","reason":"e2e_resume"}')
+recovery_resumed=$(echo "$recovery_resp" | jq -r ".resumed")
+recovery_status=$(echo "$recovery_resp" | jq -r ".status")
+[ "$recovery_resumed" = "true" ]
+[ "$recovery_status" = "ACTIVE" ]
 
 autopilot_plan=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/autopilot/plan" \

@@ -158,11 +158,12 @@ Implemented route handlers:
 - `POST /api/projects-v2/:id/recordings/session/:sessionId/finalize` complete upload, register media, queue transcript
 - `POST /api/projects-v2/:id/recordings/session/:sessionId/cancel` cancel upload session and abort multipart upload
 - `POST /api/projects-v2/:id/recordings/session/:sessionId/recover` recover/resume a failed or canceled recording session
+- `GET /api/projects-v2/:id/studio/rooms` list Studio Rooms for the project (status, participants, artifact counts)
 - `POST /api/projects-v2/:id/studio/rooms` create Studio Room for remote multi-guest recording
 - `GET /api/projects-v2/:id/studio/rooms/:roomId` fetch Studio Room metadata + participants
 - `POST /api/projects-v2/:id/studio/rooms/:roomId/join-token` issue Studio participant token
 - `POST /api/projects-v2/:id/studio/rooms/:roomId/start-recording` mark Studio recording start
-- `POST /api/projects-v2/:id/studio/rooms/:roomId/stop-recording` mark Studio recording stop and materialize artifacts
+- `POST /api/projects-v2/:id/studio/rooms/:roomId/stop-recording` mark Studio recording stop, materialize artifacts, and link deterministic clips into timeline revisions
 - `GET /api/projects-v2/:id/timeline` v2 timeline fetch
 - `PATCH /api/projects-v2/:id/timeline` v2 timeline patch
 - `GET /api/projects-v2/:id/editor-health` v2 editor sync/queue/render readiness snapshot

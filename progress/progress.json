@@ -222,6 +222,12 @@
       "title": "Descript+ Phase 0-5 backend foundation",
       "status": "DONE",
       "details": "Implemented additive schema/migration for StudioRoom/RemoteTrack/Recovery, transcript checkpoints/conflicts, AudioEnhancementRunV2 + preset profiles, Autopilot session/action lineage, review request logs, publish connector jobs, and parity benchmark persistence"
+    },
+    {
+      "id": "descript_plus_phase1_recording_parity",
+      "title": "Descript+ Phase 1 recording parity (local + remote multi-guest)",
+      "status": "DONE",
+      "details": "Completed local recording reliability plus remote Studio Rooms flow: room list/create/details/join-token/start/stop, deterministic remote artifact -> timeline linkage, recording recovery endpoint integration, OpenCut shell remote controls, and e2e assertions for timeline linkage and recovery resume"
     }
   ]
 }

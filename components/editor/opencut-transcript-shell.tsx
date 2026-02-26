@@ -48,7 +48,14 @@ import {
   previewTranscriptRangeDelete,
   previewTranscriptOps,
   registerProjectV2Media,
+  recoverProjectV2RecordingSession,
   searchTranscript,
+  listProjectV2StudioRooms,
+  createProjectV2StudioRoom,
+  getProjectV2StudioRoom,
+  issueProjectV2StudioJoinToken,
+  startProjectV2StudioRecording,
+  stopProjectV2StudioRecording,
   startProjectV2RecordingSession,
   startRender,
   submitProjectV2ReviewDecision,
@@ -73,6 +80,9 @@ import {
   type ProjectReviewCommentsPayload,
   type ProjectShareLinksPayload,
   type RecordingMode,
+  type RecordingSessionRecoverResponse,
+  type StudioRoomDetailsResponse,
+  type StudioRoomSummary,
   type TranscriptIssue,
   type TimelineOperation,
   type RevisionGraphPayload,
@@ -320,6 +330,24 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [recordingUploadProgress, setRecordingUploadProgress] = useState(0);
   const [recordingStatusLabel, setRecordingStatusLabel] = useState<string>("Idle");
   const [recordingBusy, setRecordingBusy] = useState(false);
+  const [recordingSessionStatus, setRecordingSessionStatus] = useState<"ACTIVE" | "FINALIZING" | "COMPLETED" | "CANCELED" | "FAILED" | null>(null);
+  const [recordingRecoveryState, setRecordingRecoveryState] = useState<RecordingSessionRecoverResponse | null>(null);
+  const [studioRooms, setStudioRooms] = useState<StudioRoomSummary[]>([]);
+  const [studioRoomNameDraft, setStudioRoomNameDraft] = useState("Team Standup");
+  const [studioRoomRegionDraft, setStudioRoomRegionDraft] = useState("us-east");
+  const [activeStudioRoomId, setActiveStudioRoomId] = useState("");
+  const [activeStudioRoom, setActiveStudioRoom] = useState<StudioRoomDetailsResponse["room"] | null>(null);
+  const [activeStudioParticipants, setActiveStudioParticipants] = useState<StudioRoomDetailsResponse["participants"]>([]);
+  const [studioJoinParticipantName, setStudioJoinParticipantName] = useState("Host User");
+  const [studioJoinRole, setStudioJoinRole] = useState<"HOST" | "GUEST">("HOST");
+  const [studioJoinTtlSec, setStudioJoinTtlSec] = useState("3600");
+  const [studioJoinToken, setStudioJoinToken] = useState<string | null>(null);
+  const [studioStopResult, setStudioStopResult] = useState<{
+    artifactsCreated: number;
+    timelineLinked: boolean;
+    generatedClipCount: number;
+    durationSec: number;
+  } | null>(null);
 
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const localFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -465,6 +493,28 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setPerfHints(perfPayload);
   }, [projectV2Id]);
 
+  const loadStudioRooms = useCallback(async () => {
+    const payload = await listProjectV2StudioRooms(projectV2Id);
+    setStudioRooms(payload.rooms);
+    setActiveStudioRoomId((previous) => {
+      if (previous && payload.rooms.some((room) => room.id === previous)) {
+        return previous;
+      }
+      return payload.rooms[0]?.id ?? "";
+    });
+  }, [projectV2Id]);
+
+  const loadStudioRoomDetails = useCallback(async (roomId: string) => {
+    if (!roomId) {
+      setActiveStudioRoom(null);
+      setActiveStudioParticipants([]);
+      return;
+    }
+    const payload = await getProjectV2StudioRoom(projectV2Id, roomId);
+    setActiveStudioRoom(payload.room);
+    setActiveStudioParticipants(payload.participants);
+  }, [projectV2Id]);
+
   const loadReviewPublishing = useCallback(async () => {
     const [sharePayload, commentsPayload, exportPayload] = await Promise.allSettled([
       getProjectV2ShareLinks(projectV2Id),
@@ -495,7 +545,15 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     const load = async () => {
       try {
         setPanelError(null);
-        await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+        await Promise.all([
+          loadProjectSurface(),
+          loadTranscript(),
+          loadAudioAnalysis(),
+          loadChatDiagnostics(),
+          loadReviewPublishing(),
+          loadDesktopPerf(),
+          loadStudioRooms()
+        ]);
         if (!bootTrackedRef.current) {
           bootTrackedRef.current = true;
           const bootMs = Math.max(
@@ -523,7 +581,16 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     return () => {
       canceled = true;
     };
-  }, [loadAudioAnalysis, loadChatDiagnostics, loadDesktopPerf, loadProjectSurface, loadReviewPublishing, loadTranscript, projectV2Id]);
+  }, [
+    loadAudioAnalysis,
+    loadChatDiagnostics,
+    loadDesktopPerf,
+    loadProjectSurface,
+    loadReviewPublishing,
+    loadStudioRooms,
+    loadTranscript,
+    projectV2Id
+  ]);
 
   useEffect(() => {
     if (openedTelemetryRef.current) {
@@ -554,6 +621,15 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setRecordingStatusLabel("Ready to record. Choose mode and click Start Recording.");
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!activeStudioRoomId) {
+      setActiveStudioRoom(null);
+      setActiveStudioParticipants([]);
+      return;
+    }
+    void loadStudioRoomDetails(activeStudioRoomId).catch(() => {});
+  }, [activeStudioRoomId, loadStudioRoomDetails]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -690,13 +766,37 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
 
   useEffect(() => {
     if (!recordingSessionId) {
+      setRecordingSessionStatus(null);
+      setRecordingRecoveryState(null);
       return;
     }
     const interval = setInterval(async () => {
       try {
         const payload = await getProjectV2RecordingSession(projectV2Id, recordingSessionId);
+        setRecordingSessionStatus(payload.session.status);
         setRecordingUploadProgress(payload.progress.progressPct);
         setRecordingStatusLabel(`Session ${payload.session.status.toLowerCase()} (${payload.progress.completedParts}/${payload.progress.totalParts})`);
+        if (payload.session.status === "FAILED" || payload.session.status === "CANCELED") {
+          setRecordingRecoveryState((previous) => {
+            if (previous && previous.sessionId === payload.session.id && previous.status === payload.session.status) {
+              return previous;
+            }
+            return {
+              sessionId: payload.session.id,
+              recoverable: true,
+              resumed: false,
+              status: payload.session.status,
+              progress: payload.progress,
+              state: {
+                phase: "RECOVERABLE",
+                failedReason: payload.session.failedReason
+              }
+            };
+          });
+        }
+        if (payload.session.status === "ACTIVE" || payload.session.status === "COMPLETED" || payload.session.status === "FINALIZING") {
+          setRecordingRecoveryState(null);
+        }
       } catch {
         // ignore transient status poll errors
       }
@@ -1281,6 +1381,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         language
       });
       setRecordingSessionId(started.session.id);
+      setRecordingSessionStatus(started.session.status);
+      setRecordingRecoveryState(null);
 
       let shouldFallbackToSinglePut = false;
       for (let index = 0; index < totalParts; index += 1) {
@@ -1323,9 +1425,11 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
 
       if (shouldFallbackToSinglePut) {
         await cancelProjectV2RecordingSession(projectV2Id, started.session.id);
+        setRecordingSessionStatus("CANCELED");
         setRecordingStatusLabel("Multipart not available in browser, using fallback...");
         await uploadRecordingWithSinglePutFallback(blob, fileName, mimeType);
         setRecordingSessionId(null);
+        setRecordingSessionStatus(null);
         setRecordingUploadProgress(100);
         setRecordingStatusLabel("Recording uploaded (fallback)");
         appendHistory({
@@ -1342,6 +1446,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         autoTranscribe: true,
         language
       });
+      setRecordingSessionStatus(finalized.status);
       setRecordingUploadProgress(100);
       setRecordingStatusLabel(finalized.status === "COMPLETED" ? "Recording finalized" : `Recording ${finalized.status.toLowerCase()}`);
       if (finalized.aiJobId) {
@@ -1357,6 +1462,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     } catch (error) {
       const message = error instanceof Error ? error.message : "Recording upload failed";
       setPanelError(message);
+      setRecordingSessionStatus("FAILED");
       setRecordingStatusLabel("Recording failed");
       appendHistory({
         label: "Recording error",
@@ -1366,7 +1472,203 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     } finally {
       setRecordingBusy(false);
     }
-  }, [appendHistory, language, loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript, projectV2Id, uploadRecordingWithSinglePutFallback]);
+  }, [
+    appendHistory,
+    language,
+    loadAudioAnalysis,
+    loadChatDiagnostics,
+    loadDesktopPerf,
+    loadProjectSurface,
+    loadReviewPublishing,
+    loadTranscript,
+    projectV2Id,
+    uploadRecordingWithSinglePutFallback
+  ]);
+
+  const recoverRecordingSession = useCallback(async (mode: "resume" | "status_only") => {
+    if (!recordingSessionId) {
+      return;
+    }
+    setRecordingBusy(true);
+    setPanelError(null);
+    try {
+      const payload = await recoverProjectV2RecordingSession(projectV2Id, recordingSessionId, {
+        mode,
+        reason: mode === "resume" ? "editor_recover_action" : "editor_status_probe"
+      });
+      setRecordingRecoveryState(payload);
+      setRecordingSessionStatus(payload.status);
+      setRecordingUploadProgress(payload.progress.progressPct);
+      if (payload.resumed) {
+        setRecordingStatusLabel(`Session resumed (${payload.progress.completedParts}/${payload.progress.totalParts})`);
+        appendHistory({
+          label: "Recording recovery",
+          detail: "Resumed failed/canceled recording session",
+          status: "SUCCESS"
+        });
+      } else {
+        setRecordingStatusLabel(`Recovery check: ${payload.state.phase.toLowerCase()}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Recording recovery failed";
+      setPanelError(message);
+      appendHistory({
+        label: "Recording recovery",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setRecordingBusy(false);
+    }
+  }, [appendHistory, projectV2Id, recordingSessionId]);
+
+  const createStudioRoomFromDraft = useCallback(async () => {
+    setBusy("studio_room_create");
+    setPanelError(null);
+    try {
+      const payload = await createProjectV2StudioRoom(projectV2Id, {
+        name: studioRoomNameDraft.trim() || undefined,
+        region: studioRoomRegionDraft.trim() || undefined
+      });
+      await loadStudioRooms();
+      setActiveStudioRoomId(payload.room.id);
+      appendHistory({
+        label: "Studio room",
+        detail: `Created ${payload.room.roomName}`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create studio room";
+      setPanelError(message);
+      appendHistory({
+        label: "Studio room",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  }, [appendHistory, loadStudioRooms, projectV2Id, studioRoomNameDraft, studioRoomRegionDraft]);
+
+  const refreshStudioState = useCallback(async (roomId?: string) => {
+    const targetRoomId = roomId ?? activeStudioRoomId;
+    await loadStudioRooms();
+    if (targetRoomId) {
+      await loadStudioRoomDetails(targetRoomId);
+    }
+  }, [activeStudioRoomId, loadStudioRoomDetails, loadStudioRooms]);
+
+  const issueStudioJoinTokenForActiveRoom = useCallback(async () => {
+    if (!activeStudioRoomId) {
+      return;
+    }
+    setBusy("studio_join_token");
+    setPanelError(null);
+    try {
+      const ttlSec = Math.max(60, Math.min(21600, Math.floor(Number(studioJoinTtlSec) || 3600)));
+      const payload = await issueProjectV2StudioJoinToken(projectV2Id, activeStudioRoomId, {
+        participantName: studioJoinParticipantName.trim() || "Guest",
+        role: studioJoinRole,
+        ttlSec
+      });
+      setStudioJoinToken(payload.join.token);
+      await refreshStudioState(activeStudioRoomId);
+      appendHistory({
+        label: "Studio join token",
+        detail: `Issued ${studioJoinRole.toLowerCase()} token for ${payload.join.participant.displayName}`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to issue join token";
+      setPanelError(message);
+      appendHistory({
+        label: "Studio join token",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  }, [activeStudioRoomId, appendHistory, projectV2Id, refreshStudioState, studioJoinParticipantName, studioJoinRole, studioJoinTtlSec]);
+
+  const startStudioRecordingForActiveRoom = useCallback(async () => {
+    if (!activeStudioRoomId) {
+      return;
+    }
+    setBusy("studio_recording_start");
+    setPanelError(null);
+    try {
+      await startProjectV2StudioRecording(projectV2Id, activeStudioRoomId);
+      await refreshStudioState(activeStudioRoomId);
+      appendHistory({
+        label: "Studio recording",
+        detail: "Remote recording started",
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to start studio recording";
+      setPanelError(message);
+      appendHistory({
+        label: "Studio recording",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  }, [activeStudioRoomId, appendHistory, projectV2Id, refreshStudioState]);
+
+  const stopStudioRecordingForActiveRoom = useCallback(async () => {
+    if (!activeStudioRoomId) {
+      return;
+    }
+    setBusy("studio_recording_stop");
+    setPanelError(null);
+    try {
+      const payload = await stopProjectV2StudioRecording(projectV2Id, activeStudioRoomId);
+      setStudioStopResult({
+        artifactsCreated: payload.artifactsCreated,
+        timelineLinked: payload.timeline.linked,
+        generatedClipCount: payload.timeline.generatedClipCount,
+        durationSec: payload.timeline.durationSec
+      });
+      await Promise.all([
+        refreshStudioState(activeStudioRoomId),
+        loadProjectSurface(),
+        loadTranscript(),
+        loadAudioAnalysis(),
+        loadChatDiagnostics(),
+        loadReviewPublishing(),
+        loadDesktopPerf()
+      ]);
+      appendHistory({
+        label: "Studio recording",
+        detail: `Stopped remote recording (${payload.artifactsCreated} artifacts, ${payload.timeline.generatedClipCount} clips)`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to stop studio recording";
+      setPanelError(message);
+      appendHistory({
+        label: "Studio recording",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  }, [
+    activeStudioRoomId,
+    appendHistory,
+    loadAudioAnalysis,
+    loadChatDiagnostics,
+    loadDesktopPerf,
+    loadProjectSurface,
+    loadReviewPublishing,
+    loadTranscript,
+    projectV2Id,
+    refreshStudioState
+  ]);
 
   const startCaptureRecording = useCallback(async () => {
     if (isRecording || recordingBusy) {
@@ -2457,7 +2759,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()])}
+                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf(), loadStudioRooms()])}
                   disabled={busy !== null}
                 >
                   Refresh Project State
@@ -2491,7 +2793,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
 
             <div className="rounded-md border p-2 text-xs">
               <p className="font-semibold">Recording Studio</p>
-              <p className="text-muted-foreground">Record in browser -&gt; chunk upload -&gt; auto transcript.</p>
+              <p className="text-muted-foreground">Local browser capture + remote multi-guest LiveKit rooms.</p>
+              <p className="mt-2 font-medium">Local capture</p>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <Button
                   size="sm"
@@ -2538,7 +2841,159 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 {recordingStatusLabel} {isRecording ? `• ${recordingElapsedSec}s` : ""}
               </p>
               <Progress value={recordingUploadProgress} className="mt-1" />
-              {recordingSessionId ? <p className="mt-1 text-[10px] text-muted-foreground">Session {recordingSessionId.slice(0, 8)}</p> : null}
+              {recordingSessionId ? (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Session {recordingSessionId.slice(0, 8)} • {recordingSessionStatus ?? "UNKNOWN"}
+                </p>
+              ) : null}
+              {recordingRecoveryState?.recoverable ? (
+                <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
+                  <p className="font-semibold">Recovery available</p>
+                  <p>
+                    State {recordingRecoveryState.state.phase} • {recordingRecoveryState.progress.completedParts}/
+                    {recordingRecoveryState.progress.totalParts} parts
+                  </p>
+                  {recordingRecoveryState.state.failedReason ? (
+                    <p>Reason: {recordingRecoveryState.state.failedReason}</p>
+                  ) : null}
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void recoverRecordingSession("status_only")}
+                      disabled={recordingBusy}
+                    >
+                      Check
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => void recoverRecordingSession("resume")}
+                      disabled={recordingBusy}
+                    >
+                      Resume
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-3 border-t pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium">Remote multi-guest</p>
+                  <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => void loadStudioRooms()} disabled={busy !== null}>
+                    Refresh
+                  </Button>
+                </div>
+                <div className="mt-2 grid gap-2 grid-cols-[1fr_92px_auto]">
+                  <Input
+                    value={studioRoomNameDraft}
+                    onChange={(event) => setStudioRoomNameDraft(event.target.value)}
+                    placeholder="Room name"
+                    className="h-8"
+                  />
+                  <Input
+                    value={studioRoomRegionDraft}
+                    onChange={(event) => setStudioRoomRegionDraft(event.target.value)}
+                    placeholder="region"
+                    className="h-8"
+                  />
+                  <Button size="sm" onClick={createStudioRoomFromDraft} disabled={busy !== null}>
+                    Create
+                  </Button>
+                </div>
+
+                <div className="mt-2 space-y-2">
+                  <select
+                    value={activeStudioRoomId}
+                    onChange={(event) => setActiveStudioRoomId(event.target.value)}
+                    className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="">Select studio room</option>
+                    {studioRooms.map((room) => (
+                      <option key={room.id} value={room.id}>
+                        {room.roomName} ({room.status})
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="grid gap-2 grid-cols-[1fr_80px_72px_auto]">
+                    <Input
+                      value={studioJoinParticipantName}
+                      onChange={(event) => setStudioJoinParticipantName(event.target.value)}
+                      placeholder="Participant"
+                      className="h-8"
+                    />
+                    <select
+                      value={studioJoinRole}
+                      onChange={(event) => setStudioJoinRole(event.target.value as "HOST" | "GUEST")}
+                      className="h-8 rounded-md border bg-background px-2 text-xs"
+                    >
+                      <option value="HOST">HOST</option>
+                      <option value="GUEST">GUEST</option>
+                    </select>
+                    <Input
+                      value={studioJoinTtlSec}
+                      onChange={(event) => setStudioJoinTtlSec(event.target.value)}
+                      placeholder="TTL"
+                      className="h-8"
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={issueStudioJoinTokenForActiveRoom}
+                      disabled={busy !== null || !activeStudioRoomId}
+                    >
+                      Token
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      onClick={startStudioRecordingForActiveRoom}
+                      disabled={busy !== null || !activeStudioRoomId}
+                    >
+                      Start Remote
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={stopStudioRecordingForActiveRoom}
+                      disabled={busy !== null || !activeStudioRoomId}
+                    >
+                      Stop Remote
+                    </Button>
+                  </div>
+
+                  {studioJoinToken ? (
+                    <p className="rounded border bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+                      Join token (mock/livekit): {studioJoinToken.slice(0, 64)}...
+                    </p>
+                  ) : null}
+
+                  {activeStudioRoom ? (
+                    <div className="rounded border p-2 text-[11px] text-muted-foreground">
+                      <p>
+                        Active room {activeStudioRoom.roomName} • {activeStudioRoom.status}
+                      </p>
+                      <p>
+                        Participants {activeStudioParticipants.length} • Created {new Date(activeStudioRoom.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {studioStopResult ? (
+                    <div className="rounded border p-2 text-[11px] text-muted-foreground">
+                      <p className="font-semibold text-foreground">Last remote recording output</p>
+                      <p>
+                        Artifacts {studioStopResult.artifactsCreated} • Timeline linked {studioStopResult.timelineLinked ? "yes" : "no"}
+                      </p>
+                      <p>
+                        Generated clips {studioStopResult.generatedClipCount} • Duration {studioStopResult.durationSec.toFixed(2)}s
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </div>
 
             <div className="rounded-md border p-2 text-xs">
