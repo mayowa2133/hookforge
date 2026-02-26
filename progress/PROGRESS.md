@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-26T04:39:26.531Z
+Last updated: 2026-02-26T14:16:46.536Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -72,5 +72,9 @@ Last updated: 2026-02-26T04:39:26.531Z
   - Implemented projects-v2 share link APIs, review comment create/list/resolve flows, explicit approve/reject decision endpoint, export profile apply/create endpoint, render approval gate enforcement, OpenCut collaboration/review/export panels, and full validation through unit + descript-core + freeform + slice12 + phase01234567-enterprise
 - [x] Phase 6 desktop shell and hard cutover
   - Implemented immediate OpenCut replacement with hidden legacy fallback allowlist, desktop shell config/events APIs, project perf-hints API, desktop telemetry and notifications in editor, and validated via unit + descript-core + freeform + slice12 + phase01234567-enterprise
+- [-] Descript+ 9-month parity and differentiation program
+  - Program scaffolding is active: parity scorecard + benchmark APIs, CI parity gate script, LiveKit Studio room APIs, transcript search-replace/checkpoint APIs, autopilot namespace, review request decision logs, publish connector jobs, and runtime validation via descript-plus + full regression E2E chains
+- [x] Descript+ Phase 0-5 backend foundation
+  - Implemented additive schema/migration for StudioRoom/RemoteTrack/Recovery, transcript checkpoints/conflicts, AudioEnhancementRunV2 + preset profiles, Autopilot session/action lineage, review request logs, publish connector jobs, and parity benchmark persistence
 
 Status legend: `[x]=DONE`, `[-]=IN_PROGRESS`, `[ ]=TODO`

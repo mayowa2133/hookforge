@@ -32,6 +32,7 @@
     "test:e2e:enterprise": "bash scripts/e2e-enterprise.sh",
     "test:e2e:freeform": "bash scripts/e2e-freeform-chat.sh",
     "test:e2e:descript-core": "bash scripts/e2e-descript-core.sh",
+    "test:e2e:descript-plus": "bash scripts/e2e-descript-plus.sh",
     "test:e2e:freeform-cutover": "bash scripts/e2e-freeform-chat.sh && bash scripts/e2e-phase01234567-enterprise.sh",
     "test:e2e:slice12": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh",
     "test:e2e:trackab": "bash scripts/e2e-trackab.sh",
@@ -47,6 +48,7 @@
     "test:e2e:phase0123456": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh && bash scripts/e2e-phase3.sh && bash scripts/e2e-phase4.sh && bash scripts/e2e-phase5.sh && bash scripts/e2e-phase6.sh",
     "test:e2e:phase01234567": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh && bash scripts/e2e-phase3.sh && bash scripts/e2e-phase4.sh && bash scripts/e2e-phase5.sh && bash scripts/e2e-phase6.sh && bash scripts/e2e-phase7.sh",
     "test:e2e:phase01234567-enterprise": "bash scripts/e2e-all.sh && bash scripts/e2e-phase2.sh && bash scripts/e2e-phase3.sh && bash scripts/e2e-phase4.sh && bash scripts/e2e-phase5.sh && bash scripts/e2e-phase6.sh && bash scripts/e2e-phase7.sh && bash scripts/e2e-enterprise.sh",
+    "quality:parity-gate": "tsx scripts/check-parity-gates.ts",
     "progress": "node --import tsx scripts/update-progress.ts",
     "progress:quality": "node --import tsx scripts/update-captions-quality-progress.ts"
   },

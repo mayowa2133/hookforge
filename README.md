@@ -62,6 +62,7 @@ Slice 1 cutover flags:
 - `NEXT_PUBLIC_AI_EDITOR_DEFAULT=true` makes AI editor creation the dashboard default CTA.
 - `NEXT_PUBLIC_SHOW_TEMPLATES_NAV=false` relabels top-nav template entry to Quick Start.
 - `AI_EDITOR_DEFAULT_TEMPLATE_SLUG=green-screen-commentator` fallback template for seeded AI-editor project creation.
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` enable managed Studio Room join tokens for remote recording.
 
 ### 3) Install dependencies
 
@@ -156,6 +157,12 @@ Implemented route handlers:
 - `GET /api/projects-v2/:id/recordings/session/:sessionId` fetch recording upload/finalize progress
 - `POST /api/projects-v2/:id/recordings/session/:sessionId/finalize` complete upload, register media, queue transcript
 - `POST /api/projects-v2/:id/recordings/session/:sessionId/cancel` cancel upload session and abort multipart upload
+- `POST /api/projects-v2/:id/recordings/session/:sessionId/recover` recover/resume a failed or canceled recording session
+- `POST /api/projects-v2/:id/studio/rooms` create Studio Room for remote multi-guest recording
+- `GET /api/projects-v2/:id/studio/rooms/:roomId` fetch Studio Room metadata + participants
+- `POST /api/projects-v2/:id/studio/rooms/:roomId/join-token` issue Studio participant token
+- `POST /api/projects-v2/:id/studio/rooms/:roomId/start-recording` mark Studio recording start
+- `POST /api/projects-v2/:id/studio/rooms/:roomId/stop-recording` mark Studio recording stop and materialize artifacts
 - `GET /api/projects-v2/:id/timeline` v2 timeline fetch
 - `PATCH /api/projects-v2/:id/timeline` v2 timeline patch
 - `GET /api/projects-v2/:id/editor-health` v2 editor sync/queue/render readiness snapshot
@@ -164,6 +171,10 @@ Implemented route handlers:
 - `POST /api/projects-v2/:id/chat/plan` deterministic chat plan (preview)
 - `POST /api/projects-v2/:id/chat/apply` apply approved chat plan with invariant checks (`planRevisionHash` required)
 - `POST /api/projects-v2/:id/chat/undo` undo chat apply by undo token
+- `POST /api/projects-v2/:id/autopilot/plan` create scoped autopilot plan with grouped diffs/confidence rationale
+- `POST /api/projects-v2/:id/autopilot/apply` apply autopilot plan using hash-gated payload and optional op decisions
+- `POST /api/projects-v2/:id/autopilot/undo` undo autopilot apply with lineage guardrails
+- `GET /api/projects-v2/:id/autopilot/sessions` list autopilot sessions and actions
 - `POST /api/projects-v2/:id/render/final` enqueue final render for v2 project
 - `GET /api/projects/:id` fetch project + assets
 - `PATCH /api/projects/:id` update config/title
@@ -191,6 +202,11 @@ Implemented route handlers:
 - `GET /api/projects-v2/:id/transcript/issues` low-confidence/overlap/timing-drift issue queue
 - `POST /api/projects-v2/:id/transcript/ops/preview` transcript op preview (no destructive apply)
 - `POST /api/projects-v2/:id/transcript/ops/apply` transcript op apply path
+- `POST /api/projects-v2/:id/transcript/search-replace/preview` transcript search/replace preview
+- `POST /api/projects-v2/:id/transcript/search-replace/apply` transcript search/replace apply
+- `POST /api/projects-v2/:id/transcript/checkpoints/create` create transcript checkpoint snapshot
+- `GET /api/projects-v2/:id/transcript/checkpoints` list transcript checkpoints
+- `POST /api/projects-v2/:id/transcript/checkpoints/:checkpointId/restore` restore transcript checkpoint and rebuild captions
 - `POST /api/projects/:id/ai-edit` queue one-click AI edit pipeline
 - `POST /api/projects/:id/chat-edit` deterministic chat-edit planner + revision append
 - `POST /api/ai-creator/generate` queue creator generation flow
@@ -225,6 +241,10 @@ Implemented route handlers:
 - `POST /api/workspace/security/sso/providers` create OIDC/SAML provider
 - `PATCH /api/workspace/security/sso/providers/:id` update provider
 - `GET /api/workspace/projects` list shared workspace projects
+- `POST /api/projects-v2/:id/review/requests` create explicit review request
+- `POST /api/projects-v2/:id/review/requests/:requestId/decision` approve/reject request and persist decision log
+- `POST /api/projects-v2/:id/publish/connectors/:connector/export` queue connector export job (`youtube|drive|package`)
+- `GET /api/projects-v2/:id/publish/jobs/:jobId` fetch publish connector job status/result
 - `GET /api/billing/plans` plan and credit-pack catalog
 - `GET /api/billing/overview` billing + usage overview
 - `POST /api/billing/subscribe` activate subscription tier
@@ -259,6 +279,15 @@ Implemented route handlers:
 - `POST /api/quality/feedback` submit structured quality feedback
 - `GET /api/models/route-policy` list model routing policies
 - `POST /api/models/route-policy` upsert model routing policy with quality-gate enforcement
+- `GET /api/parity/scorecard` read parity module scorecard for current workspace
+- `POST /api/parity/benchmarks/run` run persisted parity benchmark execution
+- `GET /api/parity/benchmarks/:runId` fetch benchmark run summary/results
+
+Descript+ program validation commands:
+
+- `pnpm test:e2e:descript-plus`
+- `pnpm quality:parity-gate`
+- baseline report artifact: `progress/DESCRIPT_PLUS_BASELINE_REPORT.md`
 
 Public API scaffold:
 

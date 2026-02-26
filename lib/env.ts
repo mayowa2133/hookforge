@@ -49,6 +49,9 @@ const EnvSchema = z.object({
   ELEVENLABS_API_KEY: z.string().optional(),
   LIPSYNC_API_KEY: z.string().optional(),
   GENERATIVE_MEDIA_API_KEY: z.string().optional(),
+  LIVEKIT_URL: z.string().url().optional(),
+  LIVEKIT_API_KEY: z.string().optional(),
+  LIVEKIT_API_SECRET: z.string().optional(),
   PUBLIC_API_KEY_SALT: z.string().optional(),
   TOP_LANGUAGES: z.string().default("en,es,fr,de,it,pt,ja,ko,hi,ar"),
   METRICS_NAMESPACE: z.string().default("hookforge")
@@ -89,6 +92,9 @@ export const env = EnvSchema.parse({
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
   LIPSYNC_API_KEY: process.env.LIPSYNC_API_KEY,
   GENERATIVE_MEDIA_API_KEY: process.env.GENERATIVE_MEDIA_API_KEY,
+  LIVEKIT_URL: process.env.LIVEKIT_URL,
+  LIVEKIT_API_KEY: process.env.LIVEKIT_API_KEY,
+  LIVEKIT_API_SECRET: process.env.LIVEKIT_API_SECRET,
   PUBLIC_API_KEY_SALT: process.env.PUBLIC_API_KEY_SALT,
   TOP_LANGUAGES: process.env.TOP_LANGUAGES,
   METRICS_NAMESPACE: process.env.METRICS_NAMESPACE

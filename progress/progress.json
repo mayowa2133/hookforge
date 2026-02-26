@@ -210,6 +210,18 @@
       "title": "Phase 6 desktop shell and hard cutover",
       "status": "DONE",
       "details": "Implemented immediate OpenCut replacement with hidden legacy fallback allowlist, desktop shell config/events APIs, project perf-hints API, desktop telemetry and notifications in editor, and validated via unit + descript-core + freeform + slice12 + phase01234567-enterprise"
+    },
+    {
+      "id": "descript_plus_9month_program",
+      "title": "Descript+ 9-month parity and differentiation program",
+      "status": "IN_PROGRESS",
+      "details": "Program scaffolding is active: parity scorecard + benchmark APIs, CI parity gate script, LiveKit Studio room APIs, transcript search-replace/checkpoint APIs, autopilot namespace, review request decision logs, publish connector jobs, and runtime validation via descript-plus + full regression E2E chains"
+    },
+    {
+      "id": "descript_plus_phase0_to_phase5_foundation",
+      "title": "Descript+ Phase 0-5 backend foundation",
+      "status": "DONE",
+      "details": "Implemented additive schema/migration for StudioRoom/RemoteTrack/Recovery, transcript checkpoints/conflicts, AudioEnhancementRunV2 + preset profiles, Autopilot session/action lineage, review request logs, publish connector jobs, and parity benchmark persistence"
     }
   ]
 }

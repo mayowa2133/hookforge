@@ -56,7 +56,8 @@ export async function POST(request: Request, { params }: Context) {
         chunkEndpoint: `/api/projects-v2/${ctx.projectV2.id}/recordings/session/${session.id}/chunk`,
         statusEndpoint: `/api/projects-v2/${ctx.projectV2.id}/recordings/session/${session.id}`,
         finalizeEndpoint: `/api/projects-v2/${ctx.projectV2.id}/recordings/session/${session.id}/finalize`,
-        cancelEndpoint: `/api/projects-v2/${ctx.projectV2.id}/recordings/session/${session.id}/cancel`
+        cancelEndpoint: `/api/projects-v2/${ctx.projectV2.id}/recordings/session/${session.id}/cancel`,
+        recoverEndpoint: `/api/projects-v2/${ctx.projectV2.id}/recordings/session/${session.id}/recover`
       }
     });
   } catch (error) {

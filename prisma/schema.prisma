@@ -1336,3 +1336,308 @@ model SystemIncident {
   @@index([status, severity, createdAt])
   @@index([workspaceId, createdAt])
 }
+
+enum StudioRoomStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum StudioParticipantRole {
+  HOST
+  GUEST
+}
+
+enum RecordingRecoveryStatus {
+  OPEN
+  RESOLVED
+  FAILED
+}
+
+enum TranscriptIssueType {
+  LOW_CONFIDENCE
+  OVERLAP
+  TIMING_DRIFT
+}
+
+enum AutopilotActionType {
+  PLAN
+  APPLY
+  UNDO
+}
+
+enum AutopilotActionStatus {
+  SUCCESS
+  FAILED
+  SUGGESTIONS_ONLY
+}
+
+enum ReviewRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PublishJobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  ERROR
+}
+
+enum ParityBenchmarkStatus {
+  QUEUED
+  RUNNING
+  DONE
+  ERROR
+}
+
+model StudioRoom {
+  id            String               @id @default(cuid())
+  workspaceId   String
+  projectId     String
+  hostUserId    String?
+  provider      String               @default("LIVEKIT_MANAGED")
+  roomName      String
+  status        StudioRoomStatus     @default(ACTIVE)
+  metadata      Json?
+  startedAt     DateTime?
+  endedAt       DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@unique([projectId, roomName])
+  @@index([workspaceId, createdAt])
+  @@index([projectId, status, createdAt])
+}
+
+model StudioParticipant {
+  id                    String                 @id @default(cuid())
+  roomId                String
+  workspaceId           String
+  projectId             String
+  userId                String?
+  role                  StudioParticipantRole  @default(GUEST)
+  displayName           String
+  externalParticipantId String?
+  trackMetadata         Json?
+  joinedAt              DateTime               @default(now())
+  leftAt                DateTime?
+  createdAt             DateTime               @default(now())
+
+  @@index([roomId, joinedAt])
+  @@index([workspaceId, createdAt])
+  @@index([projectId, joinedAt])
+}
+
+model RemoteTrackArtifact {
+  id             String    @id @default(cuid())
+  roomId         String
+  workspaceId    String
+  projectId      String
+  participantId  String?
+  mediaAssetId   String?
+  storageKey     String?
+  trackKind      String
+  durationSec    Float?
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+
+  @@index([roomId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+model RecordingRecovery {
+  id                 String                 @id @default(cuid())
+  workspaceId        String
+  projectId          String
+  recordingSessionId String
+  status             RecordingRecoveryStatus @default(OPEN)
+  reason             String?
+  metadata           Json?
+  createdByUserId    String?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, recordingSessionId, createdAt])
+}
+
+model TranscriptEditCheckpoint {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  projectId       String
+  language        String
+  label           String
+  snapshot        Json
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, language, createdAt])
+}
+
+model TranscriptConflictIssue {
+  id            String             @id @default(cuid())
+  workspaceId   String
+  projectId     String
+  checkpointId  String?
+  issueType     TranscriptIssueType
+  severity      TrustSeverity      @default(WARN)
+  message       String
+  metadata      Json?
+  createdAt     DateTime           @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, issueType, createdAt])
+  @@index([checkpointId])
+}
+
+model AudioPresetProfile {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  name             String
+  config           Json
+  isSystem         Boolean   @default(false)
+  createdByUserId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, createdAt])
+}
+
+model AudioEnhancementRunV2 {
+  id                 String                  @id @default(cuid())
+  workspaceId        String
+  projectId          String
+  sourceRunId        String?
+  operation          AudioEnhancementOperation
+  mode               AudioEnhancementMode
+  status             AudioEnhancementRunStatus @default(PREVIEWED)
+  summary            Json?
+  metadata           Json?
+  createdByUserId    String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+model AutopilotSession {
+  id                String               @id @default(cuid())
+  workspaceId       String
+  projectId         String
+  prompt            String
+  sourcePlanId      String?
+  planRevisionHash  String
+  safetyMode        String
+  confidence        Float?
+  status            AutopilotActionStatus @default(SUCCESS)
+  metadata          Json?
+  createdByUserId   String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+model AutopilotAction {
+  id               String               @id @default(cuid())
+  workspaceId      String
+  projectId        String
+  sessionId        String
+  actionType       AutopilotActionType
+  status           AutopilotActionStatus @default(SUCCESS)
+  payload          Json?
+  errorMessage     String?
+  createdAt        DateTime             @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([sessionId, createdAt])
+}
+
+model ReviewRequest {
+  id               String              @id @default(cuid())
+  workspaceId      String
+  projectId        String
+  requestedByUserId String?
+  title            String
+  note             String?
+  requiredScopes   String[]            @default(["APPROVE"])
+  status           ReviewRequestStatus @default(PENDING)
+  decisionId       String?
+  metadata         Json?
+  decidedAt        DateTime?
+  decidedByUserId  String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, status, createdAt])
+}
+
+model ReviewDecisionLog {
+  id              String               @id @default(cuid())
+  workspaceId     String
+  projectId       String
+  requestId       String
+  decidedByUserId String?
+  status          ReviewDecisionStatus
+  note            String?
+  metadata        Json?
+  createdAt       DateTime             @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([requestId, createdAt])
+}
+
+model PublishConnectorJob {
+  id               String          @id @default(cuid())
+  workspaceId      String
+  projectId        String
+  exportProfileId  String?
+  connector        String
+  status           PublishJobStatus @default(QUEUED)
+  payload          Json?
+  output           Json?
+  errorMessage     String?
+  createdByUserId  String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, status, createdAt])
+}
+
+model ParityBenchmarkRun {
+  id               String               @id @default(cuid())
+  workspaceId      String
+  status           ParityBenchmarkStatus @default(QUEUED)
+  modules          String[]
+  summary          Json?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  createdByUserId  String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@index([workspaceId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ParityBenchmarkResult {
+  id         String   @id @default(cuid())
+  runId      String
+  module     String
+  score      Float
+  passed     Boolean
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([runId, createdAt])
+  @@index([module, createdAt])
+}

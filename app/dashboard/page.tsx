@@ -9,6 +9,7 @@ import { ReferenceAnalyzer } from "@/components/dashboard/reference-analyzer";
 import { getCurrentUser } from "@/lib/auth";
 import { buildProjectsV2EntrypointPath, projectsV2FeatureFlags, resolveProjectsV2EditorShell } from "@/lib/editor-cutover";
 import { SYSTEM_FREEFORM_TEMPLATE_SLUG } from "@/lib/freeform";
+import { buildParityScorecardForWorkspace } from "@/lib/parity/scorecard";
 import { prisma } from "@/lib/prisma";
 import { parseTemplateSlotSchema } from "@/lib/template-runtime";
 import { ensurePersonalWorkspace } from "@/lib/workspaces";
@@ -20,7 +21,7 @@ export default async function DashboardPage() {
   }
 
   const workspace = await ensurePersonalWorkspace(user.id, user.email);
-  const [templates, projects, projectsV2Raw] = await Promise.all([
+  const [templates, projects, projectsV2Raw, parityScorecard] = await Promise.all([
     prisma.template.findMany({
       where: {
         slug: {
@@ -56,7 +57,8 @@ export default async function DashboardPage() {
           orderBy: { updatedAt: "desc" },
           take: 40
         })
-      : Promise.resolve([])
+      : Promise.resolve([]),
+    buildParityScorecardForWorkspace(workspace.id)
   ]);
 
   const legacyIds = projectsV2Raw
@@ -142,6 +144,39 @@ export default async function DashboardPage() {
       </div>
 
       <ReferenceAnalyzer />
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold">Parity Scorecard</h2>
+          <Badge variant={parityScorecard.overallScore >= 70 ? "default" : "secondary"}>
+            Score {parityScorecard.overallScore}
+          </Badge>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Overall</CardTitle>
+              <CardDescription>Descript+ execution control plane</CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm space-y-1">
+              <p>Pass rate: <span className="font-semibold">{parityScorecard.passRate}%</span></p>
+              <p>Modules passed: <span className="font-semibold">{parityScorecard.passedModules}/{parityScorecard.totalModules}</span></p>
+            </CardContent>
+          </Card>
+          {parityScorecard.modules.slice(0, 3).map((module) => (
+            <Card key={module.module}>
+              <CardHeader>
+                <CardTitle className="text-base">{module.title}</CardTitle>
+                <CardDescription>{module.tier}</CardDescription>
+              </CardHeader>
+              <CardContent className="text-sm">
+                <p>Score: <span className="font-semibold">{module.score}</span></p>
+                <p>Status: <span className="font-semibold">{module.passed ? "PASS" : "WATCH"}</span></p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </section>
 
       {projectsV2FeatureFlags.projectsV2Enabled ? (
         <section className="space-y-3">
