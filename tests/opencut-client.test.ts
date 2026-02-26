@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  applyProjectV2ExportProfile,
   applyProjectV2AudioEnhancement,
   applyTranscriptOps,
   applyProjectV2ChatEdit,
   applyProjectV2FillerRemoval,
+  createProjectV2ReviewComment,
+  createProjectV2ShareLink,
   autoTranscript,
+  getDesktopConfig,
+  getProjectV2ExportProfiles,
+  getProjectV2PerfHints,
+  getProjectV2ReviewComments,
+  getProjectV2ShareLinks,
   getProjectV2EditorHealth,
   getProjectV2EditorState,
   getProjectV2Presets,
@@ -31,10 +39,13 @@ import {
   cancelProjectV2RecordingSession,
   finalizeProjectV2RecordingSession,
   startRender,
+  submitProjectV2ReviewDecision,
   startProjectV2RecordingSession,
   trackOpenCutTelemetry,
+  trackDesktopEvent,
   undoProjectV2AudioEnhancement,
   undoProjectV2ChatEdit,
+  updateProjectV2ReviewCommentStatus,
   postProjectV2RecordingChunk,
   getProjectV2RecordingSession
 } from "@/lib/opencut/hookforge-client";
@@ -374,6 +385,131 @@ describe("opencut hookforge client", () => {
       5,
       "/api/projects-v2/pv2_4/transcript/issues?language=en&minConfidence=0.86&limit=200",
       undefined
+    );
+  });
+
+  it("supports phase5 collaboration and export profile endpoints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(mockResponse({ projectId: "legacy_1", projectV2Id: "pv2_9", shareLinks: [] }))
+      .mockResolvedValueOnce(mockResponse({
+        shareLink: {
+          id: "sl_1",
+          scope: "COMMENT",
+          expiresAt: null,
+          revokedAt: null,
+          createdAt: new Date().toISOString(),
+          shareUrl: "https://example.com/share"
+        }
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        projectId: "legacy_1",
+        projectV2Id: "pv2_9",
+        reviewGate: { approvalRequired: true, latestDecision: null },
+        comments: []
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        comment: {
+          id: "rc_1",
+          body: "test",
+          status: "OPEN",
+          anchorMs: 100,
+          transcriptStartMs: null,
+          transcriptEndMs: null,
+          timelineTrackId: null,
+          clipId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          author: null
+        }
+      }))
+      .mockResolvedValueOnce(mockResponse({ comment: { id: "rc_1", status: "RESOLVED", resolvedAt: new Date().toISOString(), resolvedByUserId: "u_1" } }))
+      .mockResolvedValueOnce(mockResponse({ decision: { id: "rd_1", status: "APPROVED", revisionId: "rev_1", note: null, createdAt: new Date().toISOString() }, approvalRequired: true }))
+      .mockResolvedValueOnce(mockResponse({ workspaceId: "ws_1", projectV2Id: "pv2_9", exportProfiles: [] }))
+      .mockResolvedValueOnce(mockResponse({
+        applied: true,
+        profile: {
+          id: "ep_1",
+          name: "Social",
+          container: "mp4",
+          resolution: "1080x1920",
+          fps: 30,
+          videoBitrateKbps: null,
+          audioBitrateKbps: null,
+          audioPreset: null,
+          captionStylePresetId: null,
+          isDefault: false
+        },
+        exportProfiles: []
+      }));
+
+    await getProjectV2ShareLinks("pv2_9");
+    await createProjectV2ShareLink("pv2_9", { scope: "COMMENT", expiresInDays: 7 });
+    await getProjectV2ReviewComments("pv2_9", "token_1");
+    await createProjectV2ReviewComment("pv2_9", { body: "test", anchorMs: 100 });
+    await updateProjectV2ReviewCommentStatus("pv2_9", "rc_1", { status: "RESOLVED" });
+    await submitProjectV2ReviewDecision("pv2_9", { status: "APPROVED", requireApproval: true });
+    await getProjectV2ExportProfiles("pv2_9");
+    await applyProjectV2ExportProfile("pv2_9", { createProfile: { name: "Social" } });
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/projects-v2/pv2_9/share-links", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/projects-v2/pv2_9/review/comments?shareToken=token_1", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(7, "/api/projects-v2/pv2_9/export/profile", undefined);
+  });
+
+  it("supports desktop config/events and project perf-hints endpoints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          desktop: { supported: true, shell: "web-first-desktop-shell", status: "beta-ready" },
+          cutover: { defaultEditorShell: "OPENCUT", immediateReplacement: true, legacyFallbackAllowlistEnabled: false },
+          budgets: { editorOpenP95Ms: 2500, commandLatencyP95Ms: 100 },
+          nativeMenu: [],
+          shortcuts: { transport: [], timeline: [], transcript: [] },
+          endpoints: {
+            desktopEvents: "/api/desktop/events",
+            projectPerfHints: "/api/projects-v2/:id/perf-hints",
+            queueHealth: "/api/ops/queues/health"
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "pv2_1",
+          legacyProjectId: "legacy_1",
+          counts: { tracks: 2, clips: 8, transcriptSegments: 16, transcriptWords: 120 },
+          budgets: { editorOpenP95Ms: 2500, commandLatencyP95Ms: 100 },
+          observed: { editorOpenP95Ms: 1800, commandLatencyP95Ms: 74 },
+          suggested: { timelineWindowSize: 60, segmentWindowSize: 220, enableLaneCollapse: false, preferredZoomPercent: 100 },
+          hints: [],
+          updatedAt: new Date().toISOString()
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          tracked: true,
+          eventId: "evt_1",
+          createdAt: new Date().toISOString()
+        }, true, 201)
+      );
+
+    const config = await getDesktopConfig();
+    const perf = await getProjectV2PerfHints("pv2_1");
+    const tracked = await trackDesktopEvent({
+      projectId: "pv2_1",
+      event: "command_latency",
+      durationMs: 88,
+      outcome: "SUCCESS"
+    });
+
+    expect(config.desktop.supported).toBe(true);
+    expect(perf.budgets.commandLatencyP95Ms).toBe(100);
+    expect(tracked.tracked).toBe(true);
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/desktop/config", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/projects-v2/pv2_1/perf-hints", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/desktop/events",
+      expect.objectContaining({ method: "POST" })
     );
   });
 

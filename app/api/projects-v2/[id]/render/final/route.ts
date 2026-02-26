@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireProjectContext } from "@/lib/api-context";
 import { routeErrorToResponse } from "@/lib/http";
 import { createAndEnqueueRenderJob } from "@/lib/render/enqueue";
+import { assertRenderApprovalGate } from "@/lib/review-phase5";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,7 @@ type Context = {
 export async function POST(_request: Request, { params }: Context) {
   try {
     const ctx = await requireProjectContext(params.id);
+    await assertRenderApprovalGate(ctx.projectV2.id);
     const renderJob = await createAndEnqueueRenderJob({
       projectId: ctx.legacyProject.id,
       userId: ctx.user.id

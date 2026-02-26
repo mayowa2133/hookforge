@@ -215,6 +215,22 @@ enum FillerCandidateStatus {
   SKIPPED
 }
 
+enum ShareLinkScope {
+  VIEW
+  COMMENT
+  APPROVE
+}
+
+enum ReviewCommentStatus {
+  OPEN
+  RESOLVED
+}
+
+enum ReviewDecisionStatus {
+  APPROVED
+  REJECTED
+}
+
 model User {
   id                 String                @id @default(cuid())
   email              String                @unique
@@ -241,6 +257,11 @@ model User {
   identityProvidersCreated IdentityProviderConfig[] @relation("IdentityProviderConfigCreatedBy")
   incidentsResolved  SystemIncident[]      @relation("SystemIncidentResolvedBy")
   audioEnhancementRunsCreated AudioEnhancementRun[] @relation("AudioEnhancementRunCreatedBy")
+  shareLinksCreated  ShareLink[]           @relation("ShareLinkCreatedBy")
+  reviewCommentsAuthored ReviewComment[]   @relation("ReviewCommentAuthor")
+  reviewCommentsResolved ReviewComment[]   @relation("ReviewCommentResolvedBy")
+  reviewDecisions    ReviewDecision[]      @relation("ReviewDecisionDecider")
+  exportProfilesCreated ExportProfile[]    @relation("ExportProfileCreatedBy")
 }
 
 model Workspace {
@@ -281,6 +302,10 @@ model Workspace {
   systemIncidents     SystemIncident[]
   audioEnhancementRuns AudioEnhancementRun[]
   fillerCandidates    FillerCandidate[]
+  shareLinks          ShareLink[]
+  reviewComments      ReviewComment[]
+  reviewDecisions     ReviewDecision[]
+  exportProfiles      ExportProfile[]
 
   @@index([ownerId])
 }
@@ -455,6 +480,9 @@ model ProjectV2 {
   qualityFeedback  QualityFeedback[]
   audioEnhancementRuns AudioEnhancementRun[]
   fillerCandidates FillerCandidate[]
+  shareLinks       ShareLink[]
+  reviewComments   ReviewComment[]
+  reviewDecisions  ReviewDecision[]
 
   @@index([workspaceId])
   @@index([createdByUserId])
@@ -474,6 +502,7 @@ model TimelineRevision {
   createdBy         User?           @relation("TimelineRevisionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   tracks            TimelineTrack[]
   audioEnhancementRuns AudioEnhancementRun[]
+  reviewDecisions   ReviewDecision[]
 
   @@unique([projectId, revisionNumber])
   @@index([projectId])
@@ -709,8 +738,109 @@ model CaptionStylePreset {
 
   workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   captions     CaptionSegment[]
+  exportProfiles ExportProfile[]
 
   @@index([workspaceId])
+}
+
+model ShareLink {
+  id             String         @id @default(cuid())
+  workspaceId    String
+  projectId      String
+  createdByUserId String?
+  token          String         @unique
+  scope          ShareLinkScope @default(VIEW)
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project        ProjectV2      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy      User?          @relation("ShareLinkCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  reviewComments ReviewComment[]
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, scope, createdAt])
+  @@index([token, revokedAt, expiresAt])
+}
+
+model ReviewComment {
+  id               String              @id @default(cuid())
+  workspaceId      String
+  projectId        String
+  authorUserId     String?
+  shareLinkId      String?
+  body             String
+  status           ReviewCommentStatus @default(OPEN)
+  anchorMs         Int?
+  transcriptStartMs Int?
+  transcriptEndMs  Int?
+  timelineTrackId  String?
+  clipId           String?
+  metadata         Json?
+  resolvedAt       DateTime?
+  resolvedByUserId String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  workspace        Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          ProjectV2           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author           User?               @relation("ReviewCommentAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  shareLink        ShareLink?          @relation(fields: [shareLinkId], references: [id], onDelete: SetNull)
+  resolvedBy       User?               @relation("ReviewCommentResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, status, createdAt])
+  @@index([shareLinkId])
+}
+
+model ReviewDecision {
+  id               String               @id @default(cuid())
+  workspaceId      String
+  projectId        String
+  revisionId       String?
+  decidedByUserId  String?
+  status           ReviewDecisionStatus
+  note             String?
+  metadata         Json?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          ProjectV2            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revision         TimelineRevision?    @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  decidedBy        User?                @relation("ReviewDecisionDecider", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([projectId, status, createdAt])
+}
+
+model ExportProfile {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  createdByUserId   String?
+  name              String
+  container         String    @default("mp4")
+  resolution        String    @default("1080x1920")
+  fps               Int       @default(30)
+  videoBitrateKbps  Int?
+  audioBitrateKbps  Int?
+  audioPreset       String?
+  captionStylePresetId String?
+  isDefault         Boolean   @default(false)
+  config            Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy         User?     @relation("ExportProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  captionStylePreset CaptionStylePreset? @relation(fields: [captionStylePresetId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, isDefault])
 }
 
 model TranslationProfile {

@@ -172,8 +172,8 @@
     {
       "id": "descript_6month_quality_program",
       "title": "Descript-first 6-month quality program",
-      "status": "IN_PROGRESS",
-      "details": "Program launched with Descript-first interaction model: transcript primary, timeline precision layer, and chat co-editor V2 with plan diff review, op-level decision apply, hash-gated apply, lineage-safe undo, sessions, and revision graph wired through projects-v2 routes"
+      "status": "DONE",
+      "details": "Completed all six phases: recording-first ingest, transcript-at-scale editing, audio quality stack, chat co-editor V2 trust controls, collaboration/review/publishing, and desktop-shell hard cutover with performance and health visibility"
     },
     {
       "id": "descript_phase1_recording_core",
@@ -198,6 +198,18 @@
       "title": "Phase 4 chat co-editor V2 trust and precision",
       "status": "DONE",
       "details": "Implemented structured chat diff groups including audio, safety mode + confidence rationale, per-operation decision toggles and selective apply, hash/version-gated apply payloads, lineage-aware undo modes, chat sessions endpoint, revision graph endpoint, OpenCut lineage/session UI surfaces, and full regression validation through descript-core/freeform/slice12/phase01234567-enterprise"
+    },
+    {
+      "id": "descript_phase5_collab_review_publishing",
+      "title": "Phase 5 collaboration, review, and publishing",
+      "status": "DONE",
+      "details": "Implemented projects-v2 share link APIs, review comment create/list/resolve flows, explicit approve/reject decision endpoint, export profile apply/create endpoint, render approval gate enforcement, OpenCut collaboration/review/export panels, and full validation through unit + descript-core + freeform + slice12 + phase01234567-enterprise"
+    },
+    {
+      "id": "descript_phase6_desktop_shell_cutover",
+      "title": "Phase 6 desktop shell and hard cutover",
+      "status": "DONE",
+      "details": "Implemented immediate OpenCut replacement with hidden legacy fallback allowlist, desktop shell config/events APIs, project perf-hints API, desktop telemetry and notifications in editor, and validated via unit + descript-core + freeform + slice12 + phase01234567-enterprise"
     }
   ]
 }

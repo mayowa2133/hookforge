@@ -9,7 +9,7 @@ UPLOAD_HEADERS="/tmp/hookforge_descript_recording_headers.txt"
 OUTPUT_MP4="/tmp/hookforge_descript_core.mp4"
 SOURCE_FILE="public/demo-assets/demo-portrait.mp4"
 
-rm -f "$COOKIE" "$UPLOAD_HEADERS" "$OUTPUT_MP4"
+rm -f "$COOKIE" "$UPLOAD_HEADERS" "$OUTPUT_MP4" /tmp/hookforge_descript_render_blocked.json
 
 register_user() {
   local payload
@@ -75,6 +75,32 @@ create_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
 project_id=$(echo "$create_resp" | jq -r ".project.id")
 [ -n "$project_id" ] && [ "$project_id" != "null" ]
 echo "project_v2=$project_id"
+
+desktop_config_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/desktop/config")
+desktop_supported=$(echo "$desktop_config_resp" | jq -r ".desktop.supported")
+desktop_shell=$(echo "$desktop_config_resp" | jq -r ".desktop.shell")
+cutover_default=$(echo "$desktop_config_resp" | jq -r ".cutover.defaultEditorShell")
+[ "$desktop_supported" = "true" ]
+[ "$desktop_shell" = "web-first-desktop-shell" ]
+[ "$cutover_default" = "OPENCUT" ]
+
+desktop_event_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/desktop/events" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"projectId":"%s","event":"editor_boot","outcome":"SUCCESS","durationMs":2100,"metadata":{"source":"e2e_descript_core"}}' "$project_id")")
+desktop_tracked=$(echo "$desktop_event_resp" | jq -r ".tracked")
+[ "$desktop_tracked" = "true" ]
+
+perf_hints_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/perf-hints")
+perf_project_id=$(echo "$perf_hints_resp" | jq -r ".projectId")
+perf_editor_budget=$(echo "$perf_hints_resp" | jq -r ".budgets.editorOpenP95Ms")
+[ "$perf_project_id" = "$project_id" ]
+[ "$perf_editor_budget" -ge 1000 ]
+
+queue_health_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/ops/queues/health")
+queue_count=$(echo "$queue_health_resp" | jq -r ".queues | length")
+[ "$queue_count" -ge 1 ]
+echo "phase6_desktop_ok=true queues=$queue_count"
 
 size_bytes=$(wc -c < "$SOURCE_FILE" | tr -d " ")
 start_recording=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
@@ -260,6 +286,63 @@ revision_graph_edges=$(echo "$revision_graph_resp" | jq -r ".edgeCount")
 [ "$revision_graph_nodes" -ge 1 ]
 [ "$revision_graph_edges" -ge 0 ]
 echo "chat_phase4_ok=true safety_mode=$safety_mode sessions=$chat_sessions_count nodes=$revision_graph_nodes"
+
+share_link_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/share-links" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"COMMENT","expiresInDays":14}')
+share_link_id=$(echo "$share_link_resp" | jq -r ".shareLink.id")
+share_link_url=$(echo "$share_link_resp" | jq -r ".shareLink.shareUrl")
+[ -n "$share_link_id" ] && [ "$share_link_id" != "null" ]
+[ -n "$share_link_url" ] && [ "$share_link_url" != "null" ]
+
+review_comment_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/review/comments" \
+  -H "Content-Type: application/json" \
+  -d '{"body":"Great cut, trim first beat by 200ms.","anchorMs":300}')
+review_comment_id=$(echo "$review_comment_resp" | jq -r ".comment.id")
+[ -n "$review_comment_id" ] && [ "$review_comment_id" != "null" ]
+
+review_comments_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/review/comments")
+review_comments_count=$(echo "$review_comments_resp" | jq -r ".comments | length")
+[ "$review_comments_count" -ge 1 ]
+
+resolve_comment_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X PATCH "$BASE/api/projects-v2/$project_id/review/comments/$review_comment_id" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"RESOLVED"}')
+resolved_status=$(echo "$resolve_comment_resp" | jq -r ".comment.status")
+[ "$resolved_status" = "RESOLVED" ]
+
+export_profile_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/export/profile" \
+  -H "Content-Type: application/json" \
+  -d '{"createProfile":{"name":"E2E Social Profile","resolution":"1080x1920","fps":30,"container":"mp4"}}')
+export_applied=$(echo "$export_profile_resp" | jq -r ".applied")
+export_profile_id=$(echo "$export_profile_resp" | jq -r ".profile.id")
+[ "$export_applied" = "true" ]
+[ -n "$export_profile_id" ] && [ "$export_profile_id" != "null" ]
+echo "phase5_collab_ok=true comments=$review_comments_count share_link=$share_link_id export_profile=$export_profile_id"
+
+review_reject_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/review/approve" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"REJECTED","note":"Need tighter hook","requireApproval":true}')
+reject_status=$(echo "$review_reject_resp" | jq -r ".decision.status")
+[ "$reject_status" = "REJECTED" ]
+
+render_block_code=$(curl -sS -c "$COOKIE" -b "$COOKIE" -o /tmp/hookforge_descript_render_blocked.json -w "%{http_code}" \
+  -X POST "$BASE/api/projects-v2/$project_id/render/final")
+[ "$render_block_code" = "400" ]
+blocked_error=$(jq -r ".error" /tmp/hookforge_descript_render_blocked.json)
+[ "$blocked_error" != "null" ]
+
+review_approve_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/review/approve" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"APPROVED","note":"Approved for publish","requireApproval":true}')
+approve_status=$(echo "$review_approve_resp" | jq -r ".decision.status")
+[ "$approve_status" = "APPROVED" ]
 
 render_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/render/final")

@@ -554,6 +554,68 @@ Validation:
 - `pnpm test:e2e:slice12`
 - `pnpm test:e2e:phase01234567-enterprise`
 
+## Descript 6-Month Phase 5 Collaboration/Review/Publishing (Implemented)
+
+Implemented on `/opencut/projects-v2/[id]` and projects-v2 APIs:
+
+- Share links and scoped review access:
+  - `GET/POST /api/projects-v2/:id/share-links`
+- Review loop with anchored comments:
+  - `GET/POST /api/projects-v2/:id/review/comments`
+  - `PATCH /api/projects-v2/:id/review/comments/:commentId`
+- Explicit approve/reject decision workflow:
+  - `POST /api/projects-v2/:id/review/approve`
+- Publish/export profile workflow:
+  - `GET/POST /api/projects-v2/:id/export/profile`
+- Render approval gate enforcement:
+  - `POST /api/projects-v2/:id/render/final` now blocks render when approval is required and latest revision is not approved.
+
+Data model additions:
+
+- `ShareLink`, `ReviewComment`, `ReviewDecision`, `ExportProfile`
+- Enums: `ShareLinkScope`, `ReviewCommentStatus`, `ReviewDecisionStatus`
+
+UI integration:
+
+- OpenCut shell collaboration panel:
+  - share-link generation/list
+  - timestamp/transcript-anchored review comments with resolve/reopen
+  - approve/reject controls with approval-required toggle
+  - export profile apply/create controls
+
+Validation:
+
+- `pnpm test`
+- `pnpm test:e2e:descript-core`
+- `pnpm test:e2e:freeform`
+- `pnpm test:e2e:slice12`
+- `pnpm test:e2e:phase01234567-enterprise`
+
+## Descript 6-Month Phase 6 Desktop Shell + Hard Cutover (Implemented)
+
+Implemented on `/opencut/projects-v2/[id]` and supporting desktop APIs:
+
+- Immediate replacement cutover:
+  - `OPENCUT_IMMEDIATE_REPLACEMENT=true` makes OpenCut shell default for projects-v2.
+  - Hidden rollback control via `OPENCUT_LEGACY_FALLBACK_ALLOWLIST` for incident response.
+- Desktop shell support endpoints:
+  - `GET /api/desktop/config` (desktop capabilities, shortcuts, cutover state, perf budgets)
+  - `POST /api/desktop/events` (desktop telemetry ingestion)
+  - `GET /api/projects-v2/:id/perf-hints` (project-specific perf hints and p95 observations)
+- Editor UX hardening for desktop daily-driver behavior:
+  - Local file drag/drop + file-picker import directly in OpenCut shell
+  - Upload/render completion notifications (browser notification API)
+  - Desktop performance panel (p95 open/command vs budget + suggested virtualization windows)
+  - Desktop event instrumentation for boot, command latency, drop imports, and notifications
+
+Validation:
+
+- `pnpm test`
+- `pnpm test:e2e:descript-core`
+- `pnpm test:e2e:freeform`
+- `pnpm test:e2e:slice12`
+- `pnpm test:e2e:phase01234567-enterprise`
+
 ## Freeform + Chat-First Cutover (Implemented)
 
 Implemented:

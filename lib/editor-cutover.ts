@@ -7,6 +7,8 @@ export type OpenCutEditorCohort = "internal" | "beta" | "all";
 export type ProjectsV2FeatureFlags = {
   projectsV2Enabled: boolean;
   opencutEditorEnabled: boolean;
+  opencutImmediateReplacement: boolean;
+  opencutLegacyFallbackAllowlist: string[];
   opencutEditorCohort: OpenCutEditorCohort;
   opencutEditorInternalDomain: string;
   opencutEditorBetaAllowlist: string[];
@@ -26,6 +28,8 @@ export type ProjectsV2EntrypointInput = {
 type ProjectsV2FlagSource = {
   ENABLE_PROJECTS_V2: boolean;
   ENABLE_OPENCUT_EDITOR: boolean;
+  OPENCUT_IMMEDIATE_REPLACEMENT: boolean;
+  OPENCUT_LEGACY_FALLBACK_ALLOWLIST: string;
   OPENCUT_EDITOR_COHORT: OpenCutEditorCohort;
   OPENCUT_EDITOR_INTERNAL_DOMAIN: string;
   OPENCUT_EDITOR_BETA_ALLOWLIST: string;
@@ -46,10 +50,15 @@ export function buildProjectsV2FeatureFlags(source: ProjectsV2FlagSource): Proje
   const betaAllowlist = source.OPENCUT_EDITOR_BETA_ALLOWLIST.split(",")
     .map((entry) => entry.trim().toLowerCase())
     .filter(Boolean);
+  const legacyFallbackAllowlist = source.OPENCUT_LEGACY_FALLBACK_ALLOWLIST.split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
 
   return {
     projectsV2Enabled: source.ENABLE_PROJECTS_V2,
     opencutEditorEnabled: source.ENABLE_OPENCUT_EDITOR,
+    opencutImmediateReplacement: source.OPENCUT_IMMEDIATE_REPLACEMENT,
+    opencutLegacyFallbackAllowlist: [...new Set(legacyFallbackAllowlist)],
     opencutEditorCohort: source.OPENCUT_EDITOR_COHORT,
     opencutEditorInternalDomain: source.OPENCUT_EDITOR_INTERNAL_DOMAIN.trim().toLowerCase(),
     opencutEditorBetaAllowlist: [...new Set(betaAllowlist)],
@@ -76,6 +85,14 @@ export function isOpenCutEditorEnabledForEmail(email: string, flags: ProjectsV2F
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) {
     return false;
+  }
+
+  if (flags.opencutLegacyFallbackAllowlist.includes(normalizedEmail)) {
+    return false;
+  }
+
+  if (flags.opencutImmediateReplacement) {
+    return true;
   }
 
   if (flags.opencutEditorCohort === "all") {

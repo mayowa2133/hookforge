@@ -262,6 +262,51 @@ type MediaRegisterRequest = {
   slot?: "primary" | "broll" | "audio";
 };
 
+type CreateShareLinkRequest = {
+  scope: "VIEW" | "COMMENT" | "APPROVE";
+  expiresInDays?: number;
+};
+
+type CreateReviewCommentRequest = {
+  shareToken?: string;
+  body: string;
+  anchorMs?: number | null;
+  transcriptStartMs?: number | null;
+  transcriptEndMs?: number | null;
+  timelineTrackId?: string | null;
+  clipId?: string | null;
+};
+
+type UpdateReviewCommentStatusRequest = {
+  shareToken?: string;
+  status: "OPEN" | "RESOLVED";
+};
+
+type SubmitReviewDecisionRequest = {
+  shareToken?: string;
+  status: "APPROVED" | "REJECTED";
+  note?: string;
+  requireApproval?: boolean;
+};
+
+type CreateExportProfileRequest = {
+  name: string;
+  container?: string;
+  resolution?: string;
+  fps?: number;
+  videoBitrateKbps?: number | null;
+  audioBitrateKbps?: number | null;
+  audioPreset?: string | null;
+  captionStylePresetId?: string | null;
+  isDefault?: boolean;
+  config?: Record<string, unknown>;
+};
+
+type ApplyExportProfileRequest = {
+  profileId?: string;
+  createProfile?: CreateExportProfileRequest;
+};
+
 export type RecordingMode = "SCREEN" | "CAMERA" | "MIC" | "SCREEN_CAMERA";
 
 type RecordingSessionStartRequest = {
@@ -804,6 +849,160 @@ export type EditorHealthStatus = {
   updatedAt: string;
 };
 
+export type ProjectShareLinksPayload = {
+  projectId: string;
+  projectV2Id: string;
+  shareLinks: Array<{
+    id: string;
+    scope: "VIEW" | "COMMENT" | "APPROVE";
+    tokenPrefix: string;
+    expiresAt: string | null;
+    revokedAt: string | null;
+    createdAt: string;
+    isActive: boolean;
+    shareUrl: string;
+  }>;
+};
+
+export type CreateShareLinkPayload = {
+  shareLink: {
+    id: string;
+    scope: "VIEW" | "COMMENT" | "APPROVE";
+    expiresAt: string | null;
+    revokedAt: string | null;
+    createdAt: string;
+    shareUrl: string;
+  };
+};
+
+export type ProjectReviewCommentsPayload = {
+  projectId: string;
+  projectV2Id: string;
+  reviewGate: {
+    approvalRequired: boolean;
+    latestDecision: {
+      id: string;
+      status: "APPROVED" | "REJECTED";
+      revisionId: string | null;
+      note: string | null;
+      createdAt: string;
+    } | null;
+  };
+  comments: Array<{
+    id: string;
+    body: string;
+    status: "OPEN" | "RESOLVED";
+    anchorMs: number | null;
+    transcriptStartMs: number | null;
+    transcriptEndMs: number | null;
+    timelineTrackId: string | null;
+    clipId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    author: {
+      id: string;
+      email: string;
+    } | null;
+    resolvedBy: {
+      id: string;
+      email: string;
+    } | null;
+    resolvedAt: string | null;
+    anchorIntegrity: {
+      trackExists: boolean;
+      clipExists: boolean;
+      transcriptOverlapCount: number;
+    };
+  }>;
+};
+
+export type CreateReviewCommentPayload = {
+  comment: {
+    id: string;
+    body: string;
+    status: "OPEN" | "RESOLVED";
+    anchorMs: number | null;
+    transcriptStartMs: number | null;
+    transcriptEndMs: number | null;
+    timelineTrackId: string | null;
+    clipId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    author: {
+      id: string;
+      email: string;
+    } | null;
+  };
+};
+
+export type UpdateReviewCommentStatusPayload = {
+  comment: {
+    id: string;
+    status: "OPEN" | "RESOLVED";
+    resolvedAt: string | null;
+    resolvedByUserId: string | null;
+  };
+};
+
+export type SubmitReviewDecisionPayload = {
+  decision: {
+    id: string;
+    status: "APPROVED" | "REJECTED";
+    revisionId: string | null;
+    note: string | null;
+    createdAt: string;
+  };
+  approvalRequired: boolean;
+};
+
+export type ExportProfilesPayload = {
+  workspaceId: string;
+  projectV2Id: string;
+  exportProfiles: Array<{
+    id: string;
+    name: string;
+    container: string;
+    resolution: string;
+    fps: number;
+    videoBitrateKbps: number | null;
+    audioBitrateKbps: number | null;
+    audioPreset: string | null;
+    captionStylePresetId: string | null;
+    isDefault: boolean;
+    config: unknown;
+    updatedAt: string;
+  }>;
+};
+
+export type ApplyExportProfilePayload = {
+  applied: boolean;
+  profile: {
+    id: string;
+    name: string;
+    container: string;
+    resolution: string;
+    fps: number;
+    videoBitrateKbps: number | null;
+    audioBitrateKbps: number | null;
+    audioPreset: string | null;
+    captionStylePresetId: string | null;
+    isDefault: boolean;
+  };
+  exportProfiles: Array<{
+    id: string;
+    name: string;
+    container: string;
+    resolution: string;
+    fps: number;
+    videoBitrateKbps: number | null;
+    audioBitrateKbps: number | null;
+    audioPreset: string | null;
+    captionStylePresetId: string | null;
+    isDefault: boolean;
+    updatedAt: string;
+  }>;
+};
+
 export type PresetCatalogResponse = {
   presets: Array<{
     id: string;
@@ -821,6 +1020,14 @@ type OpenCutTelemetryRequest = {
   metadata?: Record<string, unknown>;
 };
 
+type DesktopEventRequest = {
+  projectId?: string;
+  event: "editor_boot" | "command_latency" | "background_upload_notice" | "background_render_notice" | "drop_import" | "desktop_menu_action" | "desktop_shortcut_action";
+  outcome?: "SUCCESS" | "ERROR" | "INFO";
+  durationMs?: number;
+  metadata?: Record<string, unknown>;
+};
+
 export type OpenCutMetricsResponse = {
   windowHours: number;
   totalEvents: number;
@@ -833,6 +1040,70 @@ export type OpenCutMetricsResponse = {
     info: number;
     successRate: number | null;
   }>;
+};
+
+export type DesktopConfigPayload = {
+  desktop: {
+    supported: boolean;
+    shell: string;
+    status: string;
+  };
+  cutover: {
+    defaultEditorShell: "OPENCUT" | "LEGACY";
+    immediateReplacement: boolean;
+    legacyFallbackAllowlistEnabled: boolean;
+  };
+  budgets: {
+    editorOpenP95Ms: number;
+    commandLatencyP95Ms: number;
+  };
+  nativeMenu: Array<{
+    id: string;
+    label: string;
+    shortcut: string;
+  }>;
+  shortcuts: {
+    transport: string[];
+    timeline: string[];
+    transcript: string[];
+  };
+  endpoints: {
+    desktopEvents: string;
+    projectPerfHints: string;
+    queueHealth: string;
+  };
+};
+
+export type ProjectPerfHintsPayload = {
+  projectId: string;
+  legacyProjectId: string;
+  counts: {
+    tracks: number;
+    clips: number;
+    transcriptSegments: number;
+    transcriptWords: number;
+  };
+  budgets: {
+    editorOpenP95Ms: number;
+    commandLatencyP95Ms: number;
+  };
+  observed: {
+    editorOpenP95Ms: number | null;
+    commandLatencyP95Ms: number | null;
+  };
+  suggested: {
+    timelineWindowSize: number;
+    segmentWindowSize: number;
+    enableLaneCollapse: boolean;
+    preferredZoomPercent: number;
+  };
+  hints: Array<{
+    id: string;
+    severity: "INFO" | "WARN";
+    message: string;
+    action: string;
+  }>;
+  updatedAt: string;
 };
 
 async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -1123,6 +1394,67 @@ export async function getProjectV2EditorHealth(projectIdOrV2Id: string) {
   return requestJson<EditorHealthStatus>(`/api/projects-v2/${projectIdOrV2Id}/editor-health`);
 }
 
+export async function getProjectV2PerfHints(projectIdOrV2Id: string) {
+  return requestJson<ProjectPerfHintsPayload>(`/api/projects-v2/${projectIdOrV2Id}/perf-hints`);
+}
+
+export async function getProjectV2ShareLinks(projectIdOrV2Id: string) {
+  return requestJson<ProjectShareLinksPayload>(`/api/projects-v2/${projectIdOrV2Id}/share-links`);
+}
+
+export async function createProjectV2ShareLink(projectIdOrV2Id: string, body: CreateShareLinkRequest) {
+  return requestJson<CreateShareLinkPayload>(`/api/projects-v2/${projectIdOrV2Id}/share-links`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2ReviewComments(projectIdOrV2Id: string, shareToken?: string) {
+  const suffix = shareToken ? `?shareToken=${encodeURIComponent(shareToken)}` : "";
+  return requestJson<ProjectReviewCommentsPayload>(`/api/projects-v2/${projectIdOrV2Id}/review/comments${suffix}`);
+}
+
+export async function createProjectV2ReviewComment(projectIdOrV2Id: string, body: CreateReviewCommentRequest) {
+  return requestJson<CreateReviewCommentPayload>(`/api/projects-v2/${projectIdOrV2Id}/review/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function updateProjectV2ReviewCommentStatus(
+  projectIdOrV2Id: string,
+  commentId: string,
+  body: UpdateReviewCommentStatusRequest
+) {
+  return requestJson<UpdateReviewCommentStatusPayload>(`/api/projects-v2/${projectIdOrV2Id}/review/comments/${commentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function submitProjectV2ReviewDecision(projectIdOrV2Id: string, body: SubmitReviewDecisionRequest) {
+  return requestJson<SubmitReviewDecisionPayload>(`/api/projects-v2/${projectIdOrV2Id}/review/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2ExportProfiles(projectIdOrV2Id: string) {
+  return requestJson<ExportProfilesPayload>(`/api/projects-v2/${projectIdOrV2Id}/export/profile`);
+}
+
+export async function applyProjectV2ExportProfile(projectIdOrV2Id: string, body: ApplyExportProfileRequest) {
+  return requestJson<ApplyExportProfilePayload>(`/api/projects-v2/${projectIdOrV2Id}/export/profile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
 export async function getProjectV2Presets() {
   return requestJson<PresetCatalogResponse>(`/api/projects-v2/presets`);
 }
@@ -1148,6 +1480,18 @@ export async function trackOpenCutTelemetry(body: OpenCutTelemetryRequest) {
 
 export async function getOpenCutMetrics(windowHours = 24) {
   return requestJson<OpenCutMetricsResponse>(`/api/opencut/metrics?windowHours=${windowHours}`);
+}
+
+export async function getDesktopConfig() {
+  return requestJson<DesktopConfigPayload>(`/api/desktop/config`);
+}
+
+export async function trackDesktopEvent(body: DesktopEventRequest) {
+  return requestJson<{ tracked: boolean; eventId: string; createdAt: string }>(`/api/desktop/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
 export async function startRender(projectIdOrV2Id: string) {

@@ -34,6 +34,8 @@ describe("editor cutover feature flags", () => {
     const flags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      OPENCUT_IMMEDIATE_REPLACEMENT: false,
+      OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "beta",
       OPENCUT_EDITOR_INTERNAL_DOMAIN: "hookforge.dev",
       OPENCUT_EDITOR_BETA_ALLOWLIST: "beta@hookforge.dev,beta2@hookforge.dev",
@@ -45,6 +47,8 @@ describe("editor cutover feature flags", () => {
 
     expect(flags.projectsV2Enabled).toBe(true);
     expect(flags.opencutEditorEnabled).toBe(true);
+    expect(flags.opencutImmediateReplacement).toBe(false);
+    expect(flags.opencutLegacyFallbackAllowlist).toEqual([]);
     expect(flags.opencutEditorCohort).toBe("beta");
     expect(flags.opencutEditorInternalDomain).toBe("hookforge.dev");
     expect(flags.opencutEditorBetaAllowlist).toEqual(["beta@hookforge.dev", "beta2@hookforge.dev"]);
@@ -54,10 +58,44 @@ describe("editor cutover feature flags", () => {
     expect(flags.defaultTemplateSlug).toBe("green-screen-commentator");
   });
 
-  it("resolves editor shell based on cohort rules", () => {
+  it("resolves editor shell based on immediate replacement and fallback allowlist", () => {
+    const defaultFlags = buildProjectsV2FeatureFlags({
+      ENABLE_PROJECTS_V2: true,
+      ENABLE_OPENCUT_EDITOR: true,
+      OPENCUT_IMMEDIATE_REPLACEMENT: true,
+      OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
+      OPENCUT_EDITOR_COHORT: "internal",
+      OPENCUT_EDITOR_INTERNAL_DOMAIN: "hookforge.dev",
+      OPENCUT_EDITOR_BETA_ALLOWLIST: "",
+      NEXT_PUBLIC_AI_EDITOR_DEFAULT: true,
+      NEXT_PUBLIC_SHOW_TEMPLATES_NAV: false,
+      NEXT_PUBLIC_QUICK_START_VISIBLE: true,
+      AI_EDITOR_DEFAULT_TEMPLATE_SLUG: "green-screen-commentator"
+    });
+    expect(resolveProjectsV2EditorShell("dev@hookforge.dev", defaultFlags)).toBe("OPENCUT");
+    expect(resolveProjectsV2EditorShell("user@example.com", defaultFlags)).toBe("OPENCUT");
+
+    const fallbackFlags = buildProjectsV2FeatureFlags({
+      ENABLE_PROJECTS_V2: true,
+      ENABLE_OPENCUT_EDITOR: true,
+      OPENCUT_IMMEDIATE_REPLACEMENT: true,
+      OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "legacy@example.com",
+      OPENCUT_EDITOR_COHORT: "all",
+      OPENCUT_EDITOR_INTERNAL_DOMAIN: "hookforge.dev",
+      OPENCUT_EDITOR_BETA_ALLOWLIST: "",
+      NEXT_PUBLIC_AI_EDITOR_DEFAULT: true,
+      NEXT_PUBLIC_SHOW_TEMPLATES_NAV: false,
+      NEXT_PUBLIC_QUICK_START_VISIBLE: true,
+      AI_EDITOR_DEFAULT_TEMPLATE_SLUG: "green-screen-commentator"
+    });
+    expect(resolveProjectsV2EditorShell("legacy@example.com", fallbackFlags)).toBe("LEGACY");
+    expect(resolveProjectsV2EditorShell("creator@example.com", fallbackFlags)).toBe("OPENCUT");
+
     const internalFlags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      OPENCUT_IMMEDIATE_REPLACEMENT: false,
+      OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "internal",
       OPENCUT_EDITOR_INTERNAL_DOMAIN: "hookforge.dev",
       OPENCUT_EDITOR_BETA_ALLOWLIST: "",
@@ -72,6 +110,8 @@ describe("editor cutover feature flags", () => {
     const betaFlags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      OPENCUT_IMMEDIATE_REPLACEMENT: false,
+      OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "beta",
       OPENCUT_EDITOR_INTERNAL_DOMAIN: "hookforge.dev",
       OPENCUT_EDITOR_BETA_ALLOWLIST: "tester@example.com",
@@ -88,6 +128,8 @@ describe("editor cutover feature flags", () => {
     const flags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      OPENCUT_IMMEDIATE_REPLACEMENT: true,
+      OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "all",
       OPENCUT_EDITOR_INTERNAL_DOMAIN: "hookforge.dev",
       OPENCUT_EDITOR_BETA_ALLOWLIST: "",

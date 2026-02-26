@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  applyProjectV2ExportProfile,
   applyProjectV2AudioEnhancement,
   applyProjectV2ChatEdit,
   applyProjectV2FillerRemoval,
+  createProjectV2ReviewComment,
+  createProjectV2ShareLink,
   applyTranscriptRangeDelete,
   applyTranscriptOps,
   autoTranscript,
@@ -20,7 +23,12 @@ import {
   cancelProjectV2RecordingSession,
   finalizeProjectV2RecordingSession,
   getAiJob,
+  getDesktopConfig,
   getProjectV2ChatSessions,
+  getProjectV2ExportProfiles,
+  getProjectV2PerfHints,
+  getProjectV2ReviewComments,
+  getProjectV2ShareLinks,
   getProjectV2AudioAnalysis,
   getTranscriptIssues,
   getTranscriptRanges,
@@ -43,7 +51,10 @@ import {
   searchTranscript,
   startProjectV2RecordingSession,
   startRender,
+  submitProjectV2ReviewDecision,
+  trackDesktopEvent,
   trackOpenCutTelemetry,
+  updateProjectV2ReviewCommentStatus,
   undoProjectV2AudioEnhancement,
   undoProjectV2ChatEdit,
   type AudioAnalysisPayload,
@@ -54,8 +65,13 @@ import {
   type ChatPlanOperationDecision,
   type ChatPlanResponse,
   type ChatSessionSummaryPayload,
+  type DesktopConfigPayload,
+  type ExportProfilesPayload,
   type EditorHealthStatus,
   type LegacyProjectPayload,
+  type ProjectPerfHintsPayload,
+  type ProjectReviewCommentsPayload,
+  type ProjectShareLinksPayload,
   type RecordingMode,
   type TranscriptIssue,
   type TimelineOperation,
@@ -153,6 +169,24 @@ function parseEtagFromUploadResponse(response: Response) {
   return raw.replaceAll("\"", "").trim();
 }
 
+async function notifyIfPermitted(title: string, body: string) {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return false;
+  }
+  if (Notification.permission === "default") {
+    try {
+      await Notification.requestPermission();
+    } catch {
+      return false;
+    }
+  }
+  if (Notification.permission !== "granted") {
+    return false;
+  }
+  new Notification(title, { body });
+  return true;
+}
+
 async function getCaptureStream(mode: RecordingMode) {
   if (mode === "CAMERA") {
     return navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -243,6 +277,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     outputUrl: string | null;
     errorMessage: string | null;
   } | null>(null);
+  const [desktopConfig, setDesktopConfig] = useState<DesktopConfigPayload | null>(null);
+  const [perfHints, setPerfHints] = useState<ProjectPerfHintsPayload | null>(null);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [collapsedTracks, setCollapsedTracks] = useState<Record<string, boolean>>({});
@@ -256,6 +292,27 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [chatOperationDecisions, setChatOperationDecisions] = useState<Record<string, boolean>>({});
   const [chatSessions, setChatSessions] = useState<ChatSessionSummaryPayload["sessions"]>([]);
   const [revisionGraph, setRevisionGraph] = useState<RevisionGraphPayload | null>(null);
+  const [shareLinks, setShareLinks] = useState<ProjectShareLinksPayload["shareLinks"]>([]);
+  const [shareScope, setShareScope] = useState<"VIEW" | "COMMENT" | "APPROVE">("COMMENT");
+  const [shareExpiresDays, setShareExpiresDays] = useState("14");
+  const [reviewComments, setReviewComments] = useState<ProjectReviewCommentsPayload["comments"]>([]);
+  const [reviewCommentBody, setReviewCommentBody] = useState("");
+  const [reviewCommentStatusFilter, setReviewCommentStatusFilter] = useState<"ALL" | "OPEN" | "RESOLVED">("ALL");
+  const [reviewDecisionNote, setReviewDecisionNote] = useState("");
+  const [reviewApprovalRequired, setReviewApprovalRequired] = useState(true);
+  const [reviewLatestDecision, setReviewLatestDecision] = useState<{
+    id: string;
+    status: "APPROVED" | "REJECTED";
+    createdAt: string;
+    revisionId: string | null;
+  } | null>(null);
+  const [exportProfiles, setExportProfiles] = useState<ExportProfilesPayload["exportProfiles"]>([]);
+  const [selectedExportProfileId, setSelectedExportProfileId] = useState("");
+  const [newExportProfileName, setNewExportProfileName] = useState("Social 9x16");
+  const [newExportProfileResolution, setNewExportProfileResolution] = useState("1080x1920");
+  const [newExportProfileFps, setNewExportProfileFps] = useState("30");
+  const [importUploading, setImportUploading] = useState(false);
+  const [dropzoneActive, setDropzoneActive] = useState(false);
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("SCREEN_CAMERA");
   const [isRecording, setIsRecording] = useState(false);
   const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
@@ -265,12 +322,18 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [recordingBusy, setRecordingBusy] = useState(false);
 
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localFileInputRef = useRef<HTMLInputElement | null>(null);
   const openedTelemetryRef = useRef(false);
+  const bootTrackedRef = useRef(false);
+  const bootStartedAtRef = useRef<number>(
+    typeof performance !== "undefined" ? performance.now() : Date.now()
+  );
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const searchParams = useSearchParams();
+  const shareToken = useMemo(() => searchParams.get("shareToken")?.trim() || undefined, [searchParams]);
 
   const orderedTracks = useMemo(() => {
     const tracks = timeline?.timeline.tracks ?? [];
@@ -295,19 +358,26 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   }, [selectedClipId, selectedTrack]);
 
   const previewAsset = useMemo(() => pickPreviewAsset(project), [project]);
-  const segmentWindowSize = 220;
-  const timelineWindowSize = 60;
+  const segmentWindowSize = perfHints?.suggested.segmentWindowSize ?? 220;
+  const timelineWindowSize = perfHints?.suggested.timelineWindowSize ?? 60;
   const totalSegments = transcript?.segments.length ?? 0;
 
   const visibleSegments = useMemo(
     () => transcript?.segments.slice(segmentWindowStart, segmentWindowStart + segmentWindowSize) ?? [],
-    [segmentWindowStart, transcript?.segments]
+    [segmentWindowSize, segmentWindowStart, transcript?.segments]
   );
 
   const visibleTracks = useMemo(
     () => orderedTracks.slice(timelineWindowStart, timelineWindowStart + timelineWindowSize),
-    [orderedTracks, timelineWindowStart]
+    [orderedTracks, timelineWindowSize, timelineWindowStart]
   );
+
+  const filteredReviewComments = useMemo(() => {
+    if (reviewCommentStatusFilter === "ALL") {
+      return reviewComments;
+    }
+    return reviewComments.filter((comment) => comment.status === reviewCommentStatusFilter);
+  }, [reviewCommentStatusFilter, reviewComments]);
 
   const appendHistory = useCallback((entry: Omit<OperationHistoryEntry, "id" | "createdAt">) => {
     setOperationHistory((previous) => [buildHistoryEntry(entry), ...previous].slice(0, 30));
@@ -386,12 +456,63 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setRevisionGraph(graphPayload);
   }, [projectV2Id]);
 
+  const loadDesktopPerf = useCallback(async () => {
+    const [configPayload, perfPayload] = await Promise.all([
+      getDesktopConfig(),
+      getProjectV2PerfHints(projectV2Id)
+    ]);
+    setDesktopConfig(configPayload);
+    setPerfHints(perfPayload);
+  }, [projectV2Id]);
+
+  const loadReviewPublishing = useCallback(async () => {
+    const [sharePayload, commentsPayload, exportPayload] = await Promise.allSettled([
+      getProjectV2ShareLinks(projectV2Id),
+      getProjectV2ReviewComments(projectV2Id, shareToken),
+      getProjectV2ExportProfiles(projectV2Id)
+    ]);
+    const shareLinksPayload = sharePayload.status === "fulfilled" ? sharePayload.value : { shareLinks: [] };
+    const reviewCommentsPayload = commentsPayload.status === "fulfilled" ? commentsPayload.value : { comments: [] };
+    const exportProfilesPayload = exportPayload.status === "fulfilled" ? exportPayload.value : { exportProfiles: [] };
+
+    setShareLinks(shareLinksPayload.shareLinks);
+    setReviewComments(reviewCommentsPayload.comments);
+    if ("reviewGate" in reviewCommentsPayload) {
+      setReviewApprovalRequired(reviewCommentsPayload.reviewGate.approvalRequired);
+      setReviewLatestDecision(reviewCommentsPayload.reviewGate.latestDecision);
+    }
+    setExportProfiles(exportProfilesPayload.exportProfiles);
+    setSelectedExportProfileId((previous) => {
+      if (previous && exportProfilesPayload.exportProfiles.some((profile) => profile.id === previous)) {
+        return previous;
+      }
+      return exportProfilesPayload.exportProfiles.find((profile) => profile.isDefault)?.id ?? exportProfilesPayload.exportProfiles[0]?.id ?? "";
+    });
+  }, [projectV2Id, shareToken]);
+
   useEffect(() => {
     let canceled = false;
     const load = async () => {
       try {
         setPanelError(null);
-        await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
+        await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+        if (!bootTrackedRef.current) {
+          bootTrackedRef.current = true;
+          const bootMs = Math.max(
+            0,
+            Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - bootStartedAtRef.current)
+          );
+          void trackDesktopEvent({
+            projectId: projectV2Id,
+            event: "editor_boot",
+            outcome: "SUCCESS",
+            durationMs: bootMs,
+            metadata: {
+              shell: "opencut",
+              entrypoint: "projects-v2"
+            }
+          }).catch(() => {});
+        }
       } catch (error) {
         if (!canceled) {
           setPanelError(error instanceof Error ? error.message : "Failed to load editor surface");
@@ -402,7 +523,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     return () => {
       canceled = true;
     };
-  }, [loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript]);
+  }, [loadAudioAnalysis, loadChatDiagnostics, loadDesktopPerf, loadProjectSurface, loadReviewPublishing, loadTranscript, projectV2Id]);
 
   useEffect(() => {
     if (openedTelemetryRef.current) {
@@ -487,7 +608,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         const payload = await getAiJob(autoJobId);
         setAutoJobStatus({ status: payload.aiJob.status, progress: payload.aiJob.progress });
         if (payload.aiJob.status === "DONE") {
-          await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics()]);
+          await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
           appendHistory({
             label: "Transcript auto generation",
             detail: "Auto transcript completed",
@@ -511,7 +632,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       }
     }, 2200);
     return () => clearInterval(interval);
-  }, [appendHistory, autoJobId, loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript]);
+  }, [appendHistory, autoJobId, loadAudioAnalysis, loadChatDiagnostics, loadDesktopPerf, loadProjectSurface, loadReviewPublishing, loadTranscript]);
 
   useEffect(() => {
     if (!renderJobId) {
@@ -522,7 +643,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         const payload = await getRenderJob(renderJobId);
         setRenderStatus(payload.renderJob);
         if (payload.renderJob.status === "DONE") {
-          await loadProjectSurface();
+          await Promise.all([loadProjectSurface(), loadDesktopPerf()]);
           appendHistory({
             label: "Final render",
             detail: `Render completed (${payload.renderJob.id.slice(0, 8)})`,
@@ -533,6 +654,17 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             event: "render_done",
             outcome: "SUCCESS"
           }).catch(() => {});
+          const notified = await notifyIfPermitted("HookForge render complete", `Render ${payload.renderJob.id.slice(0, 8)} finished.`);
+          if (notified) {
+            void trackDesktopEvent({
+              projectId: projectV2Id,
+              event: "background_render_notice",
+              outcome: "INFO",
+              metadata: {
+                renderJobId: payload.renderJob.id
+              }
+            }).catch(() => {});
+          }
           setRenderJobId(null);
         }
         if (payload.renderJob.status === "ERROR") {
@@ -554,7 +686,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       }
     }, 2200);
     return () => clearInterval(interval);
-  }, [appendHistory, loadProjectSurface, projectV2Id, renderJobId]);
+  }, [appendHistory, loadDesktopPerf, loadProjectSurface, projectV2Id, renderJobId]);
 
   useEffect(() => {
     if (!recordingSessionId) {
@@ -581,6 +713,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   }), [language, playheadMs, selectedClipId, selectedSegmentId, selectedTrackId]);
 
   const applyTimelineOperations = useCallback(async (operations: TimelineOperation[], action: string, uiIntent: TimelineOperation["uiIntent"] = "manual_edit") => {
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    let outcome: "SUCCESS" | "ERROR" = "SUCCESS";
     setBusy(action);
     setPanelError(null);
     setTimelineResult(null);
@@ -599,7 +733,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         revisionId: payload.revisionId,
         revision: payload.revision
       });
-      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics()]);
+      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Timeline edit",
@@ -607,6 +741,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         status: "SUCCESS"
       });
     } catch (error) {
+      outcome = "ERROR";
       const message = error instanceof Error ? error.message : "Timeline operation failed";
       setPanelError(message);
       setAutosaveStatus("ERROR");
@@ -616,9 +751,25 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         status: "ERROR"
       });
     } finally {
+      const durationMs = Math.max(
+        0,
+        Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)
+      );
+      void trackDesktopEvent({
+        projectId: projectV2Id,
+        event: "command_latency",
+        outcome,
+        durationMs,
+        metadata: {
+          command: action,
+          target: "timeline",
+          operationCount: operations.length,
+          uiIntent
+        }
+      }).catch(() => {});
       setBusy(null);
     }
-  }, [appendHistory, loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript, projectV2Id, timelineSelectionContext]);
+  }, [appendHistory, loadAudioAnalysis, loadChatDiagnostics, loadDesktopPerf, loadProjectSurface, loadReviewPublishing, loadTranscript, projectV2Id, timelineSelectionContext]);
 
   const runTranscriptPreview = useCallback(async (operations: Array<{
     op: "replace_text" | "split_segment" | "merge_segments" | "delete_range" | "set_speaker" | "normalize_punctuation";
@@ -658,6 +809,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     op: "replace_text" | "split_segment" | "merge_segments" | "delete_range" | "set_speaker" | "normalize_punctuation";
     [key: string]: unknown;
   }>, action: string) => {
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    let outcome: "SUCCESS" | "ERROR" = "SUCCESS";
     setBusy(action);
     setPanelError(null);
     setAutosaveStatus("SAVING");
@@ -668,7 +821,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setLastTranscriptPreview(payload);
-      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics()]);
+      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Transcript apply",
@@ -686,6 +839,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         }
       }).catch(() => {});
     } catch (error) {
+      outcome = "ERROR";
       const message = error instanceof Error ? error.message : "Transcript operation failed";
       setPanelError(message);
       setAutosaveStatus("ERROR");
@@ -695,9 +849,24 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         status: "ERROR"
       });
     } finally {
+      const durationMs = Math.max(
+        0,
+        Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)
+      );
+      void trackDesktopEvent({
+        projectId: projectV2Id,
+        event: "command_latency",
+        outcome,
+        durationMs,
+        metadata: {
+          command: action,
+          target: "transcript",
+          operationCount: operations.length
+        }
+      }).catch(() => {});
       setBusy(null);
     }
-  }, [appendHistory, language, loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript, minConfidenceForRipple, projectV2Id]);
+  }, [appendHistory, language, loadAudioAnalysis, loadChatDiagnostics, loadDesktopPerf, loadProjectSurface, loadReviewPublishing, loadTranscript, minConfidenceForRipple, projectV2Id]);
 
   const transcriptRangeMs = useMemo(() => {
     const words = transcript?.words ?? [];
@@ -931,6 +1100,123 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }
   };
 
+  const importLocalMediaFile = useCallback(async (file: File, source: "drop" | "picker") => {
+    if (!file) {
+      return;
+    }
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    setImportUploading(true);
+    setBusy("media_import");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const slot = file.type.startsWith("audio/") ? "audio" : "primary";
+      const importPayload = await importProjectV2Media(projectV2Id, {
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+        slot
+      });
+      const uploadResponse = await fetch(importPayload.uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream"
+        },
+        body: file
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(`Media upload failed (${uploadResponse.status})`);
+      }
+      await registerProjectV2Media(projectV2Id, {
+        storageKey: importPayload.storageKey,
+        mimeType: file.type || "application/octet-stream",
+        originalFileName: file.name,
+        slot
+      });
+
+      if (!file.type.startsWith("image/")) {
+        const transcriptJob = await autoTranscript(projectV2Id, {
+          language,
+          diarization: false,
+          punctuationStyle: "auto",
+          confidenceThreshold: minConfidenceForRipple,
+          reDecodeEnabled: true,
+          maxWordsPerSegment: 7,
+          maxCharsPerLine: 24,
+          maxLinesPerSegment: 2
+        });
+        setAutoJobId(transcriptJob.aiJobId);
+        setAutoJobStatus({ status: transcriptJob.status, progress: 0 });
+      }
+
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Media import",
+        detail: `${file.name} uploaded (${source})`,
+        status: "SUCCESS"
+      });
+
+      const durationMs = Math.max(
+        0,
+        Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)
+      );
+      void trackDesktopEvent({
+        projectId: projectV2Id,
+        event: source === "drop" ? "drop_import" : "desktop_menu_action",
+        outcome: "SUCCESS",
+        durationMs,
+        metadata: {
+          fileName: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          source
+        }
+      }).catch(() => {});
+      const notified = await notifyIfPermitted("HookForge upload complete", `${file.name} is ready in your project.`);
+      if (notified) {
+        void trackDesktopEvent({
+          projectId: projectV2Id,
+          event: "background_upload_notice",
+          outcome: "INFO",
+          metadata: {
+            fileName: file.name
+          }
+        }).catch(() => {});
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Media import failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Media import",
+        detail: message,
+        status: "ERROR"
+      });
+      void trackDesktopEvent({
+        projectId: projectV2Id,
+        event: source === "drop" ? "drop_import" : "desktop_menu_action",
+        outcome: "ERROR",
+        metadata: {
+          fileName: file.name
+        }
+      }).catch(() => {});
+    } finally {
+      setBusy(null);
+      setImportUploading(false);
+    }
+  }, [
+    language,
+    loadAudioAnalysis,
+    loadChatDiagnostics,
+    loadDesktopPerf,
+    loadProjectSurface,
+    loadReviewPublishing,
+    loadTranscript,
+    minConfidenceForRipple,
+    projectV2Id
+  ]);
+
   const uploadRecordingWithSinglePutFallback = useCallback(async (blob: Blob, fileName: string, mimeType: string) => {
     setRecordingStatusLabel("Fallback upload (single PUT)...");
     const importPayload = await importProjectV2Media(projectV2Id, {
@@ -1062,7 +1348,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         setAutoJobId(finalized.aiJobId);
         setAutoJobStatus({ status: "QUEUED", progress: 0 });
       }
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       appendHistory({
         label: "Recording finalized",
         detail: finalized.aiJobId ? "Recording uploaded and transcription queued" : "Recording uploaded",
@@ -1150,6 +1436,45 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     recorder.stop();
   }, []);
 
+  const handleLocalFilePick = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    await importLocalMediaFile(file, "picker");
+    event.target.value = "";
+  }, [importLocalMediaFile]);
+
+  const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDropzoneActive(true);
+  }, []);
+
+  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDropzoneActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const x = event.clientX;
+    const y = event.clientY;
+    if (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) {
+      setDropzoneActive(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDropzoneActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (!file) {
+      return;
+    }
+    await importLocalMediaFile(file, "drop");
+  }, [importLocalMediaFile]);
+
   const runSearch = async () => {
     setBusy("transcript_search");
     setPanelError(null);
@@ -1220,7 +1545,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setAudioApplyResult(payload);
       setAudioUndoToken(payload.undoToken);
       setAudioUndoResult(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Audio apply",
@@ -1254,7 +1579,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       const payload = await undoProjectV2AudioEnhancement(projectV2Id, audioUndoToken);
       setAudioUndoResult(payload);
       setAudioUndoToken(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Audio undo",
@@ -1324,7 +1649,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setFillerApplyResult(payload);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Filler apply",
@@ -1715,6 +2040,8 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setPanelError("Select at least one planned operation before apply.");
       return;
     }
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    let outcome: "SUCCESS" | "ERROR" = "SUCCESS";
     setBusy("chat_apply");
     setPanelError(null);
     try {
@@ -1726,7 +2053,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       });
       setChatApplyResult(result);
       setChatUndoToken(result.undoToken);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       appendHistory({
         label: "Chat apply",
         detail: result.suggestionsOnly
@@ -1744,6 +2071,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         }
       }).catch(() => {});
     } catch (error) {
+      outcome = "ERROR";
       const message = error instanceof Error ? error.message : "Failed to apply chat plan";
       setPanelError(message);
       appendHistory({
@@ -1760,6 +2088,21 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         }
       }).catch(() => {});
     } finally {
+      const durationMs = Math.max(
+        0,
+        Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt)
+      );
+      void trackDesktopEvent({
+        projectId: projectV2Id,
+        event: "command_latency",
+        outcome,
+        durationMs,
+        metadata: {
+          command: "chat_apply",
+          selectedCount,
+          totalCount: operationDecisions.length
+        }
+      }).catch(() => {});
       setBusy(null);
     }
   };
@@ -1777,7 +2120,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setChatUndoResult(response);
       setChatApplyResult(null);
       setChatUndoToken(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       appendHistory({
         label: "Chat undo",
         detail: `Restored revision ${response.appliedRevisionId.slice(0, 8)}`,
@@ -1788,6 +2131,205 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setPanelError(message);
       appendHistory({
         label: "Chat undo",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const createShareLink = async () => {
+    setBusy("share_link_create");
+    setPanelError(null);
+    try {
+      const expiresInDaysRaw = Number(shareExpiresDays);
+      const expiresInDays = Number.isFinite(expiresInDaysRaw) ? Math.max(1, Math.min(365, Math.floor(expiresInDaysRaw))) : undefined;
+      await createProjectV2ShareLink(projectV2Id, {
+        scope: shareScope,
+        expiresInDays
+      });
+      await loadReviewPublishing();
+      appendHistory({
+        label: "Share link",
+        detail: `Created ${shareScope.toLowerCase()} link`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create share link";
+      setPanelError(message);
+      appendHistory({
+        label: "Share link",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const addReviewComment = async () => {
+    const body = reviewCommentBody.trim();
+    if (!body) {
+      return;
+    }
+    setBusy("review_comment_create");
+    setPanelError(null);
+    try {
+      await createProjectV2ReviewComment(projectV2Id, {
+        shareToken,
+        body,
+        anchorMs: playheadMs,
+        transcriptStartMs: selectedSegment?.startMs ?? null,
+        transcriptEndMs: selectedSegment?.endMs ?? null,
+        timelineTrackId: selectedTrack?.id ?? null,
+        clipId: selectedClip?.id ?? null
+      });
+      setReviewCommentBody("");
+      await loadReviewPublishing();
+      appendHistory({
+        label: "Review comment",
+        detail: "Comment added",
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to add review comment";
+      setPanelError(message);
+      appendHistory({
+        label: "Review comment",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const updateReviewComment = async (commentId: string, statusValue: "OPEN" | "RESOLVED") => {
+    setBusy("review_comment_update");
+    setPanelError(null);
+    try {
+      await updateProjectV2ReviewCommentStatus(projectV2Id, commentId, {
+        shareToken,
+        status: statusValue
+      });
+      await loadReviewPublishing();
+      appendHistory({
+        label: "Review comment",
+        detail: `Marked ${statusValue.toLowerCase()}`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to update review comment";
+      setPanelError(message);
+      appendHistory({
+        label: "Review comment",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitReviewDecision = async (decision: "APPROVED" | "REJECTED") => {
+    setBusy("review_decision_submit");
+    setPanelError(null);
+    try {
+      const payload = await submitProjectV2ReviewDecision(projectV2Id, {
+        shareToken,
+        status: decision,
+        note: reviewDecisionNote.trim() || undefined,
+        requireApproval: reviewApprovalRequired
+      });
+      setReviewLatestDecision({
+        id: payload.decision.id,
+        status: payload.decision.status,
+        createdAt: payload.decision.createdAt,
+        revisionId: payload.decision.revisionId
+      });
+      await loadReviewPublishing();
+      appendHistory({
+        label: "Review decision",
+        detail: `${decision.toLowerCase()} submitted`,
+        status: decision === "APPROVED" ? "SUCCESS" : "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to submit review decision";
+      setPanelError(message);
+      appendHistory({
+        label: "Review decision",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyExistingExportProfile = async () => {
+    if (!selectedExportProfileId) {
+      return;
+    }
+    setBusy("export_profile_apply");
+    setPanelError(null);
+    try {
+      await applyProjectV2ExportProfile(projectV2Id, {
+        profileId: selectedExportProfileId
+      });
+      await Promise.all([loadProjectSurface(), loadReviewPublishing()]);
+      appendHistory({
+        label: "Export profile",
+        detail: "Applied export profile",
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to apply export profile";
+      setPanelError(message);
+      appendHistory({
+        label: "Export profile",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const createAndApplyExportProfile = async () => {
+    const name = newExportProfileName.trim();
+    if (!name) {
+      return;
+    }
+    setBusy("export_profile_create");
+    setPanelError(null);
+    try {
+      const fpsValue = Number(newExportProfileFps);
+      const response = await applyProjectV2ExportProfile(projectV2Id, {
+        createProfile: {
+          name,
+          resolution: newExportProfileResolution.trim() || "1080x1920",
+          fps: Number.isFinite(fpsValue) ? Math.max(12, Math.min(120, Math.floor(fpsValue))) : 30,
+          container: "mp4",
+          isDefault: false
+        }
+      });
+      setExportProfiles(response.exportProfiles.map((profile) => ({
+        ...profile,
+        config: null
+      })));
+      setSelectedExportProfileId(response.profile.id);
+      await loadProjectSurface();
+      appendHistory({
+        label: "Export profile",
+        detail: `Created ${response.profile.name}`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create export profile";
+      setPanelError(message);
+      appendHistory({
+        label: "Export profile",
         detail: message,
         status: "ERROR"
       });
@@ -1837,7 +2379,20 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const timelineZoomFactor = zoomPercent / 100;
 
   return (
-    <div className="flex h-[calc(100vh-120px)] min-h-[720px] flex-col gap-3">
+    <div
+      className="relative flex h-[calc(100vh-120px)] min-h-[720px] flex-col gap-3"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {dropzoneActive ? (
+        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/85">
+          <p className="rounded-md border bg-background px-3 py-2 text-sm font-semibold text-foreground">
+            Drop media to import into the project
+          </p>
+        </div>
+      ) : null}
       <div className="flex items-center justify-between rounded-xl border bg-background/95 px-4 py-3 shadow-sm">
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Descript-first editor</p>
@@ -1902,7 +2457,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()])}
+                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()])}
                   disabled={busy !== null}
                 >
                   Refresh Project State
@@ -1910,6 +2465,21 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <Button size="sm" variant="outline" onClick={enqueueRender} disabled={busy !== null || health?.render.readiness === "BLOCKED"}>
                   Render MP4
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => localFileInputRef.current?.click()}
+                  disabled={busy !== null || importUploading}
+                >
+                  {importUploading ? "Uploading..." : "Import Local Media"}
+                </Button>
+                <input
+                  ref={localFileInputRef}
+                  type="file"
+                  accept="video/*,audio/*,image/*"
+                  className="hidden"
+                  onChange={handleLocalFilePick}
+                />
               </div>
               {autoJobStatus ? (
                 <div className="mt-2">
@@ -1983,6 +2553,33 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 ))}
                 {!operationHistory.length ? <p className="text-muted-foreground">No operations recorded yet.</p> : null}
               </div>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground">Desktop Performance</p>
+              <p>
+                p95 open {perfHints?.observed.editorOpenP95Ms ?? "n/a"}ms / budget {perfHints?.budgets.editorOpenP95Ms ?? 2500}ms
+              </p>
+              <p>
+                p95 command {perfHints?.observed.commandLatencyP95Ms ?? "n/a"}ms / budget {perfHints?.budgets.commandLatencyP95Ms ?? 100}ms
+              </p>
+              <p>
+                Suggested windows: transcript {perfHints?.suggested.segmentWindowSize ?? segmentWindowSize}, timeline {perfHints?.suggested.timelineWindowSize ?? timelineWindowSize}
+              </p>
+              {perfHints?.hints.length ? (
+                <ul className="mt-1 space-y-1">
+                  {perfHints.hints.slice(0, 4).map((hint) => (
+                    <li key={hint.id}>
+                      [{hint.severity}] {hint.message}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No active perf warnings.</p>
+              )}
+              <p className="mt-1">
+                Desktop shell: {desktopConfig?.desktop.status ?? "unknown"} • immediate replacement {desktopConfig?.cutover.immediateReplacement ? "on" : "off"}
+              </p>
             </div>
 
             <div className="rounded-md border p-2 text-xs text-muted-foreground">
@@ -2551,6 +3148,175 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                     </p>
                   ))}
                   {!revisionGraph || revisionGraph.nodes.length === 0 ? <p>No revision graph yet.</p> : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Collaboration + Review + Publishing (Phase 5)</p>
+              <div className="mt-2 rounded border p-2">
+                <p className="font-medium">Share links</p>
+                <div className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-2">
+                  <select
+                    value={shareScope}
+                    onChange={(event) => setShareScope(event.target.value as "VIEW" | "COMMENT" | "APPROVE")}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="VIEW">View</option>
+                    <option value="COMMENT">Comment</option>
+                    <option value="APPROVE">Approve</option>
+                  </select>
+                  <Input
+                    value={shareExpiresDays}
+                    onChange={(event) => setShareExpiresDays(event.target.value)}
+                    placeholder="Expires days"
+                  />
+                  <Button size="sm" onClick={createShareLink} disabled={busy !== null}>
+                    Create
+                  </Button>
+                </div>
+                <div className="mt-2 max-h-[92px] space-y-1 overflow-y-auto text-muted-foreground">
+                  {shareLinks.slice(0, 10).map((link) => (
+                    <div key={link.id} className="rounded border px-2 py-1">
+                      <p>
+                        {link.scope} • {link.isActive ? "active" : "inactive"} • {link.tokenPrefix}...
+                      </p>
+                      <a className="underline" href={link.shareUrl} target="_blank" rel="noreferrer">
+                        Open share link
+                      </a>
+                    </div>
+                  ))}
+                  {shareLinks.length === 0 ? <p>No share links yet.</p> : null}
+                </div>
+              </div>
+
+              <div className="mt-2 rounded border p-2">
+                <p className="font-medium">Review comments</p>
+                <Textarea
+                  rows={2}
+                  value={reviewCommentBody}
+                  onChange={(event) => setReviewCommentBody(event.target.value)}
+                  placeholder="Leave feedback anchored to playhead/selection"
+                />
+                <div className="mt-2 grid grid-cols-[1fr_auto_auto] gap-2">
+                  <select
+                    value={reviewCommentStatusFilter}
+                    onChange={(event) => setReviewCommentStatusFilter(event.target.value as "ALL" | "OPEN" | "RESOLVED")}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="ALL">All</option>
+                    <option value="OPEN">Open</option>
+                    <option value="RESOLVED">Resolved</option>
+                  </select>
+                  <Button size="sm" variant="secondary" onClick={() => void loadReviewPublishing()} disabled={busy !== null}>
+                    Refresh
+                  </Button>
+                  <Button size="sm" onClick={addReviewComment} disabled={busy !== null || !reviewCommentBody.trim()}>
+                    Add Comment
+                  </Button>
+                </div>
+                <div className="mt-2 max-h-[130px] space-y-1 overflow-y-auto text-muted-foreground">
+                  {filteredReviewComments.slice(0, 24).map((comment) => (
+                    <div key={comment.id} className="rounded border px-2 py-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium text-foreground">
+                          {comment.status} • {formatMs(comment.anchorMs ?? 0)}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2"
+                          onClick={() => updateReviewComment(comment.id, comment.status === "OPEN" ? "RESOLVED" : "OPEN")}
+                          disabled={busy !== null}
+                        >
+                          {comment.status === "OPEN" ? "Resolve" : "Reopen"}
+                        </Button>
+                      </div>
+                      <p className="line-clamp-2">{comment.body}</p>
+                    </div>
+                  ))}
+                  {filteredReviewComments.length === 0 ? <p>No review comments.</p> : null}
+                </div>
+              </div>
+
+              <div className="mt-2 rounded border p-2">
+                <p className="font-medium">Approval and export</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    id="review-approval-required"
+                    type="checkbox"
+                    checked={reviewApprovalRequired}
+                    onChange={(event) => setReviewApprovalRequired(event.target.checked)}
+                  />
+                  <Label htmlFor="review-approval-required">Require approval before render</Label>
+                </div>
+                <Textarea
+                  rows={2}
+                  value={reviewDecisionNote}
+                  onChange={(event) => setReviewDecisionNote(event.target.value)}
+                  placeholder="Approval note (optional)"
+                />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Button size="sm" onClick={() => submitReviewDecision("APPROVED")} disabled={busy !== null}>
+                    Approve Revision
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => submitReviewDecision("REJECTED")} disabled={busy !== null}>
+                    Reject Revision
+                  </Button>
+                </div>
+                {reviewLatestDecision ? (
+                  <p className="mt-2 text-muted-foreground">
+                    Latest decision: {reviewLatestDecision.status} • {new Date(reviewLatestDecision.createdAt).toLocaleString()}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-muted-foreground">No review decision yet.</p>
+                )}
+
+                <div className="mt-3 rounded border p-2">
+                  <p className="font-medium">Export profiles</p>
+                  <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                    <select
+                      value={selectedExportProfileId}
+                      onChange={(event) => setSelectedExportProfileId(event.target.value)}
+                      className="h-8 rounded-md border bg-background px-2 text-xs"
+                    >
+                      <option value="">Select profile...</option>
+                      {exportProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name} ({profile.resolution}@{profile.fps})
+                        </option>
+                      ))}
+                    </select>
+                    <Button size="sm" onClick={applyExistingExportProfile} disabled={busy !== null || !selectedExportProfileId}>
+                      Apply
+                    </Button>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    <Input
+                      value={newExportProfileName}
+                      onChange={(event) => setNewExportProfileName(event.target.value)}
+                      placeholder="Profile name"
+                    />
+                    <Input
+                      value={newExportProfileResolution}
+                      onChange={(event) => setNewExportProfileResolution(event.target.value)}
+                      placeholder="1080x1920"
+                    />
+                    <Input
+                      value={newExportProfileFps}
+                      onChange={(event) => setNewExportProfileFps(event.target.value)}
+                      placeholder="30"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="mt-2 w-full"
+                    onClick={createAndApplyExportProfile}
+                    disabled={busy !== null || !newExportProfileName.trim()}
+                  >
+                    Create Profile
+                  </Button>
                 </div>
               </div>
             </div>
