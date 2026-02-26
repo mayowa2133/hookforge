@@ -17,9 +17,11 @@ import {
   createProjectV2ReviewComment,
   createProjectV2ShareLink,
   applyTranscriptRangeDelete,
+  applyTranscriptSearchReplace,
   applyTranscriptOps,
   autoTranscript,
   batchSetTranscriptSpeaker,
+  createTranscriptCheckpoint,
   cancelProjectV2RecordingSession,
   finalizeProjectV2RecordingSession,
   getAiJob,
@@ -31,6 +33,8 @@ import {
   getProjectV2ShareLinks,
   getProjectV2AudioAnalysis,
   getTranscriptIssues,
+  getTranscriptConflicts,
+  listTranscriptCheckpoints,
   getTranscriptRanges,
   getLegacyProject,
   getProjectV2RevisionGraph,
@@ -46,6 +50,7 @@ import {
   previewProjectV2AudioEnhancement,
   previewProjectV2FillerRemoval,
   previewTranscriptRangeDelete,
+  previewTranscriptSearchReplace,
   previewTranscriptOps,
   registerProjectV2Media,
   recoverProjectV2RecordingSession,
@@ -56,6 +61,7 @@ import {
   issueProjectV2StudioJoinToken,
   startProjectV2StudioRecording,
   stopProjectV2StudioRecording,
+  restoreTranscriptCheckpoint,
   startProjectV2RecordingSession,
   startRender,
   submitProjectV2ReviewDecision,
@@ -84,6 +90,9 @@ import {
   type StudioRoomDetailsResponse,
   type StudioRoomSummary,
   type TranscriptIssue,
+  type TranscriptConflictIssue,
+  type TranscriptEditCheckpoint,
+  type TranscriptSearchReplacePayload,
   type TimelineOperation,
   type RevisionGraphPayload,
   type TimelinePayload,
@@ -153,6 +162,32 @@ function buildHistoryEntry(input: Omit<OperationHistoryEntry, "id" | "createdAt"
     createdAt: new Date().toISOString(),
     ...input
   };
+}
+
+function parseWordRangeDraft(input: string, maxWordIndex: number) {
+  const chunks = input
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const ranges: Array<{ startWordIndex: number; endWordIndex: number }> = [];
+  const errors: string[] = [];
+  for (const chunk of chunks) {
+    const match = /^(\d+)\s*-\s*(\d+)$/.exec(chunk);
+    if (!match) {
+      errors.push(`Invalid range "${chunk}"`);
+      continue;
+    }
+    const startRaw = Number(match[1]);
+    const endRaw = Number(match[2]);
+    if (!Number.isFinite(startRaw) || !Number.isFinite(endRaw)) {
+      errors.push(`Invalid range "${chunk}"`);
+      continue;
+    }
+    const startWordIndex = Math.max(0, Math.min(maxWordIndex, Math.floor(startRaw)));
+    const endWordIndex = Math.max(startWordIndex, Math.min(maxWordIndex, Math.floor(endRaw)));
+    ranges.push({ startWordIndex, endWordIndex });
+  }
+  return { ranges, errors };
 }
 
 function confidenceBadge(confidence: number | null, minConfidence: number) {
@@ -241,6 +276,11 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [operationHistory, setOperationHistory] = useState<OperationHistoryEntry[]>([]);
   const [minConfidenceForRipple, setMinConfidenceForRipple] = useState(0.86);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchReplaceSearch, setSearchReplaceSearch] = useState("");
+  const [searchReplaceReplace, setSearchReplaceReplace] = useState("");
+  const [searchReplaceCaseSensitive, setSearchReplaceCaseSensitive] = useState(false);
+  const [searchReplaceMaxSegments, setSearchReplaceMaxSegments] = useState("500");
+  const [searchReplaceResult, setSearchReplaceResult] = useState<TranscriptSearchReplacePayload | null>(null);
   const [searchMatches, setSearchMatches] = useState<Array<{
     segmentId: string;
     startMs: number;
@@ -254,7 +294,12 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     startWordIndex: 0,
     endWordIndex: 0
   });
+  const [multiRangeSelectionDraft, setMultiRangeSelectionDraft] = useState("0-0");
   const [transcriptIssues, setTranscriptIssues] = useState<TranscriptIssue[]>([]);
+  const [transcriptConflicts, setTranscriptConflicts] = useState<TranscriptConflictIssue[]>([]);
+  const [checkpointLabelDraft, setCheckpointLabelDraft] = useState("");
+  const [transcriptCheckpoints, setTranscriptCheckpoints] = useState<TranscriptEditCheckpoint[]>([]);
+  const [selectedCheckpointId, setSelectedCheckpointId] = useState("");
   const [audioAnalysis, setAudioAnalysis] = useState<AudioAnalysisPayload | null>(null);
   const [audioPreset, setAudioPreset] = useState<AudioEnhancementPreset>("dialogue_enhance");
   const [audioTargetLufs, setAudioTargetLufs] = useState("-14");
@@ -462,6 +507,24 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setDeleteEndMs(String(Math.min(active.endMs, active.startMs + 240)));
   }, [language, minConfidenceForRipple, projectV2Id, selectedSegmentId]);
 
+  const loadTranscriptDocumentState = useCallback(async () => {
+    const [checkpointsPayload, conflictsPayload] = await Promise.all([
+      listTranscriptCheckpoints(projectV2Id, language),
+      getTranscriptConflicts(projectV2Id, {
+        language,
+        limit: 120
+      })
+    ]);
+    setTranscriptCheckpoints(checkpointsPayload.checkpoints);
+    setSelectedCheckpointId((previous) => {
+      if (previous && checkpointsPayload.checkpoints.some((entry) => entry.id === previous)) {
+        return previous;
+      }
+      return checkpointsPayload.checkpoints[0]?.id ?? "";
+    });
+    setTranscriptConflicts(conflictsPayload.conflicts);
+  }, [language, projectV2Id]);
+
   const loadAudioAnalysis = useCallback(async () => {
     const maxCandidates = Math.max(1, Math.floor(Number(fillerMaxCandidates) || 60));
     const parsedConfidence = Number(fillerMaxConfidence);
@@ -548,6 +611,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         await Promise.all([
           loadProjectSurface(),
           loadTranscript(),
+          loadTranscriptDocumentState(),
           loadAudioAnalysis(),
           loadChatDiagnostics(),
           loadReviewPublishing(),
@@ -588,6 +652,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     loadProjectSurface,
     loadReviewPublishing,
     loadStudioRooms,
+    loadTranscriptDocumentState,
     loadTranscript,
     projectV2Id
   ]);
@@ -684,7 +749,15 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         const payload = await getAiJob(autoJobId);
         setAutoJobStatus({ status: payload.aiJob.status, progress: payload.aiJob.progress });
         if (payload.aiJob.status === "DONE") {
-          await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+          await Promise.all([
+            loadTranscript(),
+            loadTranscriptDocumentState(),
+            loadProjectSurface(),
+            loadAudioAnalysis(),
+            loadChatDiagnostics(),
+            loadReviewPublishing(),
+            loadDesktopPerf()
+          ]);
           appendHistory({
             label: "Transcript auto generation",
             detail: "Auto transcript completed",
@@ -708,7 +781,17 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       }
     }, 2200);
     return () => clearInterval(interval);
-  }, [appendHistory, autoJobId, loadAudioAnalysis, loadChatDiagnostics, loadDesktopPerf, loadProjectSurface, loadReviewPublishing, loadTranscript]);
+  }, [
+    appendHistory,
+    autoJobId,
+    loadAudioAnalysis,
+    loadChatDiagnostics,
+    loadDesktopPerf,
+    loadProjectSurface,
+    loadReviewPublishing,
+    loadTranscript,
+    loadTranscriptDocumentState
+  ]);
 
   useEffect(() => {
     if (!renderJobId) {
@@ -833,7 +916,15 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         revisionId: payload.revisionId,
         revision: payload.revision
       });
-      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      await Promise.all([
+        loadTranscript(),
+        loadTranscriptDocumentState(),
+        loadProjectSurface(),
+        loadAudioAnalysis(),
+        loadChatDiagnostics(),
+        loadReviewPublishing(),
+        loadDesktopPerf()
+      ]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Timeline edit",
@@ -966,7 +1057,19 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       }).catch(() => {});
       setBusy(null);
     }
-  }, [appendHistory, language, loadAudioAnalysis, loadChatDiagnostics, loadDesktopPerf, loadProjectSurface, loadReviewPublishing, loadTranscript, minConfidenceForRipple, projectV2Id]);
+  }, [
+    appendHistory,
+    language,
+    loadAudioAnalysis,
+    loadChatDiagnostics,
+    loadDesktopPerf,
+    loadProjectSurface,
+    loadReviewPublishing,
+    loadTranscript,
+    loadTranscriptDocumentState,
+    minConfidenceForRipple,
+    projectV2Id
+  ]);
 
   const transcriptRangeMs = useMemo(() => {
     const words = transcript?.words ?? [];
@@ -1028,6 +1131,42 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     () => transcriptIssues.filter((issue) => issue.type === "LOW_CONFIDENCE"),
     [transcriptIssues]
   );
+
+  const speakerRail = useMemo(() => {
+    const entries = new Map<string, {
+      speakerLabel: string;
+      segmentCount: number;
+      totalDurationMs: number;
+      averageConfidence: number;
+      firstSegmentId: string;
+    }>();
+    for (const segment of transcript?.segments ?? []) {
+      const label = (segment.speakerLabel?.trim() || "Unknown").slice(0, 80);
+      const durationMs = Math.max(0, segment.endMs - segment.startMs);
+      const confidence = segment.confidenceAvg ?? 0;
+      const current = entries.get(label);
+      if (!current) {
+        entries.set(label, {
+          speakerLabel: label,
+          segmentCount: 1,
+          totalDurationMs: durationMs,
+          averageConfidence: confidence,
+          firstSegmentId: segment.id
+        });
+      } else {
+        const nextCount = current.segmentCount + 1;
+        current.segmentCount = nextCount;
+        current.totalDurationMs += durationMs;
+        current.averageConfidence = ((current.averageConfidence * (nextCount - 1)) + confidence) / nextCount;
+      }
+    }
+    return [...entries.values()].sort((a, b) => b.totalDurationMs - a.totalDurationMs);
+  }, [transcript?.segments]);
+
+  const parsedMultiRanges = useMemo(() => {
+    const maxWordIndex = Math.max(0, (transcript?.words.length ?? 1) - 1);
+    return parseWordRangeDraft(multiRangeSelectionDraft, maxWordIndex);
+  }, [multiRangeSelectionDraft, transcript?.words.length]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1249,7 +1388,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         setAutoJobStatus({ status: transcriptJob.status, progress: 0 });
       }
 
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadTranscriptDocumentState(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Media import",
@@ -1453,7 +1592,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         setAutoJobId(finalized.aiJobId);
         setAutoJobStatus({ status: "QUEUED", progress: 0 });
       }
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadTranscriptDocumentState(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       appendHistory({
         label: "Recording finalized",
         detail: finalized.aiJobId ? "Recording uploaded and transcription queued" : "Recording uploaded",
@@ -1847,7 +1986,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setAudioApplyResult(payload);
       setAudioUndoToken(payload.undoToken);
       setAudioUndoResult(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadTranscriptDocumentState(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Audio apply",
@@ -1881,7 +2020,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       const payload = await undoProjectV2AudioEnhancement(projectV2Id, audioUndoToken);
       setAudioUndoResult(payload);
       setAudioUndoToken(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadTranscriptDocumentState(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Audio undo",
@@ -1951,7 +2090,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setFillerApplyResult(payload);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadTranscriptDocumentState(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Filler apply",
@@ -2034,7 +2173,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setLastTranscriptPreview(payload);
-      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
+      await Promise.all([loadTranscript(), loadTranscriptDocumentState(), loadProjectSurface(), loadAudioAnalysis()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Speaker batch",
@@ -2103,7 +2242,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setLastTranscriptPreview(payload);
-      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
+      await Promise.all([loadTranscript(), loadTranscriptDocumentState(), loadProjectSurface(), loadAudioAnalysis()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Transcript apply",
@@ -2281,6 +2420,228 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }
   };
 
+  const previewMultiRangeDelete = async () => {
+    if (!transcript || transcript.words.length === 0) {
+      return;
+    }
+    if (parsedMultiRanges.errors.length > 0 || parsedMultiRanges.ranges.length === 0) {
+      setPanelError(parsedMultiRanges.errors[0] ?? "Provide at least one valid word range.");
+      return;
+    }
+    const operations = parsedMultiRanges.ranges
+      .map((range) => {
+        const first = transcript.words[range.startWordIndex];
+        const last = transcript.words[range.endWordIndex];
+        if (!first || !last) {
+          return null;
+        }
+        return {
+          op: "delete_range" as const,
+          startMs: first.startMs,
+          endMs: last.endMs
+        };
+      })
+      .filter((entry): entry is { op: "delete_range"; startMs: number; endMs: number } => !!entry)
+      .sort((a, b) => b.startMs - a.startMs);
+    await runTranscriptPreview(operations, "delete_range_multi_preview");
+  };
+
+  const applyMultiRangeDelete = async () => {
+    if (!transcript || transcript.words.length === 0) {
+      return;
+    }
+    if (parsedMultiRanges.errors.length > 0 || parsedMultiRanges.ranges.length === 0) {
+      setPanelError(parsedMultiRanges.errors[0] ?? "Provide at least one valid word range.");
+      return;
+    }
+    const operations = parsedMultiRanges.ranges
+      .map((range) => {
+        const first = transcript.words[range.startWordIndex];
+        const last = transcript.words[range.endWordIndex];
+        if (!first || !last) {
+          return null;
+        }
+        return {
+          op: "delete_range" as const,
+          startMs: first.startMs,
+          endMs: last.endMs
+        };
+      })
+      .filter((entry): entry is { op: "delete_range"; startMs: number; endMs: number } => !!entry)
+      .sort((a, b) => b.startMs - a.startMs);
+    await runTranscriptApply(operations, "delete_range_multi_apply");
+  };
+
+  const previewSearchReplace = async () => {
+    const search = searchReplaceSearch.trim();
+    if (!search) {
+      setPanelError("Search text is required.");
+      return;
+    }
+    setBusy("search_replace_preview");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await previewTranscriptSearchReplace(projectV2Id, {
+        language,
+        search,
+        replace: searchReplaceReplace,
+        caseSensitive: searchReplaceCaseSensitive,
+        maxSegments: Math.max(1, Math.min(2000, Math.floor(Number(searchReplaceMaxSegments) || 500)))
+      });
+      setSearchReplaceResult(payload);
+      setLastTranscriptPreview(payload);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Search replace preview",
+        detail: `Matched ${payload.affectedSegments} segment(s)`,
+        status: "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Search-replace preview failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Search replace preview",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applySearchReplace = async () => {
+    const search = searchReplaceSearch.trim();
+    if (!search) {
+      setPanelError("Search text is required.");
+      return;
+    }
+    setBusy("search_replace_apply");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await applyTranscriptSearchReplace(projectV2Id, {
+        language,
+        search,
+        replace: searchReplaceReplace,
+        caseSensitive: searchReplaceCaseSensitive,
+        maxSegments: Math.max(1, Math.min(2000, Math.floor(Number(searchReplaceMaxSegments) || 500)))
+      });
+      setSearchReplaceResult(payload);
+      setLastTranscriptPreview(payload);
+      await Promise.all([
+        loadTranscript(),
+        loadTranscriptDocumentState(),
+        loadProjectSurface(),
+        loadAudioAnalysis(),
+        loadChatDiagnostics(),
+        loadReviewPublishing(),
+        loadDesktopPerf()
+      ]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Search replace apply",
+        detail: `Updated ${payload.affectedSegments} segment(s)`,
+        status: payload.suggestionsOnly ? "INFO" : "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Search-replace apply failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Search replace apply",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const createCheckpointFromDraft = async () => {
+    setBusy("checkpoint_create");
+    setPanelError(null);
+    try {
+      const payload = await createTranscriptCheckpoint(projectV2Id, {
+        language,
+        label: checkpointLabelDraft.trim() || undefined
+      });
+      await loadTranscriptDocumentState();
+      setSelectedCheckpointId(payload.checkpoint.id);
+      setCheckpointLabelDraft("");
+      appendHistory({
+        label: "Checkpoint create",
+        detail: payload.checkpoint.label,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Checkpoint create failed";
+      setPanelError(message);
+      appendHistory({
+        label: "Checkpoint create",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const restoreSelectedCheckpoint = async () => {
+    if (!selectedCheckpointId) {
+      return;
+    }
+    setBusy("checkpoint_restore");
+    setPanelError(null);
+    setAutosaveStatus("SAVING");
+    try {
+      const payload = await restoreTranscriptCheckpoint(projectV2Id, selectedCheckpointId);
+      await Promise.all([
+        loadTranscript(),
+        loadTranscriptDocumentState(),
+        loadProjectSurface(),
+        loadAudioAnalysis(),
+        loadChatDiagnostics(),
+        loadReviewPublishing(),
+        loadDesktopPerf()
+      ]);
+      setAutosaveStatus("SAVED");
+      appendHistory({
+        label: "Checkpoint restore",
+        detail: `Restored ${payload.restoredSegments} segments (${payload.language})`,
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Checkpoint restore failed";
+      setPanelError(message);
+      setAutosaveStatus("ERROR");
+      appendHistory({
+        label: "Checkpoint restore",
+        detail: message,
+        status: "ERROR"
+      });
+      await loadTranscriptDocumentState().catch(() => {});
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const focusSpeaker = (speakerLabel: string, firstSegmentId: string) => {
+    const normalized = speakerLabel === "Unknown" ? "" : speakerLabel;
+    setSpeakerBatchFromLabel(normalized);
+    const index = transcript?.segments.findIndex((entry) => entry.id === firstSegmentId) ?? -1;
+    if (index >= 0) {
+      const segment = transcript?.segments[index];
+      if (segment) {
+        setSelectedSegmentId(segment.id);
+        setSegmentDraft(segment.text);
+        setSpeakerDraft(segment.speakerLabel ?? "");
+        setSegmentWindowStart(Math.max(0, index - 8));
+      }
+    }
+  };
+
   const createChatPlan = async () => {
     if (!chatPrompt.trim()) {
       return;
@@ -2355,7 +2716,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       });
       setChatApplyResult(result);
       setChatUndoToken(result.undoToken);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadTranscriptDocumentState(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       appendHistory({
         label: "Chat apply",
         detail: result.suggestionsOnly
@@ -2422,7 +2783,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setChatUndoResult(response);
       setChatApplyResult(null);
       setChatUndoToken(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadTranscriptDocumentState(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf()]);
       appendHistory({
         label: "Chat undo",
         detail: `Restored revision ${response.appliedRevisionId.slice(0, 8)}`,
@@ -2759,7 +3120,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf(), loadStudioRooms()])}
+                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadTranscriptDocumentState(), loadAudioAnalysis(), loadChatDiagnostics(), loadReviewPublishing(), loadDesktopPerf(), loadStudioRooms()])}
                   disabled={busy !== null}
                 >
                   Refresh Project State
@@ -3240,6 +3601,165 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               >
                 Sync Range From Selected Segment
               </Button>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Multi-range edit</p>
+              <p className="text-muted-foreground">Comma-separated word ranges, e.g. 0-12,40-68,110-132.</p>
+              <Input
+                className="mt-2"
+                value={multiRangeSelectionDraft}
+                onChange={(event) => setMultiRangeSelectionDraft(event.target.value)}
+                placeholder="0-12,40-68"
+              />
+              {parsedMultiRanges.errors.length > 0 ? (
+                <p className="mt-1 text-destructive">{parsedMultiRanges.errors[0]}</p>
+              ) : (
+                <p className="mt-1 text-muted-foreground">
+                  Parsed {parsedMultiRanges.ranges.length} range(s).
+                </p>
+              )}
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={previewMultiRangeDelete}
+                  disabled={busy !== null || parsedMultiRanges.ranges.length === 0}
+                >
+                  Preview Multi-Delete
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={applyMultiRangeDelete}
+                  disabled={busy !== null || parsedMultiRanges.ranges.length === 0}
+                >
+                  Apply Multi-Delete
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Search + replace (document-scale)</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Input
+                  value={searchReplaceSearch}
+                  onChange={(event) => setSearchReplaceSearch(event.target.value)}
+                  placeholder="Find"
+                />
+                <Input
+                  value={searchReplaceReplace}
+                  onChange={(event) => setSearchReplaceReplace(event.target.value)}
+                  placeholder="Replace with"
+                />
+              </div>
+              <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                <Input
+                  value={searchReplaceMaxSegments}
+                  onChange={(event) => setSearchReplaceMaxSegments(event.target.value)}
+                  placeholder="Max segments"
+                />
+                <Button
+                  size="sm"
+                  variant={searchReplaceCaseSensitive ? "secondary" : "outline"}
+                  onClick={() => setSearchReplaceCaseSensitive((previous) => !previous)}
+                >
+                  {searchReplaceCaseSensitive ? "Case sensitive" : "Case insensitive"}
+                </Button>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button size="sm" variant="secondary" onClick={previewSearchReplace} disabled={busy !== null}>
+                  Preview Replace
+                </Button>
+                <Button size="sm" onClick={applySearchReplace} disabled={busy !== null}>
+                  Apply Replace
+                </Button>
+              </div>
+              {searchReplaceResult ? (
+                <div className="mt-2 rounded border p-2 text-muted-foreground">
+                  <p>
+                    Matched {searchReplaceResult.affectedSegments} segment(s) • mode {searchReplaceResult.mode}
+                  </p>
+                  {searchReplaceResult.checkpoint ? (
+                    <p>Checkpoint {searchReplaceResult.checkpoint.label}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Speaker rail</p>
+              <div className="mt-2 max-h-[140px] space-y-1 overflow-y-auto">
+                {speakerRail.map((entry) => (
+                  <button
+                    key={entry.speakerLabel}
+                    type="button"
+                    className="w-full rounded border px-2 py-1 text-left hover:bg-muted"
+                    onClick={() => focusSpeaker(entry.speakerLabel, entry.firstSegmentId)}
+                  >
+                    <p className="font-medium">{entry.speakerLabel}</p>
+                    <p className="text-muted-foreground">
+                      {entry.segmentCount} segment(s) • {formatMs(entry.totalDurationMs)} • conf {entry.averageConfidence.toFixed(2)}
+                    </p>
+                  </button>
+                ))}
+                {speakerRail.length === 0 ? <p className="text-muted-foreground">No speaker data available.</p> : null}
+              </div>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Transcript checkpoints</p>
+              <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                <Input
+                  value={checkpointLabelDraft}
+                  onChange={(event) => setCheckpointLabelDraft(event.target.value)}
+                  placeholder="Checkpoint label (optional)"
+                />
+                <Button size="sm" onClick={createCheckpointFromDraft} disabled={busy !== null}>
+                  Create
+                </Button>
+              </div>
+              <div className="mt-2 grid grid-cols-[1fr_auto_auto] gap-2">
+                <select
+                  value={selectedCheckpointId}
+                  onChange={(event) => setSelectedCheckpointId(event.target.value)}
+                  className="h-8 rounded-md border bg-background px-2 text-xs"
+                >
+                  <option value="">Select checkpoint</option>
+                  {transcriptCheckpoints.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </select>
+                <Button size="sm" variant="secondary" onClick={() => void loadTranscriptDocumentState()} disabled={busy !== null}>
+                  Refresh
+                </Button>
+                <Button size="sm" variant="destructive" onClick={restoreSelectedCheckpoint} disabled={busy !== null || !selectedCheckpointId}>
+                  Restore
+                </Button>
+              </div>
+              <p className="mt-1 text-muted-foreground">Total {transcriptCheckpoints.length} checkpoint(s).</p>
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Conflict resolution queue ({transcriptConflicts.length})</p>
+              <div className="mt-2 max-h-[130px] space-y-1 overflow-y-auto">
+                {transcriptConflicts.slice(0, 50).map((issue) => (
+                  <div key={issue.id} className="rounded border px-2 py-1">
+                    <p className="font-medium">
+                      [{issue.severity}] {issue.issueType}
+                    </p>
+                    <p className="text-muted-foreground">{issue.message}</p>
+                    {issue.checkpointLabel ? (
+                      <p className="text-muted-foreground">Checkpoint: {issue.checkpointLabel}</p>
+                    ) : null}
+                  </div>
+                ))}
+                {transcriptConflicts.length === 0 ? (
+                  <p className="text-muted-foreground">No persisted transcript conflicts.</p>
+                ) : null}
+              </div>
             </div>
 
             <div className="rounded-md border p-2 text-xs">

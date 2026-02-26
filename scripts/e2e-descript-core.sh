@@ -175,6 +175,42 @@ range_apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
 range_apply_mode=$(echo "$range_apply_resp" | jq -r ".mode")
 [ "$range_apply_mode" = "APPLY" ]
 
+search_replace_preview_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/search-replace/preview" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","search":"demo","replace":"sample","caseSensitive":false,"maxSegments":100}')
+search_replace_preview_mode=$(echo "$search_replace_preview_resp" | jq -r ".mode")
+[ "$search_replace_preview_mode" = "PREVIEW" ]
+
+search_replace_apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/search-replace/apply" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","search":"demo","replace":"sample","caseSensitive":false,"maxSegments":100}')
+search_replace_apply_mode=$(echo "$search_replace_apply_resp" | jq -r ".mode")
+search_replace_checkpoint_id=$(echo "$search_replace_apply_resp" | jq -r ".checkpoint.id")
+[ "$search_replace_apply_mode" = "APPLY" ]
+[ -n "$search_replace_checkpoint_id" ] && [ "$search_replace_checkpoint_id" != "null" ]
+
+checkpoint_create_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/checkpoints/create" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","label":"e2e-manual-checkpoint"}')
+manual_checkpoint_id=$(echo "$checkpoint_create_resp" | jq -r ".checkpoint.id")
+[ -n "$manual_checkpoint_id" ] && [ "$manual_checkpoint_id" != "null" ]
+
+checkpoint_list_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/transcript/checkpoints?language=en")
+checkpoint_count=$(echo "$checkpoint_list_resp" | jq -r ".checkpoints | length")
+[ "$checkpoint_count" -ge 1 ]
+
+checkpoint_restore_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/transcript/checkpoints/$manual_checkpoint_id/restore")
+checkpoint_restored=$(echo "$checkpoint_restore_resp" | jq -r ".restored")
+[ "$checkpoint_restored" = "true" ]
+
+conflicts_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/transcript/conflicts?language=en&limit=120")
+conflicts_total=$(echo "$conflicts_resp" | jq -r ".totalConflicts")
+[ "$conflicts_total" -ge 0 ]
+
 speaker_batch_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/transcript/speakers/batch" \
   -H "Content-Type: application/json" \
@@ -185,7 +221,7 @@ speaker_batch_affected=$(echo "$speaker_batch_resp" | jq -r ".affectedSegments")
 issues_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/transcript/issues?language=en&minConfidence=0.86&limit=200")
 issues_total=$(echo "$issues_resp" | jq -r ".totalIssues")
 [ "$issues_total" -ge 0 ]
-echo "range_ops_ok=true speaker_batch_affected=$speaker_batch_affected transcript_issues=$issues_total"
+echo "range_ops_ok=true speaker_batch_affected=$speaker_batch_affected transcript_issues=$issues_total checkpoint_count=$checkpoint_count conflicts_total=$conflicts_total"
 
 audio_analysis_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/audio/analysis?language=en&maxCandidates=60&maxConfidence=0.92")
 audio_tracks=$(echo "$audio_analysis_resp" | jq -r ".analysis.audioTrackCount")

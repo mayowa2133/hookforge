@@ -19,6 +19,7 @@ import {
   getProjectV2,
   getProjectV2AudioAnalysis,
   getProjectV2ChatSessions,
+  getTranscriptConflicts,
   getOpenCutMetrics,
   getProjectV2RevisionGraph,
   importProjectV2Media,
@@ -35,16 +36,19 @@ import {
   planProjectV2ChatEdit,
   applyProjectV2Preset,
   applyTranscriptRangeDelete,
+  applyTranscriptSearchReplace,
   batchSetTranscriptSpeaker,
   cancelProjectV2RecordingSession,
   createProjectV2StudioRoom,
   finalizeProjectV2RecordingSession,
   getProjectV2StudioRoom,
+  listTranscriptCheckpoints,
   startRender,
   submitProjectV2ReviewDecision,
   issueProjectV2StudioJoinToken,
   listProjectV2StudioRooms,
   recoverProjectV2RecordingSession,
+  restoreTranscriptCheckpoint,
   startProjectV2RecordingSession,
   startProjectV2StudioRecording,
   stopProjectV2StudioRecording,
@@ -54,7 +58,9 @@ import {
   undoProjectV2ChatEdit,
   updateProjectV2ReviewCommentStatus,
   postProjectV2RecordingChunk,
-  getProjectV2RecordingSession
+  getProjectV2RecordingSession,
+  previewTranscriptSearchReplace,
+  createTranscriptCheckpoint
 } from "@/lib/opencut/hookforge-client";
 
 function mockResponse(body: unknown, ok = true, status = 200) {
@@ -393,6 +399,164 @@ describe("opencut hookforge client", () => {
       "/api/projects-v2/pv2_4/transcript/issues?language=en&minConfidence=0.86&limit=200",
       undefined
     );
+  });
+
+  it("supports transcript search-replace, checkpoints, and conflict queue endpoints", async () => {
+    const now = new Date().toISOString();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "PREVIEW",
+          query: {
+            search: "hook",
+            replace: "intro",
+            caseSensitive: false
+          },
+          affectedSegments: 2,
+          matches: [
+            {
+              segmentId: "seg_1",
+              before: "great hook",
+              after: "great intro",
+              startMs: 0,
+              endMs: 800,
+              confidenceAvg: 0.9
+            }
+          ],
+          applied: false,
+          suggestionsOnly: false,
+          revisionId: null,
+          issues: [],
+          timelineOps: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          mode: "APPLY",
+          checkpoint: {
+            id: "ckpt_1",
+            language: "en",
+            label: "search-replace:hook",
+            createdAt: now
+          },
+          query: {
+            search: "hook",
+            replace: "intro",
+            caseSensitive: false
+          },
+          affectedSegments: 2,
+          matches: [],
+          applied: true,
+          suggestionsOnly: false,
+          revisionId: "rev_30",
+          issues: [],
+          timelineOps: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          checkpoint: {
+            id: "ckpt_2",
+            language: "en",
+            label: "manual checkpoint",
+            createdAt: now
+          }
+        }, true, 201)
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_4",
+          checkpoints: [
+            {
+              id: "ckpt_2",
+              language: "en",
+              label: "manual checkpoint",
+              createdAt: now,
+              createdByUserId: "user_1"
+            }
+          ]
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          restored: true,
+          checkpointId: "ckpt_2",
+          revisionId: "rev_31",
+          language: "en",
+          restoredSegments: 3,
+          restoredWords: 24
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_4",
+          totalConflicts: 1,
+          conflicts: [
+            {
+              id: "conf_1",
+              issueType: "TIMING_DRIFT",
+              severity: "WARN",
+              message: "Timing drift detected.",
+              metadata: { issueCode: "timing" },
+              checkpointId: "ckpt_2",
+              checkpointLabel: "manual checkpoint",
+              createdAt: now
+            }
+          ]
+        })
+      );
+
+    const preview = await previewTranscriptSearchReplace("pv2_4", {
+      language: "en",
+      search: "hook",
+      replace: "intro"
+    });
+    const apply = await applyTranscriptSearchReplace("pv2_4", {
+      language: "en",
+      search: "hook",
+      replace: "intro"
+    });
+    const created = await createTranscriptCheckpoint("pv2_4", {
+      language: "en",
+      label: "manual checkpoint"
+    });
+    const checkpoints = await listTranscriptCheckpoints("pv2_4", "en");
+    const restored = await restoreTranscriptCheckpoint("pv2_4", "ckpt_2");
+    const conflicts = await getTranscriptConflicts("pv2_4", {
+      language: "en",
+      limit: 50
+    });
+
+    expect(preview.mode).toBe("PREVIEW");
+    expect(apply.mode).toBe("APPLY");
+    expect(created.checkpoint.id).toBe("ckpt_2");
+    expect(checkpoints.checkpoints).toHaveLength(1);
+    expect(restored.restored).toBe(true);
+    expect(conflicts.totalConflicts).toBe(1);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "/api/projects-v2/pv2_4/transcript/search-replace/preview",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects-v2/pv2_4/transcript/search-replace/apply",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects-v2/pv2_4/transcript/checkpoints/create",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(4, "/api/projects-v2/pv2_4/transcript/checkpoints?language=en", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      5,
+      "/api/projects-v2/pv2_4/transcript/checkpoints/ckpt_2/restore",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(6, "/api/projects-v2/pv2_4/transcript/conflicts?language=en&limit=50", undefined);
   });
 
   it("supports phase5 collaboration and export profile endpoints", async () => {

@@ -201,6 +201,7 @@ Implemented route handlers:
 - `POST /api/projects-v2/:id/transcript/ranges/apply` apply delete-range operation from word indices
 - `POST /api/projects-v2/:id/transcript/speakers/batch` batch speaker relabel with optional confidence filter
 - `GET /api/projects-v2/:id/transcript/issues` low-confidence/overlap/timing-drift issue queue
+- `GET /api/projects-v2/:id/transcript/conflicts` persisted checkpoint-linked transcript conflict queue
 - `POST /api/projects-v2/:id/transcript/ops/preview` transcript op preview (no destructive apply)
 - `POST /api/projects-v2/:id/transcript/ops/apply` transcript op apply path
 - `POST /api/projects-v2/:id/transcript/search-replace/preview` transcript search/replace preview

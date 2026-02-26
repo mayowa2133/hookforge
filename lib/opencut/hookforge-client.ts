@@ -183,6 +183,19 @@ type TranscriptSpeakerBatchRequest = {
   minConfidenceForRipple?: number;
 };
 
+type TranscriptSearchReplaceRequest = {
+  language?: string;
+  search: string;
+  replace: string;
+  caseSensitive?: boolean;
+  maxSegments?: number;
+};
+
+type TranscriptCheckpointCreateRequest = {
+  language?: string;
+  label?: string;
+};
+
 type AudioEnhanceRequest = {
   language?: string;
   preset: AudioEnhancementPreset;
@@ -812,6 +825,25 @@ export type TranscriptRangesPayload = {
   }>;
 };
 
+export type TranscriptDocumentSelection = {
+  language: string;
+  ranges: Array<{
+    startWordIndex: number;
+    endWordIndex: number;
+    startMs: number;
+    endMs: number;
+    textPreview: string;
+  }>;
+};
+
+export type TranscriptEditCheckpoint = {
+  id: string;
+  language: string;
+  label: string;
+  createdAt: string;
+  createdByUserId: string | null;
+};
+
 export type TranscriptOperationResult = {
   applied: boolean;
   suggestionsOnly: boolean;
@@ -848,6 +880,63 @@ export type TranscriptIssuesPayload = {
     TIMING_DRIFT: number;
   };
   issues: TranscriptIssue[];
+};
+
+export type TranscriptConflictIssue = {
+  id: string;
+  issueType: "LOW_CONFIDENCE" | "OVERLAP" | "TIMING_DRIFT";
+  severity: "INFO" | "WARN" | "HIGH" | "CRITICAL";
+  message: string;
+  metadata: unknown;
+  checkpointId: string | null;
+  checkpointLabel: string | null;
+  createdAt: string;
+};
+
+export type TranscriptConflictsPayload = {
+  projectId: string;
+  projectV2Id: string;
+  totalConflicts: number;
+  conflicts: TranscriptConflictIssue[];
+};
+
+export type TranscriptSearchReplacePayload = TranscriptOperationResult & {
+  mode: "PREVIEW" | "APPLY";
+  query: {
+    search: string;
+    replace: string;
+    caseSensitive: boolean;
+  };
+  affectedSegments: number;
+  matches: Array<{
+    segmentId: string;
+    before: string;
+    after: string;
+    startMs: number;
+    endMs: number;
+    confidenceAvg: number | null;
+  }>;
+  checkpoint?: {
+    id: string;
+    language: string;
+    label: string;
+    createdAt: string;
+  };
+};
+
+export type TranscriptCheckpointsPayload = {
+  projectId: string;
+  projectV2Id: string;
+  checkpoints: TranscriptEditCheckpoint[];
+};
+
+export type TranscriptCheckpointRestorePayload = {
+  restored: boolean;
+  checkpointId: string;
+  revisionId: string;
+  language: string;
+  restoredSegments: number;
+  restoredWords: number;
 };
 
 export type AudioAnalysisPayload = {
@@ -1281,6 +1370,34 @@ export async function getTranscriptIssues(projectV2Id: string, language: string,
   );
 }
 
+export async function getTranscriptConflicts(
+  projectV2Id: string,
+  params: {
+    language?: string;
+    issueType?: "LOW_CONFIDENCE" | "OVERLAP" | "TIMING_DRIFT";
+    severity?: "INFO" | "WARN" | "HIGH" | "CRITICAL";
+    limit?: number;
+  } = {}
+) {
+  const query = new URLSearchParams();
+  if (params.language) {
+    query.set("language", params.language);
+  }
+  if (params.issueType) {
+    query.set("issueType", params.issueType);
+  }
+  if (params.severity) {
+    query.set("severity", params.severity);
+  }
+  if (typeof params.limit === "number") {
+    query.set("limit", String(params.limit));
+  }
+  const suffix = query.toString();
+  return requestJson<TranscriptConflictsPayload>(
+    `/api/projects-v2/${projectV2Id}/transcript/conflicts${suffix ? `?${suffix}` : ""}`
+  );
+}
+
 export async function autoTranscript(projectV2Id: string, body: TranscriptAutoRequest) {
   return requestJson<{ aiJobId: string; status: string; trackId: string }>(`/api/projects-v2/${projectV2Id}/transcript/auto`, {
     method: "POST",
@@ -1322,6 +1439,48 @@ export async function batchSetTranscriptSpeaker(projectV2Id: string, body: Trans
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+}
+
+export async function previewTranscriptSearchReplace(projectV2Id: string, body: TranscriptSearchReplaceRequest) {
+  return requestJson<TranscriptSearchReplacePayload>(`/api/projects-v2/${projectV2Id}/transcript/search-replace/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function applyTranscriptSearchReplace(projectV2Id: string, body: TranscriptSearchReplaceRequest) {
+  return requestJson<TranscriptSearchReplacePayload>(`/api/projects-v2/${projectV2Id}/transcript/search-replace/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function createTranscriptCheckpoint(projectV2Id: string, body: TranscriptCheckpointCreateRequest = {}) {
+  return requestJson<{ checkpoint: { id: string; language: string; label: string; createdAt: string } }>(
+    `/api/projects-v2/${projectV2Id}/transcript/checkpoints/create`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+}
+
+export async function listTranscriptCheckpoints(projectV2Id: string, language?: string) {
+  return requestJson<TranscriptCheckpointsPayload>(
+    `/api/projects-v2/${projectV2Id}/transcript/checkpoints${language ? `?language=${encodeURIComponent(language)}` : ""}`
+  );
+}
+
+export async function restoreTranscriptCheckpoint(projectV2Id: string, checkpointId: string) {
+  return requestJson<TranscriptCheckpointRestorePayload>(
+    `/api/projects-v2/${projectV2Id}/transcript/checkpoints/${checkpointId}/restore`,
+    {
+      method: "POST"
+    }
+  );
 }
 
 export async function previewProjectV2AudioEnhancement(projectV2Id: string, body: AudioEnhanceRequest) {
