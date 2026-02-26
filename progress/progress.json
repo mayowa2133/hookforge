@@ -234,6 +234,18 @@
       "title": "Descript+ Phase 2 transcript-native long-form editing parity",
       "status": "DONE",
       "details": "Delivered document-scale transcript editing with multi-range delete preview/apply, search-replace preview/apply, checkpoint create/list/restore, speaker rail navigation, persisted conflict queue API/UI, and validated via unit + descript-core + full regression e2e chains"
+    },
+    {
+      "id": "descript_plus_phase3_audio_lab",
+      "title": "Descript+ Phase 3 audio lab and safety modes",
+      "status": "DONE",
+      "details": "Delivered projects-v2 audio analysis, preset preview/apply/undo, transcript-aware filler detection/removal, A/B segment audition, and confidence-aware safety modes with deterministic revision lineage and test coverage."
+    },
+    {
+      "id": "descript_plus_phase4_autopilot",
+      "title": "Descript+ Phase 4 AI co-editor autopilot",
+      "status": "DONE",
+      "details": "Implemented capability-specific planner packs + macro prompts, hash-gated apply with explicit decisions for APPLY_WITH_CONFIRM, replay route with lineage safeguards, enriched client contracts, and strengthened e2e coverage for plan/apply/undo/replay flows."
     }
   ]
 }

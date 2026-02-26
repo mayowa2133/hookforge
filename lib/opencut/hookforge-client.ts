@@ -254,6 +254,63 @@ type ChatEditUndoRequest = {
   lineageMode?: "latest" | "force";
 };
 
+export type AutopilotPlannerPack = "timeline" | "transcript" | "captions" | "audio" | "publishing";
+export type AutopilotMacroId =
+  | "tighten_pacing"
+  | "remove_filler_normalize_audio"
+  | "social_cut_from_range"
+  | "speaker_cleanup_chaptering";
+
+export type AutopilotMacroArgs = {
+  startMs?: number;
+  endMs?: number;
+  speakerLabel?: string;
+  chapterCount?: number;
+};
+
+export type AutopilotDiffGroup = {
+  group: "timeline" | "transcript" | "captions" | "audio" | "publishing";
+  title: string;
+  summary: string;
+  items: Array<{
+    id: string;
+    type: "operation" | "note";
+    label: string;
+    before?: string;
+    after?: string;
+    severity?: "INFO" | "WARN" | "ERROR";
+    operationIndex?: number;
+  }>;
+};
+
+type AutopilotPlanRequest = {
+  prompt?: string;
+  plannerPack?: AutopilotPlannerPack;
+  macroId?: AutopilotMacroId;
+  macroArgs?: AutopilotMacroArgs;
+  attachmentAssetIds?: string[];
+};
+
+type AutopilotApplyRequest = {
+  sessionId: string;
+  planRevisionHash: string;
+  confirmed: true;
+  operationDecisions?: ChatPlanOperationDecision[];
+};
+
+type AutopilotUndoRequest = {
+  sessionId?: string;
+  undoToken: string;
+  force?: boolean;
+};
+
+type AutopilotReplayRequest = {
+  sessionId: string;
+  confirmed: true;
+  applyImmediately?: boolean;
+  reuseOperationDecisions?: boolean;
+};
+
 type AssetPresignRequest = {
   slotKey: string;
   fileName: string;
@@ -713,6 +770,70 @@ export type ChatPlanResponse = {
     message: string;
     severity: "INFO" | "WARN" | "ERROR";
   }>;
+};
+
+export type AutopilotPlanResponse = {
+  sessionId: string;
+  planId: string;
+  planRevisionHash: string;
+  safetyMode: ChatSafetyMode;
+  confidence: number;
+  plannerPack: AutopilotPlannerPack;
+  macroId: AutopilotMacroId | null;
+  macroLabel: string | null;
+  confidenceRationale: ChatConfidenceRationale;
+  diffGroups: AutopilotDiffGroup[];
+  opsPreview: Array<{ op: string; [key: string]: unknown }>;
+  constrainedSuggestions: Array<{
+    id: string;
+    title: string;
+    prompt: string;
+    reason: string;
+  }>;
+};
+
+export type AutopilotApplyResponse = ChatApplyResponse & {
+  sessionId: string;
+};
+
+export type AutopilotUndoResponse = {
+  restored: boolean;
+  appliedRevisionId: string;
+};
+
+export type AutopilotReplayResponse = {
+  replayedFromSessionId: string;
+  newSessionId: string;
+  applied: boolean;
+  requiresExplicitDecisions: boolean;
+  plan: AutopilotPlanResponse;
+  applyResult?: AutopilotApplyResponse;
+};
+
+export type AutopilotSessionsPayload = {
+  projectId: string;
+  projectV2Id: string;
+  sessions: Array<{
+    id: string;
+    prompt: string;
+    sourcePlanId: string | null;
+    planRevisionHash: string;
+    safetyMode: string;
+    confidence: number | null;
+    status: "SUCCESS" | "FAILED" | "SUGGESTIONS_ONLY";
+    metadata: unknown;
+    createdAt: string;
+    updatedAt: string;
+    actions: Array<{
+      id: string;
+      actionType: "PLAN" | "APPLY" | "UNDO";
+      status: "SUCCESS" | "FAILED" | "SUGGESTIONS_ONLY";
+      payload: unknown;
+      errorMessage: string | null;
+      createdAt: string;
+    }>;
+  }>;
+  linkedChatSessions: ChatSessionSummaryPayload["sessions"];
 };
 
 export type ChatApplyResponse = {
@@ -1774,6 +1895,42 @@ export async function getProjectV2ChatSessions(projectIdOrV2Id: string, limit = 
 
 export async function getProjectV2RevisionGraph(projectIdOrV2Id: string, limit = 200) {
   return requestJson<RevisionGraphPayload>(`/api/projects-v2/${projectIdOrV2Id}/revisions/graph?limit=${limit}`);
+}
+
+export async function planProjectV2Autopilot(projectIdOrV2Id: string, body: AutopilotPlanRequest) {
+  return requestJson<AutopilotPlanResponse>(`/api/projects-v2/${projectIdOrV2Id}/autopilot/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function applyProjectV2Autopilot(projectIdOrV2Id: string, body: AutopilotApplyRequest) {
+  return requestJson<AutopilotApplyResponse>(`/api/projects-v2/${projectIdOrV2Id}/autopilot/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function undoProjectV2Autopilot(projectIdOrV2Id: string, body: AutopilotUndoRequest) {
+  return requestJson<AutopilotUndoResponse>(`/api/projects-v2/${projectIdOrV2Id}/autopilot/undo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function replayProjectV2Autopilot(projectIdOrV2Id: string, body: AutopilotReplayRequest) {
+  return requestJson<AutopilotReplayResponse>(`/api/projects-v2/${projectIdOrV2Id}/autopilot/replay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2AutopilotSessions(projectIdOrV2Id: string, limit = 30) {
+  return requestJson<AutopilotSessionsPayload>(`/api/projects-v2/${projectIdOrV2Id}/autopilot/sessions?limit=${limit}`);
 }
 
 export async function getProjectV2EditorState(projectIdOrV2Id: string) {

@@ -73,15 +73,50 @@ recovery_status=$(echo "$recovery_resp" | jq -r ".status")
 autopilot_plan=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/autopilot/plan" \
   -H "Content-Type: application/json" \
-  -d '{"prompt":"tighten pacing and improve intro hook"}')
+  -d '{"macroId":"tighten_pacing","plannerPack":"timeline"}')
 autopilot_session_id=$(echo "$autopilot_plan" | jq -r ".sessionId")
 autopilot_plan_hash=$(echo "$autopilot_plan" | jq -r ".planRevisionHash")
 [ -n "$autopilot_session_id" ] && [ "$autopilot_session_id" != "null" ]
 [ -n "$autopilot_plan_hash" ] && [ "$autopilot_plan_hash" != "null" ]
+autopilot_safety_mode=$(echo "$autopilot_plan" | jq -r ".safetyMode")
+autopilot_ops=$(echo "$autopilot_plan" | jq -c '.diffGroups[]? | select(.group=="timeline") | .items | map(select(.type=="operation") | {itemId: .id, accepted: true})')
+if [ -z "$autopilot_ops" ] || [ "$autopilot_ops" = "null" ]; then
+  autopilot_ops="[]"
+fi
+
+autopilot_apply=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/autopilot/apply" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -cn --arg session "$autopilot_session_id" --arg hash "$autopilot_plan_hash" --argjson decisions "$autopilot_ops" '{sessionId:$session, planRevisionHash:$hash, confirmed:true, operationDecisions:$decisions}')")
+autopilot_apply_suggestions=$(echo "$autopilot_apply" | jq -r ".suggestionsOnly")
+autopilot_undo_token=$(echo "$autopilot_apply" | jq -r ".undoToken")
+if [ "$autopilot_apply_suggestions" = "false" ]; then
+  [ "$autopilot_undo_token" != "null" ]
+  autopilot_undo=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+    -X POST "$BASE/api/projects-v2/$project_id/autopilot/undo" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -cn --arg session "$autopilot_session_id" --arg undo "$autopilot_undo_token" '{sessionId:$session, undoToken:$undo}')")
+  undo_restored=$(echo "$autopilot_undo" | jq -r ".restored")
+  [ "$undo_restored" = "true" ]
+fi
+
+autopilot_replay=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/autopilot/replay" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -cn --arg session "$autopilot_session_id" '{sessionId:$session, confirmed:true, applyImmediately:false, reuseOperationDecisions:true}')")
+replayed_from=$(echo "$autopilot_replay" | jq -r ".replayedFromSessionId")
+new_session_id=$(echo "$autopilot_replay" | jq -r ".newSessionId")
+[ "$replayed_from" = "$autopilot_session_id" ]
+[ -n "$new_session_id" ] && [ "$new_session_id" != "null" ]
+
+if [ "$autopilot_safety_mode" = "APPLY_WITH_CONFIRM" ]; then
+  require_confirm=$(echo "$autopilot_plan" | jq -r '.diffGroups[]? | select(.group=="timeline") | .items | map(select(.type=="operation")) | length')
+  [ "$require_confirm" -ge 0 ]
+fi
 
 autopilot_sessions=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/autopilot/sessions")
 autopilot_count=$(echo "$autopilot_sessions" | jq -r '.sessions | length')
-[ "$autopilot_count" -ge 1 ]
+[ "$autopilot_count" -ge 2 ]
 
 review_request=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/review/requests" \

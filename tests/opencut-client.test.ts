@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyProjectV2ExportProfile,
   applyProjectV2AudioEnhancement,
+  applyProjectV2Autopilot,
   applyTranscriptOps,
   applyProjectV2ChatEdit,
   applyProjectV2FillerRemoval,
@@ -23,6 +24,7 @@ import {
   getTranscriptConflicts,
   getOpenCutMetrics,
   getProjectV2RevisionGraph,
+  getProjectV2AutopilotSessions,
   importProjectV2Media,
   getTranscriptIssues,
   getTranscriptRanges,
@@ -35,6 +37,7 @@ import {
   registerProjectV2Media,
   searchTranscript,
   planProjectV2ChatEdit,
+  planProjectV2Autopilot,
   applyProjectV2Preset,
   applyTranscriptRangeDelete,
   applyTranscriptSearchReplace,
@@ -56,12 +59,14 @@ import {
   trackOpenCutTelemetry,
   trackDesktopEvent,
   undoProjectV2AudioEnhancement,
+  undoProjectV2Autopilot,
   undoProjectV2ChatEdit,
   updateProjectV2ReviewCommentStatus,
   postProjectV2RecordingChunk,
   getProjectV2RecordingSession,
   previewTranscriptSearchReplace,
-  createTranscriptCheckpoint
+  createTranscriptCheckpoint,
+  replayProjectV2Autopilot
 } from "@/lib/opencut/hookforge-client";
 
 function mockResponse(body: unknown, ok = true, status = 200) {
@@ -1561,5 +1566,166 @@ describe("opencut hookforge client", () => {
     const payload = await getOpenCutMetrics(24);
     expect(payload.windowHours).toBe(24);
     expect(fetchSpy).toHaveBeenCalledWith("/api/opencut/metrics?windowHours=24", undefined);
+  });
+
+  it("supports autopilot plan/apply/undo/replay/session endpoints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          sessionId: "auto_sess_1",
+          planId: "ai_job_1",
+          planRevisionHash: "hash_123456789",
+          safetyMode: "APPLY_WITH_CONFIRM",
+          confidence: 0.77,
+          plannerPack: "timeline",
+          macroId: "tighten_pacing",
+          macroLabel: "Tighten Pacing",
+          confidenceRationale: {
+            averageConfidence: 0.77,
+            validPlanRate: 98.4,
+            lowConfidence: false,
+            reasons: [],
+            fallbackReason: null
+          },
+          diffGroups: [
+            {
+              group: "timeline",
+              title: "Timeline Changes",
+              summary: "2 operation(s) planned",
+              items: [
+                { id: "timeline-op-1", type: "operation", label: "1. Split Clip", operationIndex: 0 },
+                { id: "timeline-op-2", type: "operation", label: "2. Trim Clip", operationIndex: 1 }
+              ]
+            }
+          ],
+          opsPreview: [{ op: "split_clip" }, { op: "trim_clip" }],
+          constrainedSuggestions: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          sessionId: "auto_sess_1",
+          applied: true,
+          suggestionsOnly: false,
+          issues: [],
+          revisionId: "rev_99",
+          undoToken: "undo_99",
+          selectedOperationCount: 2,
+          totalOperationCount: 2
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          restored: true,
+          appliedRevisionId: "rev_98"
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          replayedFromSessionId: "auto_sess_1",
+          newSessionId: "auto_sess_2",
+          applied: false,
+          requiresExplicitDecisions: true,
+          plan: {
+            sessionId: "auto_sess_2",
+            planId: "ai_job_2",
+            planRevisionHash: "hash_987654321",
+            safetyMode: "APPLY_WITH_CONFIRM",
+            confidence: 0.75,
+            plannerPack: "timeline",
+            macroId: "tighten_pacing",
+            macroLabel: "Tighten Pacing",
+            confidenceRationale: {
+              averageConfidence: 0.75,
+              validPlanRate: 96.2,
+              lowConfidence: false,
+              reasons: [],
+              fallbackReason: null
+            },
+            diffGroups: [],
+            opsPreview: [],
+            constrainedSuggestions: []
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_11",
+          projectV2Id: "pv2_11",
+          sessions: [
+            {
+              id: "auto_sess_1",
+              prompt: "tighten pacing",
+              sourcePlanId: "ai_job_1",
+              planRevisionHash: "hash_123456789",
+              safetyMode: "APPLY_WITH_CONFIRM",
+              confidence: 0.77,
+              status: "SUCCESS",
+              metadata: {},
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              actions: []
+            }
+          ],
+          linkedChatSessions: []
+        })
+      );
+
+    const plan = await planProjectV2Autopilot("pv2_11", {
+      macroId: "tighten_pacing",
+      plannerPack: "timeline"
+    });
+    const apply = await applyProjectV2Autopilot("pv2_11", {
+      sessionId: "auto_sess_1",
+      planRevisionHash: "hash_123456789",
+      confirmed: true,
+      operationDecisions: [
+        { itemId: "timeline-op-1", accepted: true },
+        { itemId: "timeline-op-2", accepted: true }
+      ]
+    });
+    const undo = await undoProjectV2Autopilot("pv2_11", {
+      sessionId: "auto_sess_1",
+      undoToken: "undo_99"
+    });
+    const replay = await replayProjectV2Autopilot("pv2_11", {
+      sessionId: "auto_sess_1",
+      confirmed: true,
+      applyImmediately: true,
+      reuseOperationDecisions: true
+    });
+    const sessions = await getProjectV2AutopilotSessions("pv2_11", 25);
+
+    expect(plan.sessionId).toBe("auto_sess_1");
+    expect(apply.applied).toBe(true);
+    expect(undo.restored).toBe(true);
+    expect(replay.newSessionId).toBe("auto_sess_2");
+    expect(sessions.sessions.length).toBe(1);
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "/api/projects-v2/pv2_11/autopilot/plan",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects-v2/pv2_11/autopilot/apply",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects-v2/pv2_11/autopilot/undo",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
+      "/api/projects-v2/pv2_11/autopilot/replay",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      5,
+      "/api/projects-v2/pv2_11/autopilot/sessions?limit=25",
+      undefined
+    );
   });
 });

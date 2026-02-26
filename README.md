@@ -187,6 +187,7 @@ Implemented route handlers:
 - `POST /api/projects-v2/:id/autopilot/plan` create scoped autopilot plan with grouped diffs/confidence rationale
 - `POST /api/projects-v2/:id/autopilot/apply` apply autopilot plan using hash-gated payload and optional op decisions
 - `POST /api/projects-v2/:id/autopilot/undo` undo autopilot apply with lineage guardrails
+- `POST /api/projects-v2/:id/autopilot/replay` replay prior autopilot session with optional immediate apply
 - `GET /api/projects-v2/:id/autopilot/sessions` list autopilot sessions and actions
 - `POST /api/projects-v2/:id/render/final` enqueue final render for v2 project
 - `GET /api/projects/:id` fetch project + assets
@@ -302,6 +303,12 @@ Descript+ program validation commands:
 - `pnpm test:e2e:descript-plus`
 - `pnpm quality:parity-gate`
 - baseline report artifact: `progress/DESCRIPT_PLUS_BASELINE_REPORT.md`
+
+Autopilot Phase 4 highlights:
+
+- Planner packs: `timeline`, `transcript`, `captions`, `audio`, `publishing`
+- Macro shortcuts: `tighten_pacing`, `remove_filler_normalize_audio`, `social_cut_from_range`, `speaker_cleanup_chaptering`
+- Replay flow: `POST /api/projects-v2/:id/autopilot/replay` supports safe re-plan and optional immediate apply with lineage safeguards
 
 Public API scaffold:
 
