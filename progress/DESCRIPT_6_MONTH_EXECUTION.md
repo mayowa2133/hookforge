@@ -11,7 +11,7 @@ Last updated: 2026-02-26
 - Phase 1 (Weeks 1-4) Recording Core + Ingest Reliability: `DONE`
 - Phase 2 (Weeks 5-8) Transcript-First Editing at Scale: `DONE`
 - Phase 3 (Weeks 9-12) Audio Quality Stack: `DONE`
-- Phase 4 (Weeks 13-16) Chat Co-Editor V2: `IN_PROGRESS`
+- Phase 4 (Weeks 13-16) Chat Co-Editor V2: `DONE`
 - Phase 5 (Weeks 17-20) Collaboration/Review/Publishing: `TODO`
 - Phase 6 (Weeks 21-24) Desktop Shell + Hard Cutover: `TODO`
 
@@ -35,6 +35,12 @@ Last updated: 2026-02-26
   - `/api/projects-v2/:id/audio/enhance/undo`
   - `/api/projects-v2/:id/audio/filler/preview`
   - `/api/projects-v2/:id/audio/filler/apply`
+- Chat Co-Editor V2 APIs:
+  - `/api/projects-v2/:id/chat/plan`
+  - `/api/projects-v2/:id/chat/apply`
+  - `/api/projects-v2/:id/chat/undo`
+  - `/api/projects-v2/:id/chat/sessions`
+  - `/api/projects-v2/:id/revisions/graph`
 - Recording-first editor UX:
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/components/editor/opencut-transcript-shell.tsx`
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/components/dashboard/create-recording-project-button.tsx`
@@ -42,6 +48,11 @@ Last updated: 2026-02-26
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/lib/audio/phase3.ts`
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/lib/audio/schemas.ts`
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/app/api/projects-v2/[id]/audio/*`
+- Chat V2 implementation:
+  - `/Users/mayowaadesanya/Documents/Projects/hookforge/lib/chat-v2.ts`
+  - `/Users/mayowaadesanya/Documents/Projects/hookforge/lib/chat-v2-tools.ts`
+  - `/Users/mayowaadesanya/Documents/Projects/hookforge/app/api/projects-v2/[id]/chat/*`
+  - `/Users/mayowaadesanya/Documents/Projects/hookforge/app/api/projects-v2/[id]/revisions/graph/route.ts`
 - Regression harness:
   - `/Users/mayowaadesanya/Documents/Projects/hookforge/scripts/e2e-descript-core.sh`
   - `pnpm test:e2e:descript-core`

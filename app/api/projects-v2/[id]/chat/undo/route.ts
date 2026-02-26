@@ -10,13 +10,15 @@ type Context = {
 
 const UndoSchema = z.object({
   undoToken: z.string().min(8),
-  force: z.boolean().optional()
+  force: z.boolean().optional(),
+  lineageMode: z.enum(["latest", "force"]).optional()
 });
 
 export async function POST(request: Request, { params }: Context) {
   try {
     const body = UndoSchema.parse(await request.json());
-    return jsonOk(await undoChatPlanApplyWithMode(params.id, body.undoToken, Boolean(body.force)));
+    const force = body.lineageMode === "force" || Boolean(body.force);
+    return jsonOk(await undoChatPlanApplyWithMode(params.id, body.undoToken, force));
   } catch (error) {
     return routeErrorToResponse(error);
   }

@@ -88,6 +88,8 @@ export async function GET(_request: Request, { params }: Context) {
         }),
         hasLegacyBridge: Boolean(legacyProject),
         supportsChatPlanApply: true,
+        supportsChatSessions: true,
+        supportsRevisionGraph: true,
         supportsFreeformRender: true,
         legacyProject
       }

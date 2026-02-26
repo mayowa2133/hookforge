@@ -524,6 +524,36 @@ Validation:
 - `pnpm test:e2e:descript-core`
 - `pnpm test:e2e:phase01234567-enterprise`
 
+## Descript 6-Month Phase 4 Chat Co-Editor V2 (Implemented)
+
+Implemented on `/opencut/projects-v2/[id]` and projects-v2 APIs:
+
+- Structured plan payload:
+  - grouped diffs across `timeline`, `transcript`, `captions`, and `audio`
+  - safety mode classification (`APPLIED`, `APPLY_WITH_CONFIRM`, `SUGGESTIONS_ONLY`)
+  - confidence rationale (average confidence, valid plan rate, reasons, fallback reason)
+- Selective apply contract:
+  - `POST /api/projects-v2/:id/chat/apply` now supports per-operation decisions:
+    - `operationDecisions: [{ itemId, accepted }]`
+  - strict `planRevisionHash` gating retained
+  - apply returns selected/total operation counts
+- Lineage and visibility:
+  - `POST /api/projects-v2/:id/chat/undo` supports lineage mode (`latest` or `force`)
+  - `GET /api/projects-v2/:id/chat/sessions` for plan/apply history
+  - `GET /api/projects-v2/:id/revisions/graph` for revision lineage graph
+- UI integration:
+  - OpenCut shell supports operation-by-operation toggles before apply
+  - chat sessions summary and revision lineage panel rendered in editor
+  - apply button enforces at least one selected operation on applied plans
+
+Validation:
+
+- `pnpm test`
+- `pnpm test:e2e:descript-core`
+- `pnpm test:e2e:freeform`
+- `pnpm test:e2e:slice12`
+- `pnpm test:e2e:phase01234567-enterprise`
+
 ## Freeform + Chat-First Cutover (Implemented)
 
 Implemented:

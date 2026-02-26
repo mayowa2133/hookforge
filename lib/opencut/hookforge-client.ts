@@ -226,11 +226,13 @@ type ChatApplyRequest = {
   planId: string;
   planRevisionHash: string;
   confirmed: true;
+  operationDecisions?: ChatPlanOperationDecision[];
 };
 
 type ChatEditUndoRequest = {
   undoToken: string;
   force?: boolean;
+  lineageMode?: "latest" | "force";
 };
 
 type AssetPresignRequest = {
@@ -476,7 +478,7 @@ export type ChatEditUndoResponse = {
 };
 
 export type ChatPlanDiffGroup = {
-  group: "timeline" | "transcript" | "captions";
+  group: "timeline" | "transcript" | "captions" | "audio";
   title: string;
   summary: string;
   items: Array<{
@@ -486,7 +488,23 @@ export type ChatPlanDiffGroup = {
     before?: string;
     after?: string;
     severity?: "INFO" | "WARN" | "ERROR";
+    operationIndex?: number;
   }>;
+};
+
+export type ChatSafetyMode = "APPLIED" | "APPLY_WITH_CONFIRM" | "SUGGESTIONS_ONLY";
+
+export type ChatPlanOperationDecision = {
+  itemId: string;
+  accepted: boolean;
+};
+
+export type ChatConfidenceRationale = {
+  averageConfidence: number;
+  validPlanRate: number;
+  lowConfidence: boolean;
+  reasons: string[];
+  fallbackReason: string | null;
 };
 
 export type ChatPlanResponse = {
@@ -495,6 +513,8 @@ export type ChatPlanResponse = {
   confidence: number;
   requiresConfirmation: true;
   executionMode: "APPLIED" | "SUGGESTIONS_ONLY";
+  safetyMode: ChatSafetyMode;
+  confidenceRationale: ChatConfidenceRationale;
   opsPreview: Array<{
     op: string;
     [key: string]: unknown;
@@ -523,6 +543,48 @@ export type ChatApplyResponse = {
   }>;
   revisionId: string | null;
   undoToken: string | null;
+  selectedOperationCount?: number;
+  totalOperationCount?: number;
+};
+
+export type ChatSessionSummaryPayload = {
+  projectId: string;
+  projectV2Id: string;
+  sessions: Array<{
+    planId: string;
+    createdAt: string;
+    prompt: string;
+    executionMode: "APPLIED" | "SUGGESTIONS_ONLY";
+    confidence: number;
+    safetyMode: ChatSafetyMode;
+    planRevisionHash: string;
+    appliedRevisionId: string | null;
+    undoToken: string | null;
+    issueCount: number;
+    diffGroupCount: number;
+  }>;
+};
+
+export type RevisionGraphPayload = {
+  projectId: string;
+  projectV2Id: string;
+  currentRevisionId: string | null;
+  nodeCount: number;
+  edgeCount: number;
+  nodes: Array<{
+    revisionId: string;
+    revisionNumber: number;
+    source: string;
+    summary: string;
+    createdAt: string;
+    isCurrent: boolean;
+  }>;
+  edges: Array<{
+    fromRevisionId: string;
+    toRevisionId: string;
+    relation: "NEXT";
+    reason: string;
+  }>;
 };
 
 export type EditorStatePayload = {
@@ -1043,6 +1105,14 @@ export async function undoProjectV2ChatEdit(projectIdOrV2Id: string, body: ChatE
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+}
+
+export async function getProjectV2ChatSessions(projectIdOrV2Id: string, limit = 20) {
+  return requestJson<ChatSessionSummaryPayload>(`/api/projects-v2/${projectIdOrV2Id}/chat/sessions?limit=${limit}`);
+}
+
+export async function getProjectV2RevisionGraph(projectIdOrV2Id: string, limit = 200) {
+  return requestJson<RevisionGraphPayload>(`/api/projects-v2/${projectIdOrV2Id}/revisions/graph?limit=${limit}`);
 }
 
 export async function getProjectV2EditorState(projectIdOrV2Id: string) {

@@ -214,13 +214,30 @@ chat_plan_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -d '{"prompt":"split first clip and tighten intro pacing"}')
 plan_id=$(echo "$chat_plan_resp" | jq -r ".planId")
 plan_hash=$(echo "$chat_plan_resp" | jq -r ".planRevisionHash")
+safety_mode=$(echo "$chat_plan_resp" | jq -r ".safetyMode")
+selected_item_id=$(echo "$chat_plan_resp" | jq -r '.diffGroups[] | select(.group=="timeline") | .items[] | select(.type=="operation") | .id' | head -n 1)
 [ -n "$plan_id" ] && [ "$plan_id" != "null" ]
 [ -n "$plan_hash" ] && [ "$plan_hash" != "null" ]
+[ -n "$safety_mode" ] && [ "$safety_mode" != "null" ]
+[ -n "$selected_item_id" ] && [ "$selected_item_id" != "null" ]
+
+apply_body=$(jq -n \
+  --arg planId "$plan_id" \
+  --arg planRevisionHash "$plan_hash" \
+  --arg selectedItemId "$selected_item_id" \
+  '{
+    planId: $planId,
+    planRevisionHash: $planRevisionHash,
+    confirmed: true,
+    operationDecisions: [
+      { itemId: $selectedItemId, accepted: true }
+    ]
+  }')
 
 chat_apply_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/chat/apply" \
   -H "Content-Type: application/json" \
-  -d "$(printf '{"planId":"%s","planRevisionHash":"%s","confirmed":true}' "$plan_id" "$plan_hash")")
+  -d "$apply_body")
 undo_token=$(echo "$chat_apply_resp" | jq -r ".undoToken")
 applied=$(echo "$chat_apply_resp" | jq -r ".applied")
 [ "$applied" = "true" ]
@@ -229,9 +246,20 @@ applied=$(echo "$chat_apply_resp" | jq -r ".applied")
 chat_undo_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/chat/undo" \
   -H "Content-Type: application/json" \
-  -d "$(printf '{"undoToken":"%s"}' "$undo_token")")
+  -d "$(printf '{"undoToken":"%s","lineageMode":"latest"}' "$undo_token")")
 restored=$(echo "$chat_undo_resp" | jq -r ".restored")
 [ "$restored" = "true" ]
+
+chat_sessions_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/chat/sessions?limit=10")
+chat_sessions_count=$(echo "$chat_sessions_resp" | jq -r ".sessions | length")
+[ "$chat_sessions_count" -ge 1 ]
+
+revision_graph_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/revisions/graph?limit=50")
+revision_graph_nodes=$(echo "$revision_graph_resp" | jq -r ".nodeCount")
+revision_graph_edges=$(echo "$revision_graph_resp" | jq -r ".edgeCount")
+[ "$revision_graph_nodes" -ge 1 ]
+[ "$revision_graph_edges" -ge 0 ]
+echo "chat_phase4_ok=true safety_mode=$safety_mode sessions=$chat_sessions_count nodes=$revision_graph_nodes"
 
 render_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/render/final")

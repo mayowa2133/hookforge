@@ -10,7 +10,9 @@ import {
   getProjectV2Presets,
   getProjectV2,
   getProjectV2AudioAnalysis,
+  getProjectV2ChatSessions,
   getOpenCutMetrics,
+  getProjectV2RevisionGraph,
   importProjectV2Media,
   getTranscriptIssues,
   getTranscriptRanges,
@@ -780,9 +782,31 @@ describe("opencut hookforge client", () => {
         planRevisionHash: "hash_123456",
         confidence: 0.78,
         requiresConfirmation: true,
-        executionMode: "SUGGESTIONS_ONLY",
+        executionMode: "APPLIED",
+        safetyMode: "APPLY_WITH_CONFIRM",
+        confidenceRationale: {
+          averageConfidence: 0.78,
+          validPlanRate: 98,
+          lowConfidence: false,
+          reasons: ["Planner confidence medium"],
+          fallbackReason: null
+        },
         opsPreview: [],
-        diffGroups: [],
+        diffGroups: [
+          {
+            group: "timeline",
+            title: "Timeline Changes",
+            summary: "1 operation(s) planned",
+            items: [
+              {
+                id: "timeline-op-1",
+                type: "operation",
+                label: "1. Split",
+                operationIndex: 0
+              }
+            ]
+          }
+        ],
         constrainedSuggestions: [],
         issues: []
       })
@@ -792,6 +816,8 @@ describe("opencut hookforge client", () => {
       prompt: "tighten this section and remove dead air"
     });
     expect(payload.planId).toBe("plan_1");
+    expect(payload.safetyMode).toBe("APPLY_WITH_CONFIRM");
+    expect(payload.diffGroups[0]?.items[0]?.operationIndex).toBe(0);
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/projects-v2/pv2_7/chat/plan",
       expect.objectContaining({
@@ -807,14 +833,20 @@ describe("opencut hookforge client", () => {
         suggestionsOnly: false,
         issues: [],
         revisionId: "rev_1",
-        undoToken: "undo_1"
+        undoToken: "undo_1",
+        selectedOperationCount: 1,
+        totalOperationCount: 2
       })
     );
 
     const payload = await applyProjectV2ChatEdit("pv2_8", {
       planId: "plan_1",
       planRevisionHash: "hash_123456",
-      confirmed: true
+      confirmed: true,
+      operationDecisions: [
+        { itemId: "timeline-op-1", accepted: true },
+        { itemId: "timeline-op-2", accepted: false }
+      ]
     });
     expect(payload.applied).toBe(true);
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -833,7 +865,7 @@ describe("opencut hookforge client", () => {
       })
     );
 
-    const payload = await undoProjectV2ChatEdit("pv2_8", { undoToken: "token_12345678" });
+    const payload = await undoProjectV2ChatEdit("pv2_8", { undoToken: "token_12345678", lineageMode: "latest" });
     expect(payload.restored).toBe(true);
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/projects-v2/pv2_8/chat/undo",
@@ -841,6 +873,52 @@ describe("opencut hookforge client", () => {
         method: "POST"
       })
     );
+  });
+
+  it("fetches chat sessions through projects-v2 chat sessions endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        projectId: "legacy_10",
+        projectV2Id: "pv2_10",
+        sessions: [
+          {
+            planId: "plan_2",
+            createdAt: new Date().toISOString(),
+            prompt: "tighten pacing",
+            executionMode: "APPLIED",
+            confidence: 0.86,
+            safetyMode: "APPLIED",
+            planRevisionHash: "hash_plan_2",
+            appliedRevisionId: "rev_2",
+            undoToken: "undo_2",
+            issueCount: 0,
+            diffGroupCount: 4
+          }
+        ]
+      })
+    );
+
+    const payload = await getProjectV2ChatSessions("pv2_10", 25);
+    expect(payload.sessions.length).toBe(1);
+    expect(fetchSpy).toHaveBeenCalledWith("/api/projects-v2/pv2_10/chat/sessions?limit=25", undefined);
+  });
+
+  it("fetches revision graph through projects-v2 revisions graph endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockResponse({
+        projectId: "legacy_10",
+        projectV2Id: "pv2_10",
+        currentRevisionId: "rev_3",
+        nodeCount: 3,
+        edgeCount: 2,
+        nodes: [],
+        edges: []
+      })
+    );
+
+    const payload = await getProjectV2RevisionGraph("pv2_10", 120);
+    expect(payload.nodeCount).toBe(3);
+    expect(fetchSpy).toHaveBeenCalledWith("/api/projects-v2/pv2_10/revisions/graph?limit=120", undefined);
   });
 
   it("fetches editor state and presets and applies preset", async () => {

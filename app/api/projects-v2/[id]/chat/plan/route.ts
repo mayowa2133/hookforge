@@ -16,10 +16,12 @@ const ChatPlanSchema = z.object({
 export async function POST(request: Request, { params }: Context) {
   try {
     const body = ChatPlanSchema.parse(await request.json());
-    const { planJob, execution } = await createChatPlan(params.id, body.prompt, body.attachmentAssetIds ?? []);
+    const { planJob, execution, safetyMode, confidenceRationale } = await createChatPlan(params.id, body.prompt, body.attachmentAssetIds ?? []);
     const output = (planJob.output ?? {}) as {
       planRevisionHash?: string;
       diffGroups?: unknown;
+      safetyMode?: "APPLIED" | "APPLY_WITH_CONFIRM" | "SUGGESTIONS_ONLY";
+      confidenceRationale?: unknown;
     };
     const validationIssues = execution.planValidation.reasons.map((reason) => ({
       code: "PLAN_VALIDATION",
@@ -33,6 +35,8 @@ export async function POST(request: Request, { params }: Context) {
       confidence: execution.planValidation.averageConfidence,
       requiresConfirmation: true,
       executionMode: execution.executionMode,
+      safetyMode: output.safetyMode ?? safetyMode,
+      confidenceRationale: output.confidenceRationale ?? confidenceRationale,
       opsPreview: execution.appliedTimelineOperations,
       constrainedSuggestions: execution.constrainedSuggestions,
       diffGroups: Array.isArray(output.diffGroups) ? output.diffGroups : [],

@@ -173,7 +173,7 @@
       "id": "descript_6month_quality_program",
       "title": "Descript-first 6-month quality program",
       "status": "IN_PROGRESS",
-      "details": "Program launched with Descript-first interaction model: transcript primary, timeline precision layer, chat plan/apply/undo safety flow, and recording-first path wired through projects-v2 routes"
+      "details": "Program launched with Descript-first interaction model: transcript primary, timeline precision layer, and chat co-editor V2 with plan diff review, op-level decision apply, hash-gated apply, lineage-safe undo, sessions, and revision graph wired through projects-v2 routes"
     },
     {
       "id": "descript_phase1_recording_core",
@@ -192,6 +192,12 @@
       "title": "Phase 3 audio quality stack",
       "status": "DONE",
       "details": "Implemented projects-v2 audio analysis/enhance/filler preview+apply+undo APIs, persisted AudioEnhancementRun and FillerCandidate models, transcript-aware filler removal with safe timeline updates, OpenCut audio quality panel, and full validation via unit + descript-core + enterprise chain e2e"
+    },
+    {
+      "id": "descript_phase4_chat_editor_v2",
+      "title": "Phase 4 chat co-editor V2 trust and precision",
+      "status": "DONE",
+      "details": "Implemented structured chat diff groups including audio, safety mode + confidence rationale, per-operation decision toggles and selective apply, hash/version-gated apply payloads, lineage-aware undo modes, chat sessions endpoint, revision graph endpoint, OpenCut lineage/session UI surfaces, and full regression validation through descript-core/freeform/slice12/phase01234567-enterprise"
     }
   ]
 }

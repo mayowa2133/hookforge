@@ -20,10 +20,12 @@ import {
   cancelProjectV2RecordingSession,
   finalizeProjectV2RecordingSession,
   getAiJob,
+  getProjectV2ChatSessions,
   getProjectV2AudioAnalysis,
   getTranscriptIssues,
   getTranscriptRanges,
   getLegacyProject,
+  getProjectV2RevisionGraph,
   getProjectV2RecordingSession,
   getProjectV2EditorHealth,
   getRenderJob,
@@ -49,12 +51,15 @@ import {
   type AudioEnhancementPreset,
   type AudioFillerResultPayload,
   type ChatApplyResponse,
+  type ChatPlanOperationDecision,
   type ChatPlanResponse,
+  type ChatSessionSummaryPayload,
   type EditorHealthStatus,
   type LegacyProjectPayload,
   type RecordingMode,
   type TranscriptIssue,
   type TimelineOperation,
+  type RevisionGraphPayload,
   type TimelinePayload,
   type TranscriptPayload,
   type TranscriptRangeSelection
@@ -248,6 +253,9 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [chatApplyResult, setChatApplyResult] = useState<ChatApplyResponse | null>(null);
   const [chatUndoToken, setChatUndoToken] = useState<string | null>(null);
   const [chatUndoResult, setChatUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
+  const [chatOperationDecisions, setChatOperationDecisions] = useState<Record<string, boolean>>({});
+  const [chatSessions, setChatSessions] = useState<ChatSessionSummaryPayload["sessions"]>([]);
+  const [revisionGraph, setRevisionGraph] = useState<RevisionGraphPayload | null>(null);
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("SCREEN_CAMERA");
   const [isRecording, setIsRecording] = useState(false);
   const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
@@ -369,12 +377,21 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setAudioAnalysis(payload);
   }, [fillerMaxCandidates, fillerMaxConfidence, language, projectV2Id]);
 
+  const loadChatDiagnostics = useCallback(async () => {
+    const [sessionsPayload, graphPayload] = await Promise.all([
+      getProjectV2ChatSessions(projectV2Id, 20),
+      getProjectV2RevisionGraph(projectV2Id, 160)
+    ]);
+    setChatSessions(sessionsPayload.sessions);
+    setRevisionGraph(graphPayload);
+  }, [projectV2Id]);
+
   useEffect(() => {
     let canceled = false;
     const load = async () => {
       try {
         setPanelError(null);
-        await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+        await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
       } catch (error) {
         if (!canceled) {
           setPanelError(error instanceof Error ? error.message : "Failed to load editor surface");
@@ -385,7 +402,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     return () => {
       canceled = true;
     };
-  }, [loadAudioAnalysis, loadProjectSurface, loadTranscript]);
+  }, [loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript]);
 
   useEffect(() => {
     if (openedTelemetryRef.current) {
@@ -470,7 +487,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         const payload = await getAiJob(autoJobId);
         setAutoJobStatus({ status: payload.aiJob.status, progress: payload.aiJob.progress });
         if (payload.aiJob.status === "DONE") {
-          await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
+          await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics()]);
           appendHistory({
             label: "Transcript auto generation",
             detail: "Auto transcript completed",
@@ -494,7 +511,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       }
     }, 2200);
     return () => clearInterval(interval);
-  }, [appendHistory, autoJobId, loadAudioAnalysis, loadProjectSurface, loadTranscript]);
+  }, [appendHistory, autoJobId, loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript]);
 
   useEffect(() => {
     if (!renderJobId) {
@@ -582,7 +599,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         revisionId: payload.revisionId,
         revision: payload.revision
       });
-      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
+      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Timeline edit",
@@ -601,7 +618,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     } finally {
       setBusy(null);
     }
-  }, [appendHistory, loadAudioAnalysis, loadProjectSurface, loadTranscript, projectV2Id, timelineSelectionContext]);
+  }, [appendHistory, loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript, projectV2Id, timelineSelectionContext]);
 
   const runTranscriptPreview = useCallback(async (operations: Array<{
     op: "replace_text" | "split_segment" | "merge_segments" | "delete_range" | "set_speaker" | "normalize_punctuation";
@@ -651,7 +668,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setLastTranscriptPreview(payload);
-      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis()]);
+      await Promise.all([loadTranscript(), loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Transcript apply",
@@ -680,7 +697,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     } finally {
       setBusy(null);
     }
-  }, [appendHistory, language, loadAudioAnalysis, loadProjectSurface, loadTranscript, minConfidenceForRipple, projectV2Id]);
+  }, [appendHistory, language, loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript, minConfidenceForRipple, projectV2Id]);
 
   const transcriptRangeMs = useMemo(() => {
     const words = transcript?.words ?? [];
@@ -700,18 +717,27 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   }, [rangeSelection.endWordIndex, rangeSelection.startWordIndex, transcript?.words]);
 
   const chatConfidenceBand = useMemo(() => {
-    const score = chatPlan?.confidence ?? 0;
     if (!chatPlan) {
       return "N/A";
     }
-    if (chatPlan.executionMode === "SUGGESTIONS_ONLY" || score < 0.65) {
+    if (chatPlan.safetyMode === "SUGGESTIONS_ONLY") {
       return "Suggestions-only";
     }
-    if (score < 0.8) {
+    if (chatPlan.safetyMode === "APPLY_WITH_CONFIRM") {
       return "Apply-with-confirm";
     }
     return "Applied";
   }, [chatPlan]);
+
+  const selectedChatOperationCount = useMemo(
+    () => Object.values(chatOperationDecisions).filter(Boolean).length,
+    [chatOperationDecisions]
+  );
+
+  const totalSelectableChatOperations = useMemo(
+    () => Object.keys(chatOperationDecisions).length,
+    [chatOperationDecisions]
+  );
 
   const clipAtSelectedSegment = useMemo(() => {
     if (!selectedSegment) {
@@ -1021,7 +1047,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
           detail: "Uploaded using fallback single PUT path",
           status: "INFO"
         });
-        await Promise.all([loadProjectSurface(), loadAudioAnalysis()]);
+        await Promise.all([loadProjectSurface(), loadAudioAnalysis(), loadChatDiagnostics()]);
         return;
       }
 
@@ -1036,7 +1062,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         setAutoJobId(finalized.aiJobId);
         setAutoJobStatus({ status: "QUEUED", progress: 0 });
       }
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
       appendHistory({
         label: "Recording finalized",
         detail: finalized.aiJobId ? "Recording uploaded and transcription queued" : "Recording uploaded",
@@ -1054,7 +1080,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     } finally {
       setRecordingBusy(false);
     }
-  }, [appendHistory, language, loadAudioAnalysis, loadProjectSurface, loadTranscript, projectV2Id, uploadRecordingWithSinglePutFallback]);
+  }, [appendHistory, language, loadAudioAnalysis, loadChatDiagnostics, loadProjectSurface, loadTranscript, projectV2Id, uploadRecordingWithSinglePutFallback]);
 
   const startCaptureRecording = useCallback(async () => {
     if (isRecording || recordingBusy) {
@@ -1194,7 +1220,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setAudioApplyResult(payload);
       setAudioUndoToken(payload.undoToken);
       setAudioUndoResult(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Audio apply",
@@ -1228,7 +1254,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       const payload = await undoProjectV2AudioEnhancement(projectV2Id, audioUndoToken);
       setAudioUndoResult(payload);
       setAudioUndoToken(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Audio undo",
@@ -1298,7 +1324,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         minConfidenceForRipple
       });
       setFillerApplyResult(payload);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
       setAutosaveStatus("SAVED");
       appendHistory({
         label: "Filler apply",
@@ -1641,9 +1667,19 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
         prompt: chatPrompt.trim()
       });
       setChatPlan(plan);
+      const defaults: Record<string, boolean> = {};
+      for (const group of plan.diffGroups) {
+        for (const item of group.items) {
+          if (item.type === "operation" && typeof item.operationIndex === "number") {
+            defaults[item.id] = true;
+          }
+        }
+      }
+      setChatOperationDecisions(defaults);
+      await loadChatDiagnostics();
       appendHistory({
         label: "Chat plan",
-        detail: `Plan generated (${plan.executionMode}, confidence ${plan.confidence.toFixed(2)})`,
+        detail: `Plan generated (${plan.safetyMode}, confidence ${plan.confidence.toFixed(2)})`,
         status: "INFO"
       });
     } catch (error) {
@@ -1659,8 +1695,24 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }
   };
 
+  const toggleChatOperationDecision = (itemId: string) => {
+    setChatOperationDecisions((previous) => ({
+      ...previous,
+      [itemId]: !previous[itemId]
+    }));
+  };
+
   const applyChatPlan = async () => {
     if (!chatPlan || !chatPlan.planRevisionHash) {
+      return;
+    }
+    const operationDecisions: ChatPlanOperationDecision[] = Object.entries(chatOperationDecisions).map(([itemId, accepted]) => ({
+      itemId,
+      accepted
+    }));
+    const selectedCount = operationDecisions.filter((decision) => decision.accepted).length;
+    if (chatPlan.executionMode === "APPLIED" && selectedCount === 0) {
+      setPanelError("Select at least one planned operation before apply.");
       return;
     }
     setBusy("chat_apply");
@@ -1669,14 +1721,17 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       const result = await applyProjectV2ChatEdit(projectV2Id, {
         planId: chatPlan.planId,
         planRevisionHash: chatPlan.planRevisionHash,
-        confirmed: true
+        confirmed: true,
+        operationDecisions
       });
       setChatApplyResult(result);
       setChatUndoToken(result.undoToken);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
       appendHistory({
         label: "Chat apply",
-        detail: result.suggestionsOnly ? "Suggestions-only path; no destructive apply" : "Plan applied successfully",
+        detail: result.suggestionsOnly
+          ? "Suggestions-only path; no destructive apply"
+          : `Plan applied (${result.selectedOperationCount ?? selectedCount}/${result.totalOperationCount ?? selectedCount} ops)`,
         status: result.suggestionsOnly ? "INFO" : "SUCCESS"
       });
       void trackOpenCutTelemetry({
@@ -1722,7 +1777,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setChatUndoResult(response);
       setChatApplyResult(null);
       setChatUndoToken(null);
-      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()]);
+      await Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()]);
       appendHistory({
         label: "Chat undo",
         detail: `Restored revision ${response.appliedRevisionId.slice(0, 8)}`,
@@ -1847,7 +1902,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis()])}
+                  onClick={() => void Promise.all([loadProjectSurface(), loadTranscript(), loadAudioAnalysis(), loadChatDiagnostics()])}
                   disabled={busy !== null}
                 >
                   Refresh Project State
@@ -2361,7 +2416,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
             </div>
 
             <div className="rounded-md border p-2 text-xs">
-              <p className="font-semibold">Chat co-editor</p>
+              <p className="font-semibold">Chat co-editor (Plan -&gt; Review -&gt; Apply)</p>
               <Textarea
                 rows={3}
                 value={chatPrompt}
@@ -2372,7 +2427,16 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                 <Button size="sm" onClick={createChatPlan} disabled={busy !== null || !chatPrompt.trim()}>
                   Plan
                 </Button>
-                <Button size="sm" variant="secondary" onClick={applyChatPlan} disabled={busy !== null || !chatPlan?.planRevisionHash}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={applyChatPlan}
+                  disabled={
+                    busy !== null ||
+                    !chatPlan?.planRevisionHash ||
+                    (chatPlan.executionMode === "APPLIED" && selectedChatOperationCount === 0)
+                  }
+                >
                   Apply
                 </Button>
                 <Button size="sm" variant="outline" onClick={undoChat} disabled={busy !== null || !chatUndoToken}>
@@ -2384,18 +2448,56 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   <p className="font-semibold">
                     Review plan • {chatPlan.executionMode} • confidence {chatPlan.confidence.toFixed(2)} • band {chatConfidenceBand}
                   </p>
-                  <p className="text-muted-foreground">Plan hash: {chatPlan.planRevisionHash ? chatPlan.planRevisionHash.slice(0, 12) : "missing"}</p>
-                  <div className="mt-2 max-h-[150px] space-y-1 overflow-y-auto">
+                  <p className="text-muted-foreground">
+                    Safety mode: {chatPlan.safetyMode} • hash {chatPlan.planRevisionHash ? chatPlan.planRevisionHash.slice(0, 12) : "missing"}
+                  </p>
+                  <p className="text-muted-foreground">
+                    Selected ops: {selectedChatOperationCount}/{totalSelectableChatOperations}
+                  </p>
+                  <div className="mt-2 max-h-[190px] space-y-1 overflow-y-auto">
                     {chatPlan.diffGroups.map((group) => (
                       <div key={group.group} className="rounded border px-2 py-1">
                         <p className="font-medium">{group.title}</p>
                         <p className="text-muted-foreground">{group.summary}</p>
-                        {group.items.slice(0, 4).map((item) => (
-                          <p key={item.id} className="text-muted-foreground">{item.label}</p>
-                        ))}
+                        {group.items.slice(0, 8).map((item) => {
+                          const toggleable = item.type === "operation" && typeof item.operationIndex === "number";
+                          const checked = chatOperationDecisions[item.id] ?? true;
+                          return (
+                            <label key={item.id} className="mt-1 flex items-center gap-2 text-muted-foreground">
+                              {toggleable ? (
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleChatOperationDecision(item.id)}
+                                />
+                              ) : (
+                                <span className="inline-block w-3" />
+                              )}
+                              <span>{item.label}</span>
+                            </label>
+                          );
+                        })}
                       </div>
                     ))}
                     {!chatPlan.diffGroups.length ? <p className="text-muted-foreground">No grouped diffs returned.</p> : null}
+                  </div>
+                  <div className="mt-2 rounded border p-2 text-muted-foreground">
+                    <p className="font-medium text-foreground">Confidence rationale</p>
+                    <p>
+                      Avg {chatPlan.confidenceRationale.averageConfidence.toFixed(2)} • Plan rate {chatPlan.confidenceRationale.validPlanRate.toFixed(2)}%
+                    </p>
+                    {chatPlan.confidenceRationale.fallbackReason ? (
+                      <p>Fallback: {chatPlan.confidenceRationale.fallbackReason}</p>
+                    ) : null}
+                    {chatPlan.confidenceRationale.reasons.length > 0 ? (
+                      <ul className="mt-1 space-y-1">
+                        {chatPlan.confidenceRationale.reasons.slice(0, 4).map((reason, index) => (
+                          <li key={`${reason}-${index}`}>- {reason}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>No planner warnings.</p>
+                    )}
                   </div>
                   {chatPlan.issues.length > 0 ? (
                     <ul className="mt-2 space-y-1 text-muted-foreground">
@@ -2414,6 +2516,10 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   <p className="text-muted-foreground">
                     Revision {chatApplyResult.revisionId ? chatApplyResult.revisionId.slice(0, 8) : "n/a"}
                   </p>
+                  <p className="text-muted-foreground">
+                    Ops {chatApplyResult.selectedOperationCount ?? selectedChatOperationCount}/
+                    {chatApplyResult.totalOperationCount ?? totalSelectableChatOperations}
+                  </p>
                 </div>
               ) : null}
               {chatUndoResult ? (
@@ -2422,6 +2528,31 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   <p className="text-muted-foreground">Revision {chatUndoResult.appliedRevisionId.slice(0, 8)}</p>
                 </div>
               ) : null}
+              <div className="mt-2 rounded border p-2 text-muted-foreground">
+                <p className="font-medium text-foreground">Chat sessions</p>
+                <p>Total: {chatSessions.length}</p>
+                <div className="mt-1 max-h-[90px] overflow-y-auto">
+                  {chatSessions.slice(0, 5).map((session) => (
+                    <p key={session.planId}>
+                      {session.safetyMode} • {session.confidence.toFixed(2)} • {session.planId.slice(0, 8)}
+                    </p>
+                  ))}
+                  {chatSessions.length === 0 ? <p>No chat sessions yet.</p> : null}
+                </div>
+              </div>
+              <div className="mt-2 rounded border p-2 text-muted-foreground">
+                <p className="font-medium text-foreground">Revision lineage</p>
+                <p>Nodes: {revisionGraph?.nodeCount ?? 0} • Edges: {revisionGraph?.edgeCount ?? 0}</p>
+                <div className="mt-1 max-h-[110px] overflow-y-auto">
+                  {revisionGraph?.nodes.slice(-8).map((node) => (
+                    <p key={node.revisionId}>
+                      r{node.revisionNumber} • {node.source}
+                      {node.isCurrent ? " (current)" : ""}
+                    </p>
+                  ))}
+                  {!revisionGraph || revisionGraph.nodes.length === 0 ? <p>No revision graph yet.</p> : null}
+                </div>
+              </div>
             </div>
 
             {renderStatus ? (

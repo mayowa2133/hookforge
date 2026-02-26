@@ -8,6 +8,17 @@ import { prisma } from "@/lib/prisma";
 import { previewTimelineOperationsWithValidation } from "@/lib/timeline-invariants";
 import { TIMELINE_STATE_KEY, buildTimelineState, serializeTimelineState } from "@/lib/timeline-legacy";
 import type { TimelineOperation } from "@/lib/timeline-types";
+import {
+  buildChatConfidenceRationale,
+  buildRevisionGraph,
+  resolveChatSafetyMode,
+  selectTimelineOperationsFromDecisions,
+  type ChatConfidenceRationale,
+  type ChatPlanOperationDecision,
+  type ChatSafetyMode
+} from "@/lib/chat-v2-tools";
+
+export type { ChatPlanOperationDecision, ChatSafetyMode, ChatConfidenceRationale } from "@/lib/chat-v2-tools";
 
 export type ChatPlanDiffItem = {
   id: string;
@@ -16,10 +27,11 @@ export type ChatPlanDiffItem = {
   before?: string;
   after?: string;
   severity?: "INFO" | "WARN" | "ERROR";
+  operationIndex?: number;
 };
 
 export type ChatPlanDiffGroup = {
-  group: "timeline" | "transcript" | "captions";
+  group: "timeline" | "transcript" | "captions" | "audio";
   title: string;
   summary: string;
   items: ChatPlanDiffItem[];
@@ -31,6 +43,8 @@ type PlanPayload = {
   createdAt: string;
   planRevisionHash: string;
   diffGroups: ChatPlanDiffGroup[];
+  safetyMode: ChatSafetyMode;
+  confidenceRationale: ChatConfidenceRationale;
   appliedRevisionId?: string | null;
   undoToken?: string | null;
 };
@@ -65,7 +79,8 @@ function buildDiffGroups(execution: ChatEditPipelineResult): ChatPlanDiffGroup[]
     id: `timeline-op-${index + 1}`,
     type: "operation",
     label: `${index + 1}. ${toTitleCase(operation.op)}`,
-    after: JSON.stringify(operation)
+    after: JSON.stringify(operation),
+    operationIndex: index
   }));
 
   const captionItems: ChatPlanDiffItem[] = execution.validatedOperations
@@ -74,6 +89,15 @@ function buildDiffGroups(execution: ChatEditPipelineResult): ChatPlanDiffGroup[]
       id: `caption-op-${index + 1}`,
       type: "operation",
       label: `${index + 1}. Caption Style`,
+      after: JSON.stringify(operation)
+    }));
+
+  const audioItems: ChatPlanDiffItem[] = execution.validatedOperations
+    .filter((operation) => operation.op === "audio_duck")
+    .map((operation, index) => ({
+      id: `audio-op-${index + 1}`,
+      type: "operation",
+      label: `${index + 1}. Audio Duck`,
       after: JSON.stringify(operation)
     }));
 
@@ -103,6 +127,12 @@ function buildDiffGroups(execution: ChatEditPipelineResult): ChatPlanDiffGroup[]
       title: "Caption Changes",
       summary: captionItems.length > 0 ? `${captionItems.length} caption operation(s)` : "No caption operation planned",
       items: captionItems
+    },
+    {
+      group: "audio",
+      title: "Audio Changes",
+      summary: audioItems.length > 0 ? `${audioItems.length} audio operation(s)` : "No audio operation planned",
+      items: audioItems
     }
   ];
 }
@@ -162,6 +192,11 @@ export async function createChatPlan(projectIdOrV2Id: string, prompt: string, at
     execution
   });
   const diffGroups = buildDiffGroups(execution);
+  const safetyMode = resolveChatSafetyMode({
+    executionMode: execution.executionMode,
+    averageConfidence: execution.planValidation.averageConfidence
+  });
+  const confidenceRationale = buildChatConfidenceRationale(execution.planValidation, execution.fallbackReason);
 
   const planJob = await prisma.aIJob.create({
     data: {
@@ -180,6 +215,8 @@ export async function createChatPlan(projectIdOrV2Id: string, prompt: string, at
         execution,
         planRevisionHash,
         diffGroups,
+        safetyMode,
+        confidenceRationale,
         createdAt: new Date().toISOString()
       } as never
     }
@@ -187,7 +224,10 @@ export async function createChatPlan(projectIdOrV2Id: string, prompt: string, at
 
   return {
     planJob,
-    execution
+    execution,
+    safetyMode,
+    confidenceRationale,
+    diffGroups
   };
 }
 
@@ -204,7 +244,7 @@ function parsePlanPayload(job: AIJob): PlanPayload {
 }
 
 export async function applyChatPlan(projectIdOrV2Id: string, planId: string) {
-  const { ctx, legacyProject, state } = await loadLegacyProjectState(projectIdOrV2Id);
+  const { ctx } = await loadLegacyProjectState(projectIdOrV2Id);
   const planJob = await prisma.aIJob.findFirst({
     where: {
       id: planId,
@@ -225,7 +265,12 @@ export async function applyChatPlan(projectIdOrV2Id: string, planId: string) {
   return applyChatPlanWithHash(projectIdOrV2Id, planId, payload.planRevisionHash);
 }
 
-export async function applyChatPlanWithHash(projectIdOrV2Id: string, planId: string, expectedPlanRevisionHash: string) {
+export async function applyChatPlanWithHash(
+  projectIdOrV2Id: string,
+  planId: string,
+  expectedPlanRevisionHash: string,
+  operationDecisions?: ChatPlanOperationDecision[]
+) {
   const { ctx, legacyProject, state } = await loadLegacyProjectState(projectIdOrV2Id);
   const planJob = await prisma.aIJob.findFirst({
     where: {
@@ -255,14 +300,45 @@ export async function applyChatPlanWithHash(projectIdOrV2Id: string, planId: str
         severity: "ERROR" as const
       })),
       revisionId: null as string | null,
-      undoToken: null as string | null
+      undoToken: null as string | null,
+      selectedOperationCount: 0,
+      totalOperationCount: asTimelineOperations(payload.execution.appliedTimelineOperations).length
     };
   }
 
   const operations = asTimelineOperations(payload.execution.appliedTimelineOperations);
+  const timelineItems = payload.diffGroups
+    .find((group) => group.group === "timeline")
+    ?.items.filter((item) => item.type === "operation")
+    .map((item) => ({ id: item.id, operationIndex: item.operationIndex })) ?? [];
+
+  const selected = selectTimelineOperationsFromDecisions({
+    operations,
+    timelineItems,
+    decisions: operationDecisions
+  });
+
+  if (selected.selectedOperations.length === 0) {
+    return {
+      applied: false,
+      suggestionsOnly: true,
+      issues: [
+        {
+          code: "NO_OPERATIONS_SELECTED",
+          message: "No operations were selected for apply.",
+          severity: "WARN" as const
+        }
+      ],
+      revisionId: null as string | null,
+      undoToken: null as string | null,
+      selectedOperationCount: 0,
+      totalOperationCount: operations.length
+    };
+  }
+
   const preview = previewTimelineOperationsWithValidation({
     state,
-    operations
+    operations: selected.selectedOperations
   });
 
   if (!preview.valid || !preview.nextState) {
@@ -275,7 +351,9 @@ export async function applyChatPlanWithHash(projectIdOrV2Id: string, planId: str
         severity: "ERROR" as const
       })),
       revisionId: null as string | null,
-      undoToken: null as string | null
+      undoToken: null as string | null,
+      selectedOperationCount: selected.selectedCount,
+      totalOperationCount: operations.length
     };
   }
 
@@ -315,7 +393,12 @@ export async function applyChatPlanWithHash(projectIdOrV2Id: string, planId: str
     operations: {
       source: "chat_plan_apply_v2",
       planId,
-      operations
+      selectedOperationCount: selected.selectedCount,
+      totalOperationCount: operations.length,
+      skippedOperationCount: selected.skippedCount,
+      unknownDecisionItemIds: selected.unknownDecisionItemIds,
+      operationDecisions: operationDecisions ?? [],
+      operations: selected.selectedOperations
     }
   });
 
@@ -335,7 +418,9 @@ export async function applyChatPlanWithHash(projectIdOrV2Id: string, planId: str
     suggestionsOnly: false,
     issues: [],
     revisionId: revision.id,
-    undoToken
+    undoToken,
+    selectedOperationCount: selected.selectedCount,
+    totalOperationCount: operations.length
   };
 }
 
@@ -380,6 +465,7 @@ export async function undoChatPlanApplyWithMode(projectIdOrV2Id: string, undoTok
     operations: {
       source: "chat_plan_undo_v2",
       undoToken,
+      force,
       prompt: consumed.entry.prompt
     }
   });
@@ -387,5 +473,77 @@ export async function undoChatPlanApplyWithMode(projectIdOrV2Id: string, undoTok
   return {
     restored: true,
     appliedRevisionId: revision.id
+  };
+}
+
+export async function listChatSessions(projectIdOrV2Id: string, limit = 20) {
+  const ctx = await requireProjectContext(projectIdOrV2Id);
+  const safeLimit = Math.max(1, Math.min(limit, 100));
+  const jobs = await prisma.aIJob.findMany({
+    where: {
+      workspaceId: ctx.workspace.id,
+      projectId: ctx.projectV2.id,
+      type: "CHAT_EDIT"
+    },
+    orderBy: { createdAt: "desc" },
+    take: safeLimit
+  });
+
+  return {
+    projectId: ctx.legacyProject.id,
+    projectV2Id: ctx.projectV2.id,
+    sessions: jobs.map((job) => {
+      const payload = parsePlanPayload(job);
+      return {
+        planId: job.id,
+        createdAt: job.createdAt.toISOString(),
+        prompt: String((job.input as Record<string, unknown>)?.prompt ?? ""),
+        executionMode: payload.execution.executionMode,
+        confidence: payload.execution.planValidation.averageConfidence,
+        safetyMode: payload.safetyMode ?? resolveChatSafetyMode({
+          executionMode: payload.execution.executionMode,
+          averageConfidence: payload.execution.planValidation.averageConfidence
+        }),
+        planRevisionHash: payload.planRevisionHash,
+        appliedRevisionId: payload.appliedRevisionId ?? null,
+        undoToken: payload.undoToken ?? null,
+        issueCount: payload.execution.invariantIssues.length,
+        diffGroupCount: payload.diffGroups.length
+      };
+    })
+  };
+}
+
+export async function getProjectRevisionGraph(projectIdOrV2Id: string, limit = 200) {
+  const ctx = await requireProjectContext(projectIdOrV2Id);
+  const safeLimit = Math.max(5, Math.min(limit, 500));
+  const revisions = await prisma.timelineRevision.findMany({
+    where: { projectId: ctx.projectV2.id },
+    orderBy: { revisionNumber: "desc" },
+    take: safeLimit
+  });
+  const project = await prisma.projectV2.findUnique({
+    where: { id: ctx.projectV2.id },
+    select: { currentRevisionId: true }
+  });
+
+  const graph = buildRevisionGraph({
+    revisions: revisions.map((revision) => ({
+      id: revision.id,
+      revisionNumber: revision.revisionNumber,
+      operations: revision.operations,
+      createdAt: revision.createdAt
+    })),
+    currentRevisionId: project?.currentRevisionId ?? null
+  });
+
+  return {
+    projectId: ctx.legacyProject.id,
+    projectV2Id: ctx.projectV2.id,
+    currentRevisionId: project?.currentRevisionId ?? null,
+    nodeCount: graph.nodes.length,
+    edgeCount: graph.edges.length,
+    nodes: graph.nodes,
+    edges: graph.edges
   };
 }
