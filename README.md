@@ -59,6 +59,18 @@ Slice 1 cutover flags:
 - `OPENCUT_EDITOR_COHORT=all` is the immediate-replacement default.
 - `OPENCUT_EDITOR_INTERNAL_DOMAIN=hookforge.local` marks internal cohort email-domain gate.
 - `OPENCUT_EDITOR_BETA_ALLOWLIST=` comma-separated beta allowlist emails.
+- `DESCRIPT_PLUS_ROLLOUT_STAGE=global` controls staged launch (`internal|pilot|small_team|global`).
+- `DESCRIPT_PLUS_ROLLOUT_ALLOWLIST=` comma-separated pilot/small-team emails.
+- `DESCRIPT_PLUS_INTERNAL_DOMAIN=hookforge.local` internal-only rollout domain.
+- `DESCRIPT_PLUS_AUTO_ROLLBACK=true` enables rollback recommendations when critical launch guardrails fail.
+- `DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY=false` forces legacy editor routing for all projects-v2 users.
+- `DESCRIPT_PLUS_MIN_PARITY_SCORE=75`
+- `DESCRIPT_PLUS_MIN_RENDER_SUCCESS_PCT=99`
+- `DESCRIPT_PLUS_MIN_AI_SUCCESS_PCT=95`
+- `DESCRIPT_PLUS_MAX_QUEUE_BACKLOG=1200`
+- `DESCRIPT_PLUS_MAX_QUEUE_FAILED=200`
+- `DESCRIPT_PLUS_MAX_EDITOR_OPEN_P95_MS=2500`
+- `DESCRIPT_PLUS_MAX_COMMAND_P95_MS=100`
 - `NEXT_PUBLIC_AI_EDITOR_DEFAULT=true` makes AI editor creation the dashboard default CTA.
 - `NEXT_PUBLIC_SHOW_TEMPLATES_NAV=false` relabels top-nav template entry to Quick Start.
 - `AI_EDITOR_DEFAULT_TEMPLATE_SLUG=green-screen-commentator` fallback template for seeded AI-editor project creation.
@@ -301,6 +313,7 @@ Implemented route handlers:
 - `GET /api/parity/scorecard` read parity module scorecard for current workspace
 - `POST /api/parity/benchmarks/run` run persisted parity benchmark execution
 - `GET /api/parity/benchmarks/:runId` fetch benchmark run summary/results
+- `GET /api/parity/launch/readiness` launch guardrail status (rollout stage, SLO/queue/perf thresholds, rollback recommendations)
 
 Descript+ program validation commands:
 
@@ -659,11 +672,13 @@ Implemented on `/opencut/projects-v2/[id]` and supporting desktop APIs:
   - `GET /api/desktop/config` (desktop capabilities, shortcuts, cutover state, perf budgets)
   - `POST /api/desktop/events` (desktop telemetry ingestion)
   - `GET /api/projects-v2/:id/perf-hints` (project-specific perf hints and p95 observations)
+  - `GET /api/parity/launch/readiness` (phase-6 rollout guardrail status + rollback recommendation)
 - Editor UX hardening for desktop daily-driver behavior:
   - Local file drag/drop + file-picker import directly in OpenCut shell
   - Upload/render completion notifications (browser notification API)
   - Desktop performance panel (p95 open/command vs budget + suggested virtualization windows)
   - Desktop event instrumentation for boot, command latency, drop imports, and notifications
+  - Launch guardrail panel in editor (SLO success rates, queue backlog/failed totals, parity score, benchmark verdict)
 
 Validation:
 

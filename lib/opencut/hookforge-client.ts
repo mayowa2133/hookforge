@@ -1249,7 +1249,112 @@ export type EditorHealthStatus = {
       updatedAt: string;
     }>;
   };
+  guardrails?: {
+    stage: "internal" | "pilot" | "small_team" | "global";
+    status: "READY" | "CANARY_ONLY" | "ROLLBACK_RECOMMENDED";
+    shouldRollback: boolean;
+    triggers: Array<{
+      code: string;
+      message: string;
+      severity: "WARN" | "CRITICAL";
+    }>;
+    parityScore: number;
+    renderSuccessPct: number;
+    aiSuccessPct: number;
+    queueBacklog: number;
+    queueFailed: number;
+  };
   updatedAt: string;
+};
+
+export type OpsSloSummaryPayload = {
+  workspaceId: string;
+  summary: {
+    since: string;
+    windowHours: number;
+    render: {
+      total: number;
+      success: number;
+      successRatePct: number;
+      p95LatencyMs: number;
+    };
+    ai: {
+      total: number;
+      success: number;
+      successRatePct: number;
+      p95LatencyMs: number;
+    };
+  };
+};
+
+export type OpsQueueHealthPayload = {
+  workspaceId: string;
+  healthy: boolean;
+  queues: Array<{
+    name: string;
+    counts: {
+      waiting?: number;
+      active?: number;
+      completed?: number;
+      failed?: number;
+      delayed?: number;
+    };
+    backlog: number;
+    healthy: boolean;
+  }>;
+};
+
+export type ParityLaunchReadinessPayload = {
+  workspaceId: string;
+  stage: "internal" | "pilot" | "small_team" | "global";
+  generatedAt: string;
+  rollout: {
+    eligibleForStage: boolean;
+    autoRollbackEnabled: boolean;
+    forceRollbackToLegacy: boolean;
+    allowlistSize: number;
+  };
+  thresholds: {
+    minParityScore: number;
+    minRenderSuccessPct: number;
+    minAiSuccessPct: number;
+    maxQueueBacklog: number;
+    maxQueueFailed: number;
+    maxEditorOpenP95Ms: number;
+    maxCommandP95Ms: number;
+  };
+  snapshot: {
+    parityScore: number;
+    renderSuccessPct: number;
+    aiSuccessPct: number;
+    queueHealthy: boolean;
+    queueBacklog: number;
+    queueFailed: number;
+    editorOpenP95Ms: number | null;
+    commandP95Ms: number | null;
+  };
+  guardrails: {
+    status: "READY" | "CANARY_ONLY" | "ROLLBACK_RECOMMENDED";
+    shouldRollback: boolean;
+    triggers: Array<{
+      code: string;
+      message: string;
+      severity: "WARN" | "CRITICAL";
+    }>;
+  };
+  scorecard: {
+    overallScore: number;
+    passRate: number;
+    passedModules: number;
+    totalModules: number;
+  };
+  latestBenchmark: {
+    id: string;
+    createdAt: string;
+    finishedAt: string | null;
+    summary: Record<string, unknown> | null;
+    betterThanDescript: boolean | null;
+  } | null;
 };
 
 export type ProjectShareLinksPayload = {
@@ -2115,6 +2220,18 @@ export async function getProjectV2EditorState(projectIdOrV2Id: string) {
 
 export async function getProjectV2EditorHealth(projectIdOrV2Id: string) {
   return requestJson<EditorHealthStatus>(`/api/projects-v2/${projectIdOrV2Id}/editor-health`);
+}
+
+export async function getOpsSloSummary(windowHours = 24) {
+  return requestJson<OpsSloSummaryPayload>(`/api/ops/slo/summary?windowHours=${windowHours}`);
+}
+
+export async function getOpsQueueHealth() {
+  return requestJson<OpsQueueHealthPayload>("/api/ops/queues/health");
+}
+
+export async function getParityLaunchReadiness() {
+  return requestJson<ParityLaunchReadinessPayload>("/api/parity/launch/readiness");
 }
 
 export async function getProjectV2PerfHints(projectIdOrV2Id: string) {

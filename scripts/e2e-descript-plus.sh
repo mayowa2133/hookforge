@@ -179,5 +179,21 @@ run_id=$(echo "$benchmark_run" | jq -r ".run.id")
 benchmark_status=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/parity/benchmarks/$run_id")
 result_count=$(echo "$benchmark_status" | jq -r '.results | length')
 [ "$result_count" -ge 1 ]
+benchmark_has_summary=$(echo "$benchmark_status" | jq -r '.run.summary.betterThanDescript != null')
+[ "$benchmark_has_summary" = "true" ]
+
+launch_readiness=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/parity/launch/readiness")
+launch_status=$(echo "$launch_readiness" | jq -r ".guardrails.status")
+launch_stage=$(echo "$launch_readiness" | jq -r ".stage")
+[ -n "$launch_status" ] && [ "$launch_status" != "null" ]
+[ -n "$launch_stage" ] && [ "$launch_stage" != "null" ]
+
+ops_slo=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/ops/slo/summary?windowHours=24")
+ops_render_total=$(echo "$ops_slo" | jq -r ".summary.render.total")
+[ "$ops_render_total" -ge 0 ]
+
+ops_queue=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/ops/queues/health")
+ops_queue_healthy=$(echo "$ops_queue" | jq -r ".healthy")
+[ "$ops_queue_healthy" = "true" ] || [ "$ops_queue_healthy" = "false" ]
 
 echo "DESCRIPT_PLUS_E2E_SUCCESS"

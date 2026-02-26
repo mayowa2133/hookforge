@@ -1,4 +1,5 @@
 import { buildParityScorecardForWorkspace } from "@/lib/parity/scorecard";
+import { buildDescriptPlusLaunchReadiness } from "@/lib/parity/launch-readiness";
 import { prisma } from "@/lib/prisma";
 
 async function resolveWorkspaceId() {
@@ -37,9 +38,19 @@ async function main() {
   const workspaceId = await resolveWorkspaceId();
   const threshold = Number(process.env.PARITY_GATE_MIN_SCORE ?? "70");
   const modulePassRateThreshold = Number(process.env.PARITY_GATE_MIN_PASS_RATE ?? "70");
+  const enforceLaunchReadiness = process.env.PARITY_GATE_ENFORCE_LAUNCH !== "false";
 
-  const scorecard = await buildParityScorecardForWorkspace(workspaceId);
-  const gatePassed = scorecard.overallScore >= threshold && scorecard.passRate >= modulePassRateThreshold;
+  const [scorecard, launch] = await Promise.all([
+    buildParityScorecardForWorkspace(workspaceId),
+    buildDescriptPlusLaunchReadiness({
+      workspaceId,
+      persistIncident: false
+    })
+  ]);
+  const gatePassed =
+    scorecard.overallScore >= threshold &&
+    scorecard.passRate >= modulePassRateThreshold &&
+    (!enforceLaunchReadiness || !launch.guardrails.shouldRollback);
 
   console.log(
     JSON.stringify(
@@ -49,7 +60,14 @@ async function main() {
         passRate: scorecard.passRate,
         threshold,
         modulePassRateThreshold,
+        enforceLaunchReadiness,
         gatePassed,
+        launch: {
+          stage: launch.stage,
+          status: launch.guardrails.status,
+          shouldRollback: launch.guardrails.shouldRollback,
+          triggerCount: launch.guardrails.triggers.length
+        },
         modules: scorecard.modules.map((module) => ({
           module: module.module,
           score: module.score,

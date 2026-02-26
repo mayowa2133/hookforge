@@ -18,6 +18,9 @@ import {
   getProjectV2ShareLinks,
   getProjectV2BrandPreset,
   getProjectV2PublishJob,
+  getOpsQueueHealth,
+  getOpsSloSummary,
+  getParityLaunchReadiness,
   getProjectV2EditorHealth,
   getProjectV2EditorState,
   getProjectV2Presets,
@@ -1535,6 +1538,83 @@ describe("opencut hookforge client", () => {
     const payload = await getProjectV2EditorHealth("pv2_9");
     expect(payload.status).toBe("HEALTHY");
     expect(fetchSpy).toHaveBeenCalledWith("/api/projects-v2/pv2_9/editor-health", undefined);
+  });
+
+  it("fetches ops and launch readiness snapshots", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          summary: {
+            since: new Date().toISOString(),
+            windowHours: 24,
+            render: { total: 10, success: 10, successRatePct: 100, p95LatencyMs: 3000 },
+            ai: { total: 20, success: 19, successRatePct: 95, p95LatencyMs: 1400 }
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          healthy: true,
+          queues: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          stage: "global",
+          generatedAt: new Date().toISOString(),
+          rollout: {
+            eligibleForStage: true,
+            autoRollbackEnabled: true,
+            forceRollbackToLegacy: false,
+            allowlistSize: 0
+          },
+          thresholds: {
+            minParityScore: 75,
+            minRenderSuccessPct: 99,
+            minAiSuccessPct: 95,
+            maxQueueBacklog: 1200,
+            maxQueueFailed: 200,
+            maxEditorOpenP95Ms: 2500,
+            maxCommandP95Ms: 100
+          },
+          snapshot: {
+            parityScore: 85,
+            renderSuccessPct: 100,
+            aiSuccessPct: 95,
+            queueHealthy: true,
+            queueBacklog: 0,
+            queueFailed: 0,
+            editorOpenP95Ms: 2000,
+            commandP95Ms: 80
+          },
+          guardrails: {
+            status: "READY",
+            shouldRollback: false,
+            triggers: []
+          },
+          scorecard: {
+            overallScore: 85,
+            passRate: 100,
+            passedModules: 7,
+            totalModules: 7
+          },
+          latestBenchmark: null
+        })
+      );
+
+    const slo = await getOpsSloSummary(24);
+    const queue = await getOpsQueueHealth();
+    const launch = await getParityLaunchReadiness();
+
+    expect(slo.summary.windowHours).toBe(24);
+    expect(queue.healthy).toBe(true);
+    expect(launch.guardrails.status).toBe("READY");
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/ops/slo/summary?windowHours=24", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/ops/queues/health", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/parity/launch/readiness", undefined);
   });
 
   it("tracks opencut telemetry events", async () => {

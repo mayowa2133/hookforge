@@ -17,7 +17,10 @@ export async function GET() {
       cutover: {
         defaultEditorShell: "OPENCUT",
         immediateReplacement: projectsV2FeatureFlags.opencutImmediateReplacement,
-        legacyFallbackAllowlistEnabled: projectsV2FeatureFlags.opencutLegacyFallbackAllowlist.length > 0
+        legacyFallbackAllowlistEnabled: projectsV2FeatureFlags.opencutLegacyFallbackAllowlist.length > 0,
+        rolloutStage: projectsV2FeatureFlags.descriptPlusRolloutStage,
+        autoRollbackEnabled: projectsV2FeatureFlags.descriptPlusAutoRollback,
+        forceRollbackToLegacy: projectsV2FeatureFlags.descriptPlusForceRollbackToLegacy
       },
       budgets: {
         editorOpenP95Ms: 2500,

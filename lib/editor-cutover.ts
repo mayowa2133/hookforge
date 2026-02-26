@@ -3,6 +3,7 @@ import { env } from "./env";
 export type EditorCreationMode = "FREEFORM" | "QUICK_START";
 export type EditorShell = "LEGACY" | "OPENCUT";
 export type OpenCutEditorCohort = "internal" | "beta" | "all";
+export type DescriptPlusRolloutStage = "internal" | "pilot" | "small_team" | "global";
 
 export type ProjectsV2FeatureFlags = {
   projectsV2Enabled: boolean;
@@ -12,6 +13,11 @@ export type ProjectsV2FeatureFlags = {
   opencutEditorCohort: OpenCutEditorCohort;
   opencutEditorInternalDomain: string;
   opencutEditorBetaAllowlist: string[];
+  descriptPlusRolloutStage: DescriptPlusRolloutStage;
+  descriptPlusRolloutAllowlist: string[];
+  descriptPlusInternalDomain: string;
+  descriptPlusAutoRollback: boolean;
+  descriptPlusForceRollbackToLegacy: boolean;
   aiEditorDefault: boolean;
   showTemplatesNav: boolean;
   quickStartVisible: boolean;
@@ -28,6 +34,11 @@ export type ProjectsV2EntrypointInput = {
 type ProjectsV2FlagSource = {
   ENABLE_PROJECTS_V2: boolean;
   ENABLE_OPENCUT_EDITOR: boolean;
+  DESCRIPT_PLUS_ROLLOUT_STAGE: DescriptPlusRolloutStage;
+  DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: string;
+  DESCRIPT_PLUS_INTERNAL_DOMAIN: string;
+  DESCRIPT_PLUS_AUTO_ROLLBACK: boolean;
+  DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: boolean;
   OPENCUT_IMMEDIATE_REPLACEMENT: boolean;
   OPENCUT_LEGACY_FALLBACK_ALLOWLIST: string;
   OPENCUT_EDITOR_COHORT: OpenCutEditorCohort;
@@ -47,6 +58,9 @@ export function normalizeEditorCreationMode(input: unknown, fallback: EditorCrea
 }
 
 export function buildProjectsV2FeatureFlags(source: ProjectsV2FlagSource): ProjectsV2FeatureFlags {
+  const rolloutAllowlist = source.DESCRIPT_PLUS_ROLLOUT_ALLOWLIST.split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
   const betaAllowlist = source.OPENCUT_EDITOR_BETA_ALLOWLIST.split(",")
     .map((entry) => entry.trim().toLowerCase())
     .filter(Boolean);
@@ -62,6 +76,11 @@ export function buildProjectsV2FeatureFlags(source: ProjectsV2FlagSource): Proje
     opencutEditorCohort: source.OPENCUT_EDITOR_COHORT,
     opencutEditorInternalDomain: source.OPENCUT_EDITOR_INTERNAL_DOMAIN.trim().toLowerCase(),
     opencutEditorBetaAllowlist: [...new Set(betaAllowlist)],
+    descriptPlusRolloutStage: source.DESCRIPT_PLUS_ROLLOUT_STAGE,
+    descriptPlusRolloutAllowlist: [...new Set(rolloutAllowlist)],
+    descriptPlusInternalDomain: source.DESCRIPT_PLUS_INTERNAL_DOMAIN.trim().toLowerCase(),
+    descriptPlusAutoRollback: source.DESCRIPT_PLUS_AUTO_ROLLBACK,
+    descriptPlusForceRollbackToLegacy: source.DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY,
     aiEditorDefault: source.NEXT_PUBLIC_AI_EDITOR_DEFAULT,
     showTemplatesNav: source.NEXT_PUBLIC_SHOW_TEMPLATES_NAV,
     quickStartVisible: source.NEXT_PUBLIC_QUICK_START_VISIBLE,
@@ -77,6 +96,20 @@ function emailDomain(email: string) {
   return email.slice(atIndex + 1).toLowerCase();
 }
 
+function isEmailInDescriptPlusRollout(email: string, flags: ProjectsV2FeatureFlags) {
+  if (!email) {
+    return false;
+  }
+  const domain = emailDomain(email);
+  if (flags.descriptPlusRolloutStage === "global") {
+    return true;
+  }
+  if (flags.descriptPlusRolloutStage === "internal") {
+    return domain === flags.descriptPlusInternalDomain;
+  }
+  return flags.descriptPlusRolloutAllowlist.includes(email);
+}
+
 export function isOpenCutEditorEnabledForEmail(email: string, flags: ProjectsV2FeatureFlags): boolean {
   if (!flags.opencutEditorEnabled) {
     return false;
@@ -84,6 +117,12 @@ export function isOpenCutEditorEnabledForEmail(email: string, flags: ProjectsV2F
 
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) {
+    return false;
+  }
+  if (flags.descriptPlusForceRollbackToLegacy) {
+    return false;
+  }
+  if (!isEmailInDescriptPlusRollout(normalizedEmail, flags)) {
     return false;
   }
 

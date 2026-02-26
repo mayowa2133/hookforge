@@ -1,6 +1,7 @@
 import { requireProjectContext } from "@/lib/api-context";
 import { jsonOk, routeErrorToResponse } from "@/lib/http";
 import { getQueueHealth } from "@/lib/ops";
+import { buildDescriptPlusLaunchReadiness } from "@/lib/parity/launch-readiness";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -30,7 +31,7 @@ function summarizeStatus(params: {
 export async function GET(_request: Request, { params }: Context) {
   try {
     const ctx = await requireProjectContext(params.id);
-    const [legacyProject, queueHealth, recentRenderJobs, recentAiJobs] = await Promise.all([
+    const [legacyProject, queueHealth, recentRenderJobs, recentAiJobs, launchReadiness] = await Promise.all([
       prisma.project.findUnique({
         where: { id: ctx.legacyProject.id },
         select: {
@@ -76,6 +77,11 @@ export async function GET(_request: Request, { params }: Context) {
           updatedAt: true,
           errorMessage: true
         }
+      }),
+      buildDescriptPlusLaunchReadiness({
+        workspaceId: ctx.workspace.id,
+        userEmail: ctx.user.email,
+        persistIncident: false
       })
     ]);
 
@@ -110,6 +116,17 @@ export async function GET(_request: Request, { params }: Context) {
       ai: {
         latest: recentAiJobs[0] ?? null,
         recent: recentAiJobs
+      },
+      guardrails: {
+        stage: launchReadiness.stage,
+        status: launchReadiness.guardrails.status,
+        shouldRollback: launchReadiness.guardrails.shouldRollback,
+        triggers: launchReadiness.guardrails.triggers,
+        parityScore: launchReadiness.scorecard.overallScore,
+        renderSuccessPct: launchReadiness.snapshot.renderSuccessPct,
+        aiSuccessPct: launchReadiness.snapshot.aiSuccessPct,
+        queueBacklog: launchReadiness.snapshot.queueBacklog,
+        queueFailed: launchReadiness.snapshot.queueFailed
       },
       updatedAt: new Date().toISOString()
     });

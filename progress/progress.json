@@ -214,8 +214,8 @@
     {
       "id": "descript_plus_9month_program",
       "title": "Descript+ 9-month parity and differentiation program",
-      "status": "IN_PROGRESS",
-      "details": "Program scaffolding is active: parity scorecard + benchmark APIs, CI parity gate script, LiveKit Studio room APIs, transcript search-replace/checkpoint APIs, autopilot namespace, review request decision logs, publish connector jobs, and runtime validation via descript-plus + full regression E2E chains"
+      "status": "DONE",
+      "details": "Completed through Phase 6 with launch-hardening controls: parity scorecard + benchmark APIs, staged rollout/rollback guardrails, LiveKit Studio room APIs, transcript search-replace/checkpoint flows, autopilot namespace, review request decision logs, publish connector jobs, editor launch diagnostics, and runtime validation via descript-plus + full regression E2E chains"
     },
     {
       "id": "descript_plus_phase0_to_phase5_foundation",
@@ -252,6 +252,12 @@
       "title": "Descript+ Phase 5 collaboration, approval workflow, and publishing parity",
       "status": "DONE",
       "details": "Implemented review request listing/decision management, workspace brand preset defaults, connector batch export endpoint, connector defaults sourced from brand preset, OpenCut collaboration UI upgrades, and expanded descript-plus/runtime coverage for review requests + brand + publish batch flows."
+    },
+    {
+      "id": "descript_plus_phase6_hardening_launch",
+      "title": "Descript+ Phase 6 hardening, benchmark, and controlled launch",
+      "status": "DONE",
+      "details": "Implemented launch readiness control-plane with staged rollout gating, critical-trigger rollback recommendations, parity benchmark baseline deltas and better-than-Descript verdicts, editor health guardrail surfacing (SLO/queue/parity), and CI gate integration for launch readiness."
     }
   ]
 }

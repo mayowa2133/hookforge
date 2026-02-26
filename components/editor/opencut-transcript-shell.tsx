@@ -28,6 +28,9 @@ import {
   finalizeProjectV2RecordingSession,
   getAiJob,
   getDesktopConfig,
+  getOpsQueueHealth,
+  getOpsSloSummary,
+  getParityLaunchReadiness,
   getProjectV2ChatSessions,
   getProjectV2ExportProfiles,
   getProjectV2BrandPreset,
@@ -91,6 +94,9 @@ import {
   type ExportProfilesPayload,
   type EditorHealthStatus,
   type LegacyProjectPayload,
+  type OpsQueueHealthPayload,
+  type OpsSloSummaryPayload,
+  type ParityLaunchReadinessPayload,
   type ProjectPerfHintsPayload,
   type ProjectReviewCommentsPayload,
   type ProjectReviewRequestsPayload,
@@ -269,6 +275,9 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [timeline, setTimeline] = useState<TimelinePayload | null>(null);
   const [transcript, setTranscript] = useState<TranscriptPayload | null>(null);
   const [health, setHealth] = useState<EditorHealthStatus | null>(null);
+  const [opsSloSummary, setOpsSloSummary] = useState<OpsSloSummaryPayload | null>(null);
+  const [opsQueueHealth, setOpsQueueHealth] = useState<OpsQueueHealthPayload | null>(null);
+  const [launchReadiness, setLaunchReadiness] = useState<ParityLaunchReadinessPayload | null>(null);
   const [language, setLanguage] = useState("en");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
   const [selectedTrackId, setSelectedTrackId] = useState("");
@@ -600,6 +609,17 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     setPerfHints(perfPayload);
   }, [projectV2Id]);
 
+  const loadOpsAndLaunch = useCallback(async () => {
+    const [sloPayload, queuePayload, launchPayload] = await Promise.all([
+      getOpsSloSummary(24),
+      getOpsQueueHealth(),
+      getParityLaunchReadiness()
+    ]);
+    setOpsSloSummary(sloPayload);
+    setOpsQueueHealth(queuePayload);
+    setLaunchReadiness(launchPayload);
+  }, []);
+
   const loadStudioRooms = useCallback(async () => {
     const payload = await listProjectV2StudioRooms(projectV2Id);
     setStudioRooms(payload.rooms);
@@ -685,6 +705,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
           loadChatDiagnostics(),
           loadReviewPublishing(),
           loadDesktopPerf(),
+          loadOpsAndLaunch(),
           loadStudioRooms()
         ]);
         if (!bootTrackedRef.current) {
@@ -718,6 +739,7 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     loadAudioAnalysis,
     loadChatDiagnostics,
     loadDesktopPerf,
+    loadOpsAndLaunch,
     loadProjectSurface,
     loadReviewPublishing,
     loadStudioRooms,
@@ -770,9 +792,10 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       void getProjectV2EditorHealth(projectV2Id)
         .then((payload) => setHealth(payload))
         .catch(() => {});
+      void loadOpsAndLaunch().catch(() => {});
     }, 10000);
     return () => clearInterval(interval);
-  }, [projectV2Id]);
+  }, [projectV2Id, loadOpsAndLaunch]);
 
   useEffect(() => {
     if (!orderedTracks.length) {
@@ -4839,6 +4862,47 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
               <p className="text-muted-foreground">Queue healthy: {health?.queue.healthy ? "yes" : "no"}</p>
               <p className="text-muted-foreground">Render readiness: {health?.render.readiness ?? "unknown"}</p>
               <p className="text-muted-foreground">Queues tracked: {health?.queue.queues.length ?? 0}</p>
+              <p className="text-muted-foreground">
+                Launch stage: {launchReadiness?.stage ?? "unknown"} • status {launchReadiness?.guardrails.status ?? "unknown"}
+              </p>
+              <p
+                className={`text-muted-foreground ${
+                  launchReadiness?.guardrails.shouldRollback ? "text-destructive" : ""
+                }`}
+              >
+                Auto rollback:{" "}
+                {launchReadiness?.guardrails.shouldRollback
+                  ? "recommended"
+                  : launchReadiness?.rollout.autoRollbackEnabled
+                    ? "armed"
+                    : "disabled"}
+              </p>
+              <p className="text-muted-foreground">
+                SLO render/AI: {opsSloSummary?.summary.render.successRatePct ?? "n/a"}% /{" "}
+                {opsSloSummary?.summary.ai.successRatePct ?? "n/a"}%
+              </p>
+              <p className="text-muted-foreground">
+                Queue backlog/failed: {launchReadiness?.snapshot.queueBacklog ?? opsQueueHealth?.queues.reduce((sum, queue) => sum + queue.backlog, 0) ?? "n/a"}
+                {" / "}
+                {launchReadiness?.snapshot.queueFailed ?? opsQueueHealth?.queues.reduce((sum, queue) => sum + (queue.counts.failed ?? 0), 0) ?? "n/a"}
+              </p>
+              <p className="text-muted-foreground">
+                Parity score: {launchReadiness?.scorecard.overallScore ?? "n/a"} • better-than-Descript:{" "}
+                {launchReadiness?.latestBenchmark?.betterThanDescript === null
+                  ? "n/a"
+                  : launchReadiness?.latestBenchmark?.betterThanDescript
+                    ? "yes"
+                    : "not yet"}
+              </p>
+              {launchReadiness?.guardrails.triggers.length ? (
+                <div className="mt-1 rounded border border-destructive/50 bg-destructive/5 p-1">
+                  {launchReadiness.guardrails.triggers.slice(0, 3).map((trigger) => (
+                    <p key={trigger.code} className="text-destructive">
+                      [{trigger.severity}] {trigger.message}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>

@@ -34,6 +34,11 @@ describe("editor cutover feature flags", () => {
     const flags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      DESCRIPT_PLUS_ROLLOUT_STAGE: "global",
+      DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: "",
+      DESCRIPT_PLUS_INTERNAL_DOMAIN: "hookforge.dev",
+      DESCRIPT_PLUS_AUTO_ROLLBACK: true,
+      DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: false,
       OPENCUT_IMMEDIATE_REPLACEMENT: false,
       OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "beta",
@@ -62,6 +67,11 @@ describe("editor cutover feature flags", () => {
     const defaultFlags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      DESCRIPT_PLUS_ROLLOUT_STAGE: "global",
+      DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: "",
+      DESCRIPT_PLUS_INTERNAL_DOMAIN: "hookforge.dev",
+      DESCRIPT_PLUS_AUTO_ROLLBACK: true,
+      DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: false,
       OPENCUT_IMMEDIATE_REPLACEMENT: true,
       OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "internal",
@@ -78,6 +88,11 @@ describe("editor cutover feature flags", () => {
     const fallbackFlags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      DESCRIPT_PLUS_ROLLOUT_STAGE: "global",
+      DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: "",
+      DESCRIPT_PLUS_INTERNAL_DOMAIN: "hookforge.dev",
+      DESCRIPT_PLUS_AUTO_ROLLBACK: true,
+      DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: false,
       OPENCUT_IMMEDIATE_REPLACEMENT: true,
       OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "legacy@example.com",
       OPENCUT_EDITOR_COHORT: "all",
@@ -94,6 +109,11 @@ describe("editor cutover feature flags", () => {
     const internalFlags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      DESCRIPT_PLUS_ROLLOUT_STAGE: "global",
+      DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: "",
+      DESCRIPT_PLUS_INTERNAL_DOMAIN: "hookforge.dev",
+      DESCRIPT_PLUS_AUTO_ROLLBACK: true,
+      DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: false,
       OPENCUT_IMMEDIATE_REPLACEMENT: false,
       OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "internal",
@@ -110,6 +130,11 @@ describe("editor cutover feature flags", () => {
     const betaFlags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      DESCRIPT_PLUS_ROLLOUT_STAGE: "global",
+      DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: "",
+      DESCRIPT_PLUS_INTERNAL_DOMAIN: "hookforge.dev",
+      DESCRIPT_PLUS_AUTO_ROLLBACK: true,
+      DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: false,
       OPENCUT_IMMEDIATE_REPLACEMENT: false,
       OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "beta",
@@ -128,6 +153,11 @@ describe("editor cutover feature flags", () => {
     const flags = buildProjectsV2FeatureFlags({
       ENABLE_PROJECTS_V2: true,
       ENABLE_OPENCUT_EDITOR: true,
+      DESCRIPT_PLUS_ROLLOUT_STAGE: "global",
+      DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: "",
+      DESCRIPT_PLUS_INTERNAL_DOMAIN: "hookforge.dev",
+      DESCRIPT_PLUS_AUTO_ROLLBACK: true,
+      DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: false,
       OPENCUT_IMMEDIATE_REPLACEMENT: true,
       OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
       OPENCUT_EDITOR_COHORT: "all",
@@ -156,5 +186,51 @@ describe("editor cutover feature flags", () => {
         flags
       })
     ).toBe("/opencut/projects-v2/pv2_2");
+  });
+
+  it("enforces rollout stage allowlists and force rollback fallback", () => {
+    const pilotFlags = buildProjectsV2FeatureFlags({
+      ENABLE_PROJECTS_V2: true,
+      ENABLE_OPENCUT_EDITOR: true,
+      DESCRIPT_PLUS_ROLLOUT_STAGE: "pilot",
+      DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: "pilot@example.com",
+      DESCRIPT_PLUS_INTERNAL_DOMAIN: "hookforge.dev",
+      DESCRIPT_PLUS_AUTO_ROLLBACK: true,
+      DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: false,
+      OPENCUT_IMMEDIATE_REPLACEMENT: true,
+      OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
+      OPENCUT_EDITOR_COHORT: "all",
+      OPENCUT_EDITOR_INTERNAL_DOMAIN: "hookforge.dev",
+      OPENCUT_EDITOR_BETA_ALLOWLIST: "",
+      NEXT_PUBLIC_AI_EDITOR_DEFAULT: true,
+      NEXT_PUBLIC_SHOW_TEMPLATES_NAV: false,
+      NEXT_PUBLIC_QUICK_START_VISIBLE: true,
+      AI_EDITOR_DEFAULT_TEMPLATE_SLUG: "green-screen-commentator"
+    });
+
+    expect(resolveProjectsV2EditorShell("pilot@example.com", pilotFlags)).toBe("OPENCUT");
+    expect(resolveProjectsV2EditorShell("creator@example.com", pilotFlags)).toBe("LEGACY");
+
+    const rollbackFlags = buildProjectsV2FeatureFlags({
+      ENABLE_PROJECTS_V2: true,
+      ENABLE_OPENCUT_EDITOR: true,
+      DESCRIPT_PLUS_ROLLOUT_STAGE: "global",
+      DESCRIPT_PLUS_ROLLOUT_ALLOWLIST: "",
+      DESCRIPT_PLUS_INTERNAL_DOMAIN: "hookforge.dev",
+      DESCRIPT_PLUS_AUTO_ROLLBACK: true,
+      DESCRIPT_PLUS_FORCE_ROLLBACK_TO_LEGACY: true,
+      OPENCUT_IMMEDIATE_REPLACEMENT: true,
+      OPENCUT_LEGACY_FALLBACK_ALLOWLIST: "",
+      OPENCUT_EDITOR_COHORT: "all",
+      OPENCUT_EDITOR_INTERNAL_DOMAIN: "hookforge.dev",
+      OPENCUT_EDITOR_BETA_ALLOWLIST: "",
+      NEXT_PUBLIC_AI_EDITOR_DEFAULT: true,
+      NEXT_PUBLIC_SHOW_TEMPLATES_NAV: false,
+      NEXT_PUBLIC_QUICK_START_VISIBLE: true,
+      AI_EDITOR_DEFAULT_TEMPLATE_SLUG: "green-screen-commentator"
+    });
+
+    expect(resolveProjectsV2EditorShell("pilot@example.com", rollbackFlags)).toBe("LEGACY");
+    expect(resolveProjectsV2EditorShell("creator@example.com", rollbackFlags)).toBe("LEGACY");
   });
 });
