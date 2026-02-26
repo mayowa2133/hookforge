@@ -201,6 +201,30 @@ type MediaRegisterRequest = {
   slot?: "primary" | "broll" | "audio";
 };
 
+export type RecordingMode = "SCREEN" | "CAMERA" | "MIC" | "SCREEN_CAMERA";
+
+type RecordingSessionStartRequest = {
+  mode: RecordingMode;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  totalParts: number;
+  partSizeBytes?: number;
+  autoTranscribe?: boolean;
+  language?: string;
+};
+
+type RecordingSessionFinalizeRequest = {
+  autoTranscribe?: boolean;
+  language?: string;
+};
+
+type RecordingChunkRequest = {
+  partNumber: number;
+  eTag?: string;
+  checksumSha256?: string;
+};
+
 export type AssetPresignResponse = {
   uploadUrl: string;
   storageKey: string;
@@ -257,6 +281,92 @@ export type MediaRegisterResponse = {
     status: "DRAFT" | "READY" | "RENDERING" | "DONE" | "ERROR";
   };
   missingSlotKeys: string[];
+};
+
+export type RecordingSessionStartResponse = {
+  session: {
+    id: string;
+    projectId: string;
+    mode: RecordingMode;
+    language: string;
+    autoTranscribe: boolean;
+    storageKey: string;
+    totalParts: number;
+    partSizeBytes: number;
+    minPartSizeBytes: number;
+    recommendedPartSizeBytes: number;
+    status: "ACTIVE" | "FINALIZING" | "COMPLETED" | "CANCELED" | "FAILED";
+  };
+  next: {
+    chunkEndpoint: string;
+    statusEndpoint: string;
+    finalizeEndpoint: string;
+    cancelEndpoint: string;
+  };
+};
+
+export type RecordingSessionStatusResponse = {
+  session: {
+    id: string;
+    mode: RecordingMode;
+    status: "ACTIVE" | "FINALIZING" | "COMPLETED" | "CANCELED" | "FAILED";
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    totalParts: number;
+    partSizeBytes: number;
+    autoTranscribe: boolean;
+    language: string;
+    finalizedAssetId: string | null;
+    finalizeAiJobId: string | null;
+    failedReason: string | null;
+    createdAt: string;
+    updatedAt: string;
+    completedAt: string | null;
+  };
+  progress: {
+    totalParts: number;
+    completedParts: number;
+    remainingParts: number;
+    missingPartNumbers: number[];
+    uploadedPartNumbers: number[];
+    progressPct: number;
+  };
+  chunks: Array<{
+    partNumber: number;
+    eTag: string;
+    checksumSha256: string | null;
+    uploadedAt: string;
+  }>;
+};
+
+export type RecordingChunkResponse =
+  | {
+      mode: "UPLOAD_URL";
+      partNumber: number;
+      uploadUrl: string;
+      method: "PUT";
+    }
+  | {
+      mode: "CHUNK_CONFIRMED";
+      partNumber: number;
+      progress: {
+        totalParts: number;
+        completedParts: number;
+        remainingParts: number;
+        missingPartNumbers: number[];
+        uploadedPartNumbers: number[];
+        progressPct: number;
+      };
+    };
+
+export type RecordingSessionFinalizeResponse = {
+  finalized: boolean;
+  status: "ACTIVE" | "FINALIZING" | "COMPLETED" | "CANCELED" | "FAILED";
+  recordingSessionId?: string;
+  finalizedAssetId?: string | null;
+  aiJobId?: string | null;
+  media?: MediaRegisterResponse;
 };
 
 export type ChatEditResponse = {
@@ -611,6 +721,50 @@ export async function registerProjectV2Media(projectIdOrV2Id: string, body: Medi
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+}
+
+export async function startProjectV2RecordingSession(projectIdOrV2Id: string, body: RecordingSessionStartRequest) {
+  return requestJson<RecordingSessionStartResponse>(`/api/projects-v2/${projectIdOrV2Id}/recordings/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2RecordingSession(projectIdOrV2Id: string, sessionId: string) {
+  return requestJson<RecordingSessionStatusResponse>(`/api/projects-v2/${projectIdOrV2Id}/recordings/session/${sessionId}`);
+}
+
+export async function postProjectV2RecordingChunk(projectIdOrV2Id: string, sessionId: string, body: RecordingChunkRequest) {
+  return requestJson<RecordingChunkResponse>(`/api/projects-v2/${projectIdOrV2Id}/recordings/session/${sessionId}/chunk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function finalizeProjectV2RecordingSession(
+  projectIdOrV2Id: string,
+  sessionId: string,
+  body: RecordingSessionFinalizeRequest = {}
+) {
+  return requestJson<RecordingSessionFinalizeResponse>(
+    `/api/projects-v2/${projectIdOrV2Id}/recordings/session/${sessionId}/finalize`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+}
+
+export async function cancelProjectV2RecordingSession(projectIdOrV2Id: string, sessionId: string) {
+  return requestJson<{ canceled: boolean; status: "ACTIVE" | "FINALIZING" | "COMPLETED" | "CANCELED" | "FAILED" }>(
+    `/api/projects-v2/${projectIdOrV2Id}/recordings/session/${sessionId}/cancel`,
+    {
+      method: "POST"
+    }
+  );
 }
 
 export async function runChatEdit(projectIdOrV2Id: string, body: ChatEditRequest) {

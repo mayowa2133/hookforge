@@ -151,6 +151,11 @@ Implemented route handlers:
 - `GET /api/projects-v2/:id/editor-state` unified v2 editor state payload (project, media, transcript, timeline)
 - `POST /api/projects-v2/:id/media/import` v2 freeform media presign
 - `POST /api/projects-v2/:id/media/register` v2 freeform media register + timeline append
+- `POST /api/projects-v2/:id/recordings/session` start recording session (mode, multipart plan, upload topology)
+- `POST /api/projects-v2/:id/recordings/session/:sessionId/chunk` get chunk upload URL or confirm uploaded chunk
+- `GET /api/projects-v2/:id/recordings/session/:sessionId` fetch recording upload/finalize progress
+- `POST /api/projects-v2/:id/recordings/session/:sessionId/finalize` complete upload, register media, queue transcript
+- `POST /api/projects-v2/:id/recordings/session/:sessionId/cancel` cancel upload session and abort multipart upload
 - `GET /api/projects-v2/:id/timeline` v2 timeline fetch
 - `PATCH /api/projects-v2/:id/timeline` v2 timeline patch
 - `GET /api/projects-v2/:id/editor-health` v2 editor sync/queue/render readiness snapshot
@@ -678,6 +683,7 @@ pnpm test:e2e:phase0123456
 pnpm test:e2e:phase01234567
 pnpm test:e2e:enterprise
 pnpm test:e2e:phase01234567-enterprise
+pnpm test:e2e:descript-core
 ```
 
 ## Security / Safety Controls

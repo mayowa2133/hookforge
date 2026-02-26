@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-25T01:41:07.958Z
+Last updated: 2026-02-26T01:14:48.352Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -58,5 +58,9 @@ Last updated: 2026-02-25T01:41:07.958Z
   - Launch Console now ships workspace collaboration controls, subscription + credit-pack billing flows, usage alerts, mobile beta configuration APIs, and install-ready manifest support
 - [x] Post-Phase 6 enterprise hardening and scale
   - Enterprise hardening delivered with workspace OIDC/SAML APIs, SSO policy enforcement, capability-based guards, immutable AuditEvent stream, scoped API key rotation/rate limits, ops SLO/queue/recovery endpoints, security settings UI, and enterprise e2e coverage
+- [-] Descript-first 6-month quality program
+  - Program launched with Descript-first interaction model: transcript primary, timeline precision layer, chat plan/apply/undo safety flow, and recording-first path wired through projects-v2 routes
+- [x] Phase 1 recording core and ingest reliability
+  - Implemented browser recording controls in OpenCut shell, projects-v2 recording session/chunk/finalize/cancel APIs, resumable multipart upload path with fallback registration, auto-transcribe on finalize, dashboard New Recording CTA, and descript-core end-to-end script coverage
 
 Status legend: `[x]=DONE`, `[-]=IN_PROGRESS`, `[ ]=TODO`

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,16 +13,23 @@ import {
   applyProjectV2ChatEdit,
   applyTranscriptOps,
   autoTranscript,
+  cancelProjectV2RecordingSession,
+  finalizeProjectV2RecordingSession,
   getAiJob,
   getLegacyProject,
+  getProjectV2RecordingSession,
   getProjectV2EditorHealth,
   getRenderJob,
   getTimeline,
+  importProjectV2Media,
   getTranscript,
   patchTimeline,
   planProjectV2ChatEdit,
+  postProjectV2RecordingChunk,
   previewTranscriptOps,
+  registerProjectV2Media,
   searchTranscript,
+  startProjectV2RecordingSession,
   startRender,
   trackOpenCutTelemetry,
   undoProjectV2ChatEdit,
@@ -29,6 +37,7 @@ import {
   type ChatPlanResponse,
   type EditorHealthStatus,
   type LegacyProjectPayload,
+  type RecordingMode,
   type TimelineOperation,
   type TimelinePayload,
   type TranscriptPayload,
@@ -109,6 +118,40 @@ function confidenceBadge(confidence: number | null, minConfidence: number) {
   return { label: `${confidence.toFixed(2)}`, variant: "secondary" as const, className: "" };
 }
 
+async function computeSha256Hex(blob: Blob) {
+  const buffer = await blob.arrayBuffer();
+  const hash = await crypto.subtle.digest("SHA-256", buffer);
+  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function parseEtagFromUploadResponse(response: Response) {
+  const raw = response.headers.get("ETag") ?? response.headers.get("etag");
+  if (!raw) {
+    return null;
+  }
+  return raw.replaceAll("\"", "").trim();
+}
+
+async function getCaptureStream(mode: RecordingMode) {
+  if (mode === "CAMERA") {
+    return navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  }
+  if (mode === "MIC") {
+    return navigator.mediaDevices.getUserMedia({ audio: true });
+  }
+  if (mode === "SCREEN") {
+    return navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  }
+  const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const combined = new MediaStream([
+    ...display.getVideoTracks(),
+    ...display.getAudioTracks(),
+    ...mic.getAudioTracks()
+  ]);
+  return combined;
+}
+
 export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, status }: OpenCutTranscriptShellProps) {
   const [project, setProject] = useState<LegacyProjectPayload["project"] | null>(null);
   const [timeline, setTimeline] = useState<TimelinePayload | null>(null);
@@ -173,9 +216,21 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   const [chatApplyResult, setChatApplyResult] = useState<ChatApplyResponse | null>(null);
   const [chatUndoToken, setChatUndoToken] = useState<string | null>(null);
   const [chatUndoResult, setChatUndoResult] = useState<{ restored: boolean; appliedRevisionId: string } | null>(null);
+  const [recordingMode, setRecordingMode] = useState<RecordingMode>("SCREEN_CAMERA");
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
+  const [recordingSessionId, setRecordingSessionId] = useState<string | null>(null);
+  const [recordingUploadProgress, setRecordingUploadProgress] = useState(0);
+  const [recordingStatusLabel, setRecordingStatusLabel] = useState<string>("Idle");
+  const [recordingBusy, setRecordingBusy] = useState(false);
 
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const openedTelemetryRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const searchParams = useSearchParams();
 
   const orderedTracks = useMemo(() => {
     const tracks = timeline?.timeline.tracks ?? [];
@@ -294,6 +349,24 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       outcome: "INFO"
     }).catch(() => {});
   }, [projectV2Id]);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const requestRecording = searchParams.get("recording");
+    if (requestRecording === "1") {
+      setRecordingStatusLabel("Ready to record. Choose mode and click Start Recording.");
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -416,6 +489,22 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }, 2200);
     return () => clearInterval(interval);
   }, [appendHistory, loadProjectSurface, projectV2Id, renderJobId]);
+
+  useEffect(() => {
+    if (!recordingSessionId) {
+      return;
+    }
+    const interval = setInterval(async () => {
+      try {
+        const payload = await getProjectV2RecordingSession(projectV2Id, recordingSessionId);
+        setRecordingUploadProgress(payload.progress.progressPct);
+        setRecordingStatusLabel(`Session ${payload.session.status.toLowerCase()} (${payload.progress.completedParts}/${payload.progress.totalParts})`);
+      } catch {
+        // ignore transient status poll errors
+      }
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [projectV2Id, recordingSessionId]);
 
   const timelineSelectionContext = useMemo(() => ({
     selectedTrackId: selectedTrackId || null,
@@ -761,6 +850,225 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
       setBusy(null);
     }
   };
+
+  const uploadRecordingWithSinglePutFallback = useCallback(async (blob: Blob, fileName: string, mimeType: string) => {
+    setRecordingStatusLabel("Fallback upload (single PUT)...");
+    const importPayload = await importProjectV2Media(projectV2Id, {
+      fileName,
+      mimeType,
+      sizeBytes: blob.size,
+      slot: mimeType.startsWith("audio/") ? "audio" : "primary"
+    });
+    const uploadResponse = await fetch(importPayload.uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": mimeType
+      },
+      body: blob
+    });
+    if (!uploadResponse.ok) {
+      throw new Error(`Fallback upload failed (${uploadResponse.status})`);
+    }
+    const registerPayload = await registerProjectV2Media(projectV2Id, {
+      storageKey: importPayload.storageKey,
+      mimeType,
+      originalFileName: fileName,
+      slot: mimeType.startsWith("audio/") ? "audio" : "primary"
+    });
+    if (!mimeType.startsWith("image/")) {
+      const transcriptJob = await autoTranscript(projectV2Id, {
+        language,
+        diarization: false,
+        punctuationStyle: "auto",
+        confidenceThreshold: minConfidenceForRipple,
+        reDecodeEnabled: true,
+        maxWordsPerSegment: 7,
+        maxCharsPerLine: 24,
+        maxLinesPerSegment: 2
+      });
+      setAutoJobId(transcriptJob.aiJobId);
+      setAutoJobStatus({ status: transcriptJob.status, progress: 0 });
+    }
+    return registerPayload;
+  }, [language, minConfidenceForRipple, projectV2Id]);
+
+  const uploadRecordingBlob = useCallback(async (blob: Blob, mode: RecordingMode) => {
+    const mimeType = blob.type || (mode === "MIC" ? "audio/webm" : "video/webm");
+    const extension = mode === "MIC" ? "webm" : "webm";
+    const fileName = `recording-${new Date().toISOString().replaceAll(":", "-")}.${extension}`;
+    const partSizeBytes = 8 * 1024 * 1024;
+    const totalParts = Math.max(1, Math.ceil(blob.size / partSizeBytes));
+
+    setRecordingBusy(true);
+    setRecordingUploadProgress(0);
+    setRecordingStatusLabel("Creating recording session...");
+
+    try {
+      const started = await startProjectV2RecordingSession(projectV2Id, {
+        mode,
+        fileName,
+        mimeType,
+        sizeBytes: blob.size,
+        totalParts,
+        partSizeBytes,
+        autoTranscribe: true,
+        language
+      });
+      setRecordingSessionId(started.session.id);
+
+      let shouldFallbackToSinglePut = false;
+      for (let index = 0; index < totalParts; index += 1) {
+        const partNumber = index + 1;
+        const begin = index * partSizeBytes;
+        const end = Math.min(blob.size, begin + partSizeBytes);
+        const chunk = blob.slice(begin, end);
+        setRecordingStatusLabel(`Uploading chunk ${partNumber}/${totalParts}...`);
+        const uploadIntent = await postProjectV2RecordingChunk(projectV2Id, started.session.id, { partNumber });
+        if (uploadIntent.mode !== "UPLOAD_URL") {
+          throw new Error("Unexpected chunk response mode");
+        }
+        const uploadResponse = await fetch(uploadIntent.uploadUrl, {
+          method: "PUT",
+          headers: {
+            "Content-Type": mimeType
+          },
+          body: chunk
+        });
+        if (!uploadResponse.ok) {
+          throw new Error(`Chunk upload failed (${uploadResponse.status})`);
+        }
+
+        const eTag = parseEtagFromUploadResponse(uploadResponse);
+        if (!eTag) {
+          shouldFallbackToSinglePut = true;
+          break;
+        }
+
+        const checksumSha256 = await computeSha256Hex(chunk);
+        const chunkResult = await postProjectV2RecordingChunk(projectV2Id, started.session.id, {
+          partNumber,
+          eTag,
+          checksumSha256
+        });
+        if (chunkResult.mode === "CHUNK_CONFIRMED") {
+          setRecordingUploadProgress(chunkResult.progress.progressPct);
+        }
+      }
+
+      if (shouldFallbackToSinglePut) {
+        await cancelProjectV2RecordingSession(projectV2Id, started.session.id);
+        setRecordingStatusLabel("Multipart not available in browser, using fallback...");
+        await uploadRecordingWithSinglePutFallback(blob, fileName, mimeType);
+        setRecordingSessionId(null);
+        setRecordingUploadProgress(100);
+        setRecordingStatusLabel("Recording uploaded (fallback)");
+        appendHistory({
+          label: "Recording upload",
+          detail: "Uploaded using fallback single PUT path",
+          status: "INFO"
+        });
+        await loadProjectSurface();
+        return;
+      }
+
+      setRecordingStatusLabel("Finalizing recording...");
+      const finalized = await finalizeProjectV2RecordingSession(projectV2Id, started.session.id, {
+        autoTranscribe: true,
+        language
+      });
+      setRecordingUploadProgress(100);
+      setRecordingStatusLabel(finalized.status === "COMPLETED" ? "Recording finalized" : `Recording ${finalized.status.toLowerCase()}`);
+      if (finalized.aiJobId) {
+        setAutoJobId(finalized.aiJobId);
+        setAutoJobStatus({ status: "QUEUED", progress: 0 });
+      }
+      await Promise.all([loadProjectSurface(), loadTranscript()]);
+      appendHistory({
+        label: "Recording finalized",
+        detail: finalized.aiJobId ? "Recording uploaded and transcription queued" : "Recording uploaded",
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Recording upload failed";
+      setPanelError(message);
+      setRecordingStatusLabel("Recording failed");
+      appendHistory({
+        label: "Recording error",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setRecordingBusy(false);
+    }
+  }, [appendHistory, language, loadProjectSurface, loadTranscript, projectV2Id, uploadRecordingWithSinglePutFallback]);
+
+  const startCaptureRecording = useCallback(async () => {
+    if (isRecording || recordingBusy) {
+      return;
+    }
+    if (typeof window === "undefined" || !("MediaRecorder" in window)) {
+      setPanelError("MediaRecorder is not supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await getCaptureStream(recordingMode);
+      const preferredMime =
+        recordingMode === "MIC"
+          ? "audio/webm;codecs=opus"
+          : "video/webm;codecs=vp8,opus";
+      const mimeType = MediaRecorder.isTypeSupported(preferredMime)
+        ? preferredMime
+        : recordingMode === "MIC"
+          ? "audio/webm"
+          : "video/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+      recordingStreamRef.current = stream;
+      recordedChunksRef.current = [];
+      setRecordingElapsedSec(0);
+      setRecordingStatusLabel(`Recording ${recordingMode.toLowerCase().replaceAll("_", "+")}...`);
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = async () => {
+        const chunks = recordedChunksRef.current;
+        recordedChunksRef.current = [];
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+          recordingStreamRef.current = null;
+        }
+        setIsRecording(false);
+        if (!chunks.length) {
+          setRecordingStatusLabel("Recording stopped (no data)");
+          return;
+        }
+        const blob = new Blob(chunks, { type: recorder.mimeType || (recordingMode === "MIC" ? "audio/webm" : "video/webm") });
+        await uploadRecordingBlob(blob, recordingMode);
+      };
+      recorder.start(1200);
+      setIsRecording(true);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingElapsedSec((previous) => previous + 1);
+      }, 1000);
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Unable to start recording");
+      setRecordingStatusLabel("Recording unavailable");
+    }
+  }, [isRecording, recordingBusy, recordingMode, uploadRecordingBlob]);
+
+  const stopCaptureRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      return;
+    }
+    recorder.stop();
+  }, []);
 
   const runSearch = async () => {
     setBusy("transcript_search");
@@ -1209,6 +1517,58 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   <Progress value={autoJobStatus.progress} />
                 </div>
               ) : null}
+            </div>
+
+            <div className="rounded-md border p-2 text-xs">
+              <p className="font-semibold">Recording Studio</p>
+              <p className="text-muted-foreground">Record in browser -&gt; chunk upload -&gt; auto transcript.</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button
+                  size="sm"
+                  variant={recordingMode === "SCREEN" ? "secondary" : "outline"}
+                  disabled={isRecording || recordingBusy}
+                  onClick={() => setRecordingMode("SCREEN")}
+                >
+                  Screen
+                </Button>
+                <Button
+                  size="sm"
+                  variant={recordingMode === "CAMERA" ? "secondary" : "outline"}
+                  disabled={isRecording || recordingBusy}
+                  onClick={() => setRecordingMode("CAMERA")}
+                >
+                  Camera
+                </Button>
+                <Button
+                  size="sm"
+                  variant={recordingMode === "MIC" ? "secondary" : "outline"}
+                  disabled={isRecording || recordingBusy}
+                  onClick={() => setRecordingMode("MIC")}
+                >
+                  Mic
+                </Button>
+                <Button
+                  size="sm"
+                  variant={recordingMode === "SCREEN_CAMERA" ? "secondary" : "outline"}
+                  disabled={isRecording || recordingBusy}
+                  onClick={() => setRecordingMode("SCREEN_CAMERA")}
+                >
+                  Screen+Cam
+                </Button>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button size="sm" onClick={startCaptureRecording} disabled={isRecording || recordingBusy}>
+                  Start Recording
+                </Button>
+                <Button size="sm" variant="destructive" onClick={stopCaptureRecording} disabled={!isRecording}>
+                  Stop Recording
+                </Button>
+              </div>
+              <p className="mt-2 text-muted-foreground">
+                {recordingStatusLabel} {isRecording ? `• ${recordingElapsedSec}s` : ""}
+              </p>
+              <Progress value={recordingUploadProgress} className="mt-1" />
+              {recordingSessionId ? <p className="mt-1 text-[10px] text-muted-foreground">Session {recordingSessionId.slice(0, 8)}</p> : null}
             </div>
 
             <div className="rounded-md border p-2 text-xs">

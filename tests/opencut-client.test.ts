@@ -16,9 +16,14 @@ import {
   searchTranscript,
   planProjectV2ChatEdit,
   applyProjectV2Preset,
+  cancelProjectV2RecordingSession,
+  finalizeProjectV2RecordingSession,
   startRender,
+  startProjectV2RecordingSession,
   trackOpenCutTelemetry,
-  undoProjectV2ChatEdit
+  undoProjectV2ChatEdit,
+  postProjectV2RecordingChunk,
+  getProjectV2RecordingSession
 } from "@/lib/opencut/hookforge-client";
 
 function mockResponse(body: unknown, ok = true, status = 200) {
@@ -271,6 +276,140 @@ describe("opencut hookforge client", () => {
       expect.objectContaining({
         method: "POST"
       })
+    );
+  });
+
+  it("supports recording session lifecycle APIs for projects-v2", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          session: {
+            id: "rec_1",
+            projectId: "pv2_7",
+            mode: "SCREEN_CAMERA",
+            language: "en",
+            autoTranscribe: true,
+            storageKey: "projects/pv2_7/recording.webm",
+            totalParts: 2,
+            partSizeBytes: 8388608,
+            minPartSizeBytes: 5242880,
+            recommendedPartSizeBytes: 8388608,
+            status: "ACTIVE"
+          },
+          next: {
+            chunkEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1/chunk",
+            statusEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1",
+            finalizeEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1/finalize",
+            cancelEndpoint: "/api/projects-v2/pv2_7/recordings/session/rec_1/cancel"
+          }
+        })
+      )
+      .mockResolvedValueOnce(mockResponse({ mode: "UPLOAD_URL", partNumber: 1, uploadUrl: "https://upload.local", method: "PUT" }))
+      .mockResolvedValueOnce(
+        mockResponse({
+          session: {
+            id: "rec_1",
+            mode: "SCREEN_CAMERA",
+            status: "ACTIVE",
+            fileName: "recording.webm",
+            mimeType: "video/webm",
+            sizeBytes: 12000,
+            totalParts: 2,
+            partSizeBytes: 8388608,
+            autoTranscribe: true,
+            language: "en",
+            finalizedAssetId: null,
+            finalizeAiJobId: null,
+            failedReason: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            completedAt: null
+          },
+          progress: {
+            totalParts: 2,
+            completedParts: 1,
+            remainingParts: 1,
+            missingPartNumbers: [2],
+            uploadedPartNumbers: [1],
+            progressPct: 50
+          },
+          chunks: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          finalized: true,
+          status: "COMPLETED",
+          recordingSessionId: "rec_1",
+          finalizedAssetId: "ma_1",
+          aiJobId: "ai_1",
+          media: {
+            asset: {
+              id: "a_1",
+              slotKey: "freeform-video-1",
+              kind: "VIDEO",
+              signedUrl: "https://cdn.local/a.mp4",
+              durationSec: 4.2,
+              mimeType: "video/mp4"
+            },
+            mediaAsset: {
+              id: "ma_1",
+              storageKey: "projects/pv2_7/recording.webm",
+              kind: "VIDEO",
+              mimeType: "video/mp4",
+              durationSec: 4.2
+            },
+            project: {
+              id: "pv2_7",
+              status: "READY"
+            },
+            missingSlotKeys: []
+          }
+        })
+      )
+      .mockResolvedValueOnce(mockResponse({ canceled: true, status: "CANCELED" }));
+
+    const started = await startProjectV2RecordingSession("pv2_7", {
+      mode: "SCREEN_CAMERA",
+      fileName: "recording.webm",
+      mimeType: "video/webm",
+      sizeBytes: 12000,
+      totalParts: 2,
+      language: "en"
+    });
+    const chunk = await postProjectV2RecordingChunk("pv2_7", started.session.id, { partNumber: 1 });
+    const status = await getProjectV2RecordingSession("pv2_7", started.session.id);
+    const finalized = await finalizeProjectV2RecordingSession("pv2_7", started.session.id, {
+      autoTranscribe: true,
+      language: "en"
+    });
+    const canceled = await cancelProjectV2RecordingSession("pv2_7", started.session.id);
+
+    expect(chunk.mode).toBe("UPLOAD_URL");
+    expect(status.progress.progressPct).toBe(50);
+    expect(finalized.status).toBe("COMPLETED");
+    expect(canceled.canceled).toBe(true);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "/api/projects-v2/pv2_7/recordings/session",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects-v2/pv2_7/recordings/session/rec_1/chunk",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/projects-v2/pv2_7/recordings/session/rec_1", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
+      "/api/projects-v2/pv2_7/recordings/session/rec_1/finalize",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      5,
+      "/api/projects-v2/pv2_7/recordings/session/rec_1/cancel",
+      expect.objectContaining({ method: "POST" })
     );
   });
 

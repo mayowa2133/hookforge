@@ -168,6 +168,18 @@
       "title": "Post-Phase 6 enterprise hardening and scale",
       "status": "DONE",
       "details": "Enterprise hardening delivered with workspace OIDC/SAML APIs, SSO policy enforcement, capability-based guards, immutable AuditEvent stream, scoped API key rotation/rate limits, ops SLO/queue/recovery endpoints, security settings UI, and enterprise e2e coverage"
+    },
+    {
+      "id": "descript_6month_quality_program",
+      "title": "Descript-first 6-month quality program",
+      "status": "IN_PROGRESS",
+      "details": "Program launched with Descript-first interaction model: transcript primary, timeline precision layer, chat plan/apply/undo safety flow, and recording-first path wired through projects-v2 routes"
+    },
+    {
+      "id": "descript_phase1_recording_core",
+      "title": "Phase 1 recording core and ingest reliability",
+      "status": "DONE",
+      "details": "Implemented browser recording controls in OpenCut shell, projects-v2 recording session/chunk/finalize/cancel APIs, resumable multipart upload path with fallback registration, auto-transcribe on finalize, dashboard New Recording CTA, and descript-core end-to-end script coverage"
     }
   ]
 }

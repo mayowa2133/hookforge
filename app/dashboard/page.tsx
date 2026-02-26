@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CreateAiProjectButton } from "@/components/dashboard/create-ai-project-button";
+import { CreateRecordingProjectButton } from "@/components/dashboard/create-recording-project-button";
 import { CreateProjectButton } from "@/components/dashboard/create-project-button";
 import { ReferenceAnalyzer } from "@/components/dashboard/reference-analyzer";
 import { getCurrentUser } from "@/lib/auth";
@@ -112,6 +113,7 @@ export default async function DashboardPage() {
         <p className="text-sm text-muted-foreground">AI editor first with quick-start templates when you want a head start.</p>
         <div className="flex flex-wrap gap-2">
           {projectsV2FeatureFlags.projectsV2Enabled ? <CreateAiProjectButton /> : null}
+          {projectsV2FeatureFlags.projectsV2Enabled ? <CreateRecordingProjectButton /> : null}
           {projectsV2FeatureFlags.quickStartVisible ? (
             <Link href="/templates" className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-accent">
               Open Quick Start
