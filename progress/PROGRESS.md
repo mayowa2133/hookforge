@@ -1,6 +1,6 @@
 # HookForge Parity Program Progress
 
-Last updated: 2026-02-26T17:56:18.989Z
+Last updated: 2026-02-26T18:41:43.002Z
 
 - [x] Next.js + TypeScript + Tailwind + shadcn scaffolding
   - App Router, UI primitives, global theming, project scripts configured
@@ -84,5 +84,7 @@ Last updated: 2026-02-26T17:56:18.989Z
   - Delivered projects-v2 audio analysis, preset preview/apply/undo, transcript-aware filler detection/removal, A/B segment audition, and confidence-aware safety modes with deterministic revision lineage and test coverage.
 - [x] Descript+ Phase 4 AI co-editor autopilot
   - Implemented capability-specific planner packs + macro prompts, hash-gated apply with explicit decisions for APPLY_WITH_CONFIRM, replay route with lineage safeguards, enriched client contracts, and strengthened e2e coverage for plan/apply/undo/replay flows.
+- [x] Descript+ Phase 5 collaboration, approval workflow, and publishing parity
+  - Implemented review request listing/decision management, workspace brand preset defaults, connector batch export endpoint, connector defaults sourced from brand preset, OpenCut collaboration UI upgrades, and expanded descript-plus/runtime coverage for review requests + brand + publish batch flows.
 
 Status legend: `[x]=DONE`, `[-]=IN_PROGRESS`, `[ ]=TODO`

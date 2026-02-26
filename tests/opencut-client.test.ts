@@ -7,13 +7,17 @@ import {
   applyProjectV2ChatEdit,
   applyProjectV2FillerRemoval,
   createProjectV2ReviewComment,
+  createProjectV2ReviewRequest,
   createProjectV2ShareLink,
   autoTranscript,
   getDesktopConfig,
   getProjectV2ExportProfiles,
   getProjectV2PerfHints,
   getProjectV2ReviewComments,
+  listProjectV2ReviewRequests,
   getProjectV2ShareLinks,
+  getProjectV2BrandPreset,
+  getProjectV2PublishJob,
   getProjectV2EditorHealth,
   getProjectV2EditorState,
   getProjectV2Presets,
@@ -49,6 +53,7 @@ import {
   listTranscriptCheckpoints,
   startRender,
   submitProjectV2ReviewDecision,
+  decideProjectV2ReviewRequest,
   issueProjectV2StudioJoinToken,
   listProjectV2StudioRooms,
   recoverProjectV2RecordingSession,
@@ -57,7 +62,10 @@ import {
   startProjectV2StudioRecording,
   stopProjectV2StudioRecording,
   trackOpenCutTelemetry,
+  publishProjectV2Connector,
+  publishProjectV2ConnectorBatch,
   trackDesktopEvent,
+  upsertProjectV2BrandPreset,
   undoProjectV2AudioEnhancement,
   undoProjectV2Autopilot,
   undoProjectV2ChatEdit,
@@ -1727,5 +1735,205 @@ describe("opencut hookforge client", () => {
       "/api/projects-v2/pv2_11/autopilot/sessions?limit=25",
       undefined
     );
+  });
+
+  it("supports review requests, brand presets, and publish connectors", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_12",
+          projectV2Id: "pv2_12",
+          requests: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          request: {
+            id: "req_1",
+            status: "PENDING",
+            title: "Final review",
+            note: "Please approve",
+            requiredScopes: ["APPROVE"],
+            createdAt: new Date().toISOString()
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          request: {
+            id: "req_1",
+            status: "APPROVED",
+            decisionId: "dec_1",
+            decidedAt: new Date().toISOString(),
+            decidedByUserId: "user_1"
+          },
+          decision: {
+            id: "dec_1",
+            status: "APPROVED",
+            revisionId: null,
+            note: null,
+            createdAt: new Date().toISOString()
+          },
+          logId: "log_1"
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          projectV2Id: "pv2_12",
+          brandPreset: {
+            id: null,
+            name: "Default Brand Preset",
+            captionStylePresetId: null,
+            audioPreset: null,
+            defaultConnector: "package",
+            defaultVisibility: "private",
+            defaultTitlePrefix: null,
+            defaultTags: [],
+            metadata: {},
+            createdAt: null,
+            updatedAt: null
+          },
+          exportProfileDefaults: null,
+          captionStylePresets: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          projectV2Id: "pv2_12",
+          brandPreset: {
+            id: "brand_1",
+            name: "Creator Kit",
+            captionStylePresetId: null,
+            audioPreset: "dialogue_enhance",
+            defaultConnector: "youtube",
+            defaultVisibility: "unlisted",
+            defaultTitlePrefix: "HookForge",
+            defaultTags: ["saas"],
+            metadata: {},
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          },
+          linkedExportProfile: {
+            id: "profile_1",
+            name: "Creator Kit Default Export",
+            isDefault: true,
+            audioPreset: "dialogue_enhance",
+            captionStylePresetId: null,
+            updatedAt: new Date().toISOString()
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_12",
+          projectV2Id: "pv2_12",
+          publishJob: {
+            id: "job_1",
+            connector: "youtube",
+            status: "DONE",
+            output: {},
+            errorMessage: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_12",
+          projectV2Id: "pv2_12",
+          jobs: [
+            {
+              id: "job_2",
+              connector: "youtube",
+              status: "DONE",
+              output: {},
+              errorMessage: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            },
+            {
+              id: "job_3",
+              connector: "package",
+              status: "DONE",
+              output: {},
+              errorMessage: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          ],
+          summary: {
+            total: 2,
+            done: 2,
+            error: 0
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_12",
+          projectV2Id: "pv2_12",
+          publishJob: {
+            id: "job_1",
+            connector: "youtube",
+            status: "DONE",
+            payload: {},
+            output: {},
+            errorMessage: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        })
+      );
+
+    const list = await listProjectV2ReviewRequests("pv2_12", 20);
+    const created = await createProjectV2ReviewRequest("pv2_12", {
+      title: "Final review",
+      requiredScopes: ["APPROVE"]
+    });
+    const decided = await decideProjectV2ReviewRequest("pv2_12", "req_1", {
+      status: "APPROVED"
+    });
+    const brand = await getProjectV2BrandPreset("pv2_12");
+    const brandSaved = await upsertProjectV2BrandPreset("pv2_12", {
+      name: "Creator Kit",
+      defaultConnector: "youtube",
+      defaultVisibility: "unlisted",
+      defaultTitlePrefix: "HookForge"
+    });
+    const publishOne = await publishProjectV2Connector("pv2_12", "youtube", {
+      title: "Episode export"
+    });
+    const publishBatch = await publishProjectV2ConnectorBatch("pv2_12", {
+      connectors: ["youtube", "package"],
+      baseInput: {
+        visibility: "private"
+      }
+    });
+    const publishJob = await getProjectV2PublishJob("pv2_12", "job_1");
+
+    expect(list.requests).toHaveLength(0);
+    expect(created.request.id).toBe("req_1");
+    expect(decided.request.status).toBe("APPROVED");
+    expect(brand.brandPreset.defaultConnector).toBe("package");
+    expect(brandSaved.brandPreset.id).toBe("brand_1");
+    expect(publishOne.publishJob.id).toBe("job_1");
+    expect(publishBatch.summary.total).toBe(2);
+    expect(publishJob.publishJob.status).toBe("DONE");
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/projects-v2/pv2_12/review/requests?limit=20", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/projects-v2/pv2_12/review/requests", expect.objectContaining({ method: "POST" }));
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects-v2/pv2_12/review/requests/req_1/decision",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(4, "/api/projects-v2/pv2_12/brand-preset", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(5, "/api/projects-v2/pv2_12/brand-preset", expect.objectContaining({ method: "POST" }));
+    expect(fetchSpy).toHaveBeenNthCalledWith(6, "/api/projects-v2/pv2_12/publish/connectors/youtube/export", expect.objectContaining({ method: "POST" }));
+    expect(fetchSpy).toHaveBeenNthCalledWith(7, "/api/projects-v2/pv2_12/publish/connectors/batch/export", expect.objectContaining({ method: "POST" }));
+    expect(fetchSpy).toHaveBeenNthCalledWith(8, "/api/projects-v2/pv2_12/publish/jobs/job_1", undefined);
   });
 });

@@ -257,9 +257,13 @@ Implemented route handlers:
 - `PATCH /api/workspace/security/sso/providers/:id` update provider
 - `GET /api/workspace/projects` list shared workspace projects
 - `POST /api/projects-v2/:id/review/requests` create explicit review request
+- `GET /api/projects-v2/:id/review/requests` list review requests + decision logs
 - `POST /api/projects-v2/:id/review/requests/:requestId/decision` approve/reject request and persist decision log
 - `POST /api/projects-v2/:id/publish/connectors/:connector/export` queue connector export job (`youtube|drive|package`)
+- `POST /api/projects-v2/:id/publish/connectors/batch/export` queue batch connector exports
 - `GET /api/projects-v2/:id/publish/jobs/:jobId` fetch publish connector job status/result
+- `GET /api/projects-v2/:id/brand-preset` get workspace brand defaults for publishing
+- `POST /api/projects-v2/:id/brand-preset` upsert workspace brand defaults (caption/audio/export defaults)
 - `GET /api/billing/plans` plan and credit-pack catalog
 - `GET /api/billing/overview` billing + usage overview
 - `POST /api/billing/subscribe` activate subscription tier

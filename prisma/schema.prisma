@@ -262,6 +262,7 @@ model User {
   reviewCommentsResolved ReviewComment[]   @relation("ReviewCommentResolvedBy")
   reviewDecisions    ReviewDecision[]      @relation("ReviewDecisionDecider")
   exportProfilesCreated ExportProfile[]    @relation("ExportProfileCreatedBy")
+  workspaceBrandPresetsUpdated WorkspaceBrandPreset[] @relation("WorkspaceBrandPresetUpdatedBy")
 }
 
 model Workspace {
@@ -306,6 +307,7 @@ model Workspace {
   reviewComments      ReviewComment[]
   reviewDecisions     ReviewDecision[]
   exportProfiles      ExportProfile[]
+  brandPreset         WorkspaceBrandPreset?
 
   @@index([ownerId])
 }
@@ -739,8 +741,31 @@ model CaptionStylePreset {
   workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   captions     CaptionSegment[]
   exportProfiles ExportProfile[]
+  workspaceBrandPresets WorkspaceBrandPreset[]
 
   @@index([workspaceId])
+}
+
+model WorkspaceBrandPreset {
+  id                  String    @id @default(cuid())
+  workspaceId         String    @unique
+  updatedByUserId     String?
+  name                String    @default("Default Brand Preset")
+  captionStylePresetId String?
+  audioPreset         String?
+  defaultConnector    String    @default("package")
+  defaultVisibility   String    @default("private")
+  defaultTitlePrefix  String?
+  defaultTags         String[]  @default([])
+  metadata            Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  updatedBy           User?     @relation("WorkspaceBrandPresetUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  captionStylePreset  CaptionStylePreset? @relation(fields: [captionStylePresetId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, updatedAt])
 }
 
 model ShareLink {

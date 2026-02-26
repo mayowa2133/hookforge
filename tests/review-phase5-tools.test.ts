@@ -3,6 +3,7 @@ import {
   buildProjectShareUrl,
   evaluateApprovalGate,
   hasShareScope,
+  normalizeBrandPresetInput,
   normalizeCommentAnchor
 } from "@/lib/review-phase5-tools";
 
@@ -51,5 +52,21 @@ describe("review phase5 tools", () => {
   it("builds deterministic share url", () => {
     expect(buildProjectShareUrl("https://app.example.com/", "pv2_1", "tok_1"))
       .toBe("https://app.example.com/opencut/projects-v2/pv2_1?shareToken=tok_1");
+  });
+
+  it("normalizes brand preset defaults and deduplicates tags", () => {
+    const normalized = normalizeBrandPresetInput({
+      name: "  Creator Brand Kit  ",
+      defaultConnector: "unknown",
+      defaultVisibility: "unlisted",
+      defaultTags: ["SaaS", "saas", "growth", "x", "  hooks  "],
+      defaultTitlePrefix: "  Launch  "
+    });
+
+    expect(normalized.name).toBe("Creator Brand Kit");
+    expect(normalized.defaultConnector).toBe("package");
+    expect(normalized.defaultVisibility).toBe("unlisted");
+    expect(normalized.defaultTags).toEqual(["saas", "growth", "hooks"]);
+    expect(normalized.defaultTitlePrefix).toBe("Launch");
   });
 });

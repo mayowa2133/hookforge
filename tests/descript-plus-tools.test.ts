@@ -49,7 +49,7 @@ describe("descript+ tools", () => {
     const { StudioJoinTokenSchema } = await import("@/lib/studio/rooms");
     const { AutopilotApplySchema } = await import("@/lib/autopilot");
     const { ReviewRequestCreateSchema, ReviewRequestDecisionSchema } = await import("@/lib/review-requests");
-    const { PublishConnectorSchema, PublishExportSchema } = await import("@/lib/publish/connectors");
+    const { PublishBatchExportSchema, PublishConnectorSchema, PublishExportSchema } = await import("@/lib/publish/connectors");
 
     expect(() =>
       StudioJoinTokenSchema.parse({
@@ -98,6 +98,19 @@ describe("descript+ tools", () => {
       PublishExportSchema.parse({
         title: "Launch export",
         visibility: "private"
+      })
+    ).not.toThrow();
+    expect(() =>
+      PublishBatchExportSchema.parse({
+        connectors: ["youtube", "package"],
+        baseInput: {
+          title: "Batch export"
+        },
+        byConnector: {
+          youtube: {
+            visibility: "unlisted"
+          }
+        }
       })
     ).not.toThrow();
   });

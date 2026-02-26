@@ -246,6 +246,12 @@
       "title": "Descript+ Phase 4 AI co-editor autopilot",
       "status": "DONE",
       "details": "Implemented capability-specific planner packs + macro prompts, hash-gated apply with explicit decisions for APPLY_WITH_CONFIRM, replay route with lineage safeguards, enriched client contracts, and strengthened e2e coverage for plan/apply/undo/replay flows."
+    },
+    {
+      "id": "descript_plus_phase5_collab_publish",
+      "title": "Descript+ Phase 5 collaboration, approval workflow, and publishing parity",
+      "status": "DONE",
+      "details": "Implemented review request listing/decision management, workspace brand preset defaults, connector batch export endpoint, connector defaults sourced from brand preset, OpenCut collaboration UI upgrades, and expanded descript-plus/runtime coverage for review requests + brand + publish batch flows."
     }
   ]
 }

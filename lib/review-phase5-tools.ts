@@ -1,4 +1,8 @@
 export type Phase5ShareScope = "VIEW" | "COMMENT" | "APPROVE";
+export const PHASE5_PUBLISH_CONNECTORS = ["youtube", "drive", "package"] as const;
+export const PHASE5_PUBLISH_VISIBILITY = ["private", "unlisted", "public"] as const;
+export type Phase5PublishConnector = (typeof PHASE5_PUBLISH_CONNECTORS)[number];
+export type Phase5PublishVisibility = (typeof PHASE5_PUBLISH_VISIBILITY)[number];
 
 type ReviewDecisionLike = {
   status: "APPROVED" | "REJECTED";
@@ -88,4 +92,36 @@ export function evaluateApprovalGate(params: {
 export function buildProjectShareUrl(baseUrl: string, projectV2Id: string, token: string) {
   const normalized = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
   return `${normalized}/opencut/projects-v2/${projectV2Id}?shareToken=${encodeURIComponent(token)}`;
+}
+
+export function normalizeBrandPresetInput(input: {
+  name?: string | null;
+  captionStylePresetId?: string | null;
+  audioPreset?: string | null;
+  defaultConnector?: string | null;
+  defaultVisibility?: string | null;
+  defaultTitlePrefix?: string | null;
+  defaultTags?: string[] | null;
+  metadata?: Record<string, unknown> | null;
+}) {
+  const connector = PHASE5_PUBLISH_CONNECTORS.includes((input.defaultConnector ?? "") as Phase5PublishConnector)
+    ? (input.defaultConnector as Phase5PublishConnector)
+    : "package";
+  const visibility = PHASE5_PUBLISH_VISIBILITY.includes((input.defaultVisibility ?? "") as Phase5PublishVisibility)
+    ? (input.defaultVisibility as Phase5PublishVisibility)
+    : "private";
+  const tags = (input.defaultTags ?? [])
+    .map((tag) => tag.trim().toLowerCase())
+    .filter((tag) => tag.length >= 2 && tag.length <= 32)
+    .slice(0, 12);
+  return {
+    name: (input.name ?? "Default Brand Preset").trim().slice(0, 120) || "Default Brand Preset",
+    captionStylePresetId: input.captionStylePresetId?.trim() || null,
+    audioPreset: input.audioPreset?.trim().slice(0, 64) || null,
+    defaultConnector: connector,
+    defaultVisibility: visibility,
+    defaultTitlePrefix: input.defaultTitlePrefix?.trim().slice(0, 120) || null,
+    defaultTags: Array.from(new Set(tags)),
+    metadata: input.metadata ?? {}
+  };
 }

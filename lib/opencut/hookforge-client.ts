@@ -365,6 +365,18 @@ type SubmitReviewDecisionRequest = {
   requireApproval?: boolean;
 };
 
+type CreateReviewRequestRequest = {
+  title: string;
+  note?: string;
+  requiredScopes?: Array<"VIEW" | "COMMENT" | "APPROVE" | "EDIT">;
+};
+
+type DecideReviewRequestRequest = {
+  status: "APPROVED" | "REJECTED";
+  note?: string;
+  requireApproval?: boolean;
+};
+
 type CreateExportProfileRequest = {
   name: string;
   container?: string;
@@ -381,6 +393,31 @@ type CreateExportProfileRequest = {
 type ApplyExportProfileRequest = {
   profileId?: string;
   createProfile?: CreateExportProfileRequest;
+};
+
+type PublishConnectorExportRequest = {
+  exportProfileId?: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  visibility?: "private" | "unlisted" | "public";
+};
+
+type PublishConnectorBatchRequest = {
+  connectors: Array<"youtube" | "drive" | "package">;
+  baseInput?: PublishConnectorExportRequest;
+  byConnector?: Partial<Record<"youtube" | "drive" | "package", PublishConnectorExportRequest>>;
+};
+
+type BrandPresetUpsertRequest = {
+  name?: string;
+  captionStylePresetId?: string | null;
+  audioPreset?: string | null;
+  defaultConnector?: "youtube" | "drive" | "package";
+  defaultVisibility?: "private" | "unlisted" | "public";
+  defaultTitlePrefix?: string | null;
+  defaultTags?: string[];
+  metadata?: Record<string, unknown>;
 };
 
 export type RecordingMode = "SCREEN" | "CAMERA" | "MIC" | "SCREEN_CAMERA";
@@ -1321,6 +1358,53 @@ export type SubmitReviewDecisionPayload = {
   approvalRequired: boolean;
 };
 
+export type ProjectReviewRequestsPayload = {
+  projectId: string;
+  projectV2Id: string;
+  requests: Array<{
+    id: string;
+    title: string;
+    note: string | null;
+    requiredScopes: string[];
+    status: "PENDING" | "APPROVED" | "REJECTED";
+    decisionId: string | null;
+    decidedAt: string | null;
+    decidedByUserId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    logs: Array<{
+      id: string;
+      status: "APPROVED" | "REJECTED";
+      note: string | null;
+      decidedByUserId: string | null;
+      createdAt: string;
+    }>;
+  }>;
+};
+
+export type CreateReviewRequestPayload = {
+  request: {
+    id: string;
+    status: "PENDING" | "APPROVED" | "REJECTED";
+    title: string;
+    note: string | null;
+    requiredScopes: string[];
+    createdAt: string;
+  };
+};
+
+export type DecideReviewRequestPayload = {
+  request: {
+    id: string;
+    status: "PENDING" | "APPROVED" | "REJECTED";
+    decisionId: string | null;
+    decidedAt: string | null;
+    decidedByUserId: string | null;
+  };
+  decision: SubmitReviewDecisionPayload["decision"];
+  logId: string;
+};
+
 export type ExportProfilesPayload = {
   workspaceId: string;
   projectV2Id: string;
@@ -1367,6 +1451,98 @@ export type ApplyExportProfilePayload = {
     isDefault: boolean;
     updatedAt: string;
   }>;
+};
+
+export type WorkspaceBrandPresetPayload = {
+  workspaceId: string;
+  projectV2Id: string;
+  brandPreset: {
+    id: string | null;
+    name: string;
+    captionStylePresetId: string | null;
+    audioPreset: string | null;
+    defaultConnector: "youtube" | "drive" | "package";
+    defaultVisibility: "private" | "unlisted" | "public";
+    defaultTitlePrefix: string | null;
+    defaultTags: string[];
+    metadata: Record<string, unknown>;
+    createdAt: string | null;
+    updatedAt: string | null;
+  };
+  exportProfileDefaults: {
+    id: string;
+    name: string;
+    container: string;
+    resolution: string;
+    fps: number;
+    audioPreset: string | null;
+    captionStylePresetId: string | null;
+    updatedAt: string;
+  } | null;
+  captionStylePresets: Array<{
+    id: string;
+    name: string;
+    isSystem: boolean;
+  }>;
+};
+
+export type WorkspaceBrandPresetUpsertPayload = {
+  workspaceId: string;
+  projectV2Id: string;
+  brandPreset: {
+    id: string;
+    name: string;
+    captionStylePresetId: string | null;
+    audioPreset: string | null;
+    defaultConnector: "youtube" | "drive" | "package";
+    defaultVisibility: "private" | "unlisted" | "public";
+    defaultTitlePrefix: string | null;
+    defaultTags: string[];
+    metadata: Record<string, unknown> | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  linkedExportProfile: {
+    id: string;
+    name: string;
+    isDefault: boolean;
+    audioPreset: string | null;
+    captionStylePresetId: string | null;
+    updatedAt: string;
+  };
+};
+
+export type PublishConnectorJobPayload = {
+  projectId: string;
+  projectV2Id: string;
+  publishJob: {
+    id: string;
+    connector: string;
+    status: "QUEUED" | "RUNNING" | "DONE" | "ERROR";
+    output: unknown;
+    errorMessage: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+};
+
+export type PublishConnectorBatchPayload = {
+  projectId: string | null;
+  projectV2Id: string | null;
+  jobs: Array<{
+    id: string;
+    connector: string;
+    status: "QUEUED" | "RUNNING" | "DONE" | "ERROR";
+    output: unknown;
+    errorMessage: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  summary: {
+    total: number;
+    done: number;
+    error: number;
+  };
 };
 
 export type PresetCatalogResponse = {
@@ -1990,6 +2166,33 @@ export async function submitProjectV2ReviewDecision(projectIdOrV2Id: string, bod
   });
 }
 
+export async function listProjectV2ReviewRequests(projectIdOrV2Id: string, limit = 30) {
+  return requestJson<ProjectReviewRequestsPayload>(`/api/projects-v2/${projectIdOrV2Id}/review/requests?limit=${limit}`);
+}
+
+export async function createProjectV2ReviewRequest(projectIdOrV2Id: string, body: CreateReviewRequestRequest) {
+  return requestJson<CreateReviewRequestPayload>(`/api/projects-v2/${projectIdOrV2Id}/review/requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function decideProjectV2ReviewRequest(
+  projectIdOrV2Id: string,
+  requestId: string,
+  body: DecideReviewRequestRequest
+) {
+  return requestJson<DecideReviewRequestPayload>(
+    `/api/projects-v2/${projectIdOrV2Id}/review/requests/${requestId}/decision`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+}
+
 export async function getProjectV2ExportProfiles(projectIdOrV2Id: string) {
   return requestJson<ExportProfilesPayload>(`/api/projects-v2/${projectIdOrV2Id}/export/profile`);
 }
@@ -2000,6 +2203,58 @@ export async function applyProjectV2ExportProfile(projectIdOrV2Id: string, body:
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+}
+
+export async function getProjectV2BrandPreset(projectIdOrV2Id: string) {
+  return requestJson<WorkspaceBrandPresetPayload>(`/api/projects-v2/${projectIdOrV2Id}/brand-preset`);
+}
+
+export async function upsertProjectV2BrandPreset(projectIdOrV2Id: string, body: BrandPresetUpsertRequest) {
+  return requestJson<WorkspaceBrandPresetUpsertPayload>(`/api/projects-v2/${projectIdOrV2Id}/brand-preset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function publishProjectV2Connector(
+  projectIdOrV2Id: string,
+  connector: "youtube" | "drive" | "package",
+  body: PublishConnectorExportRequest = {}
+) {
+  return requestJson<PublishConnectorJobPayload>(
+    `/api/projects-v2/${projectIdOrV2Id}/publish/connectors/${connector}/export`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+}
+
+export async function publishProjectV2ConnectorBatch(projectIdOrV2Id: string, body: PublishConnectorBatchRequest) {
+  return requestJson<PublishConnectorBatchPayload>(`/api/projects-v2/${projectIdOrV2Id}/publish/connectors/batch/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2PublishJob(projectIdOrV2Id: string, jobId: string) {
+  return requestJson<{
+    projectId: string;
+    projectV2Id: string;
+    publishJob: {
+      id: string;
+      connector: string;
+      status: "QUEUED" | "RUNNING" | "DONE" | "ERROR";
+      payload: unknown;
+      output: unknown;
+      errorMessage: string | null;
+      createdAt: string;
+      updatedAt: string;
+    };
+  }>(`/api/projects-v2/${projectIdOrV2Id}/publish/jobs/${jobId}`);
 }
 
 export async function getProjectV2Presets() {

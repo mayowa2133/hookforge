@@ -83,6 +83,72 @@ export async function createReviewRequest(params: {
   };
 }
 
+export async function listReviewRequests(params: {
+  projectIdOrV2Id: string;
+  limit?: number;
+}) {
+  const ctx = await requireProjectContext(params.projectIdOrV2Id);
+  const membership = await getMembership(ctx.workspace.id, ctx.user.id);
+  if (!hasWorkspaceCapability(membership.role, "workspace.projects.read")) {
+    throw new Error("Unauthorized");
+  }
+
+  const limit = Math.max(1, Math.min(100, Math.trunc(params.limit ?? 30)));
+  const requests = await prisma.reviewRequest.findMany({
+    where: {
+      workspaceId: ctx.workspace.id,
+      projectId: ctx.projectV2.id
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    take: limit
+  });
+
+  const logs = requests.length > 0
+    ? await prisma.reviewDecisionLog.findMany({
+        where: {
+          workspaceId: ctx.workspace.id,
+          projectId: ctx.projectV2.id,
+          requestId: {
+            in: requests.map((entry) => entry.id)
+          }
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: limit * 6
+      })
+    : [];
+
+  return {
+    projectId: ctx.legacyProject.id,
+    projectV2Id: ctx.projectV2.id,
+    requests: requests.map((request) => ({
+      id: request.id,
+      title: request.title,
+      note: request.note,
+      requiredScopes: request.requiredScopes,
+      status: request.status,
+      decisionId: request.decisionId,
+      decidedAt: request.decidedAt?.toISOString() ?? null,
+      decidedByUserId: request.decidedByUserId,
+      createdAt: request.createdAt.toISOString(),
+      updatedAt: request.updatedAt.toISOString(),
+      logs: logs
+        .filter((log) => log.requestId === request.id)
+        .slice(0, 12)
+        .map((log) => ({
+          id: log.id,
+          status: log.status,
+          note: log.note,
+          decidedByUserId: log.decidedByUserId,
+          createdAt: log.createdAt.toISOString()
+        }))
+    }))
+  };
+}
+
 export async function decideReviewRequest(params: {
   projectIdOrV2Id: string;
   requestId: string;

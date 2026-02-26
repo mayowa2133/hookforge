@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
   applyProjectV2ExportProfile,
+  createProjectV2ReviewRequest,
   applyProjectV2AudioEnhancement,
   applyProjectV2ChatEdit,
   applyProjectV2FillerRemoval,
@@ -29,8 +30,10 @@ import {
   getDesktopConfig,
   getProjectV2ChatSessions,
   getProjectV2ExportProfiles,
+  getProjectV2BrandPreset,
   getProjectV2PerfHints,
   getProjectV2ReviewComments,
+  listProjectV2ReviewRequests,
   getProjectV2ShareLinks,
   getProjectV2AudioAnalysis,
   getTranscriptIssues,
@@ -66,9 +69,13 @@ import {
   startProjectV2RecordingSession,
   startRender,
   submitProjectV2ReviewDecision,
+  decideProjectV2ReviewRequest,
   trackDesktopEvent,
   trackOpenCutTelemetry,
   updateProjectV2ReviewCommentStatus,
+  publishProjectV2Connector,
+  publishProjectV2ConnectorBatch,
+  upsertProjectV2BrandPreset,
   undoProjectV2AudioEnhancement,
   undoProjectV2ChatEdit,
   type AudioAnalysisPayload,
@@ -86,6 +93,8 @@ import {
   type LegacyProjectPayload,
   type ProjectPerfHintsPayload,
   type ProjectReviewCommentsPayload,
+  type ProjectReviewRequestsPayload,
+  type PublishConnectorBatchPayload,
   type ProjectShareLinksPayload,
   type RecordingMode,
   type RecordingSessionRecoverResponse,
@@ -99,7 +108,8 @@ import {
   type RevisionGraphPayload,
   type TimelinePayload,
   type TranscriptPayload,
-  type TranscriptRangeSelection
+  type TranscriptRangeSelection,
+  type WorkspaceBrandPresetPayload
 } from "@/lib/opencut/hookforge-client";
 import { clampPlaybackSeekSeconds, computeSplitPointMs, computeTrackReorderTarget } from "@/lib/opencut/timeline-helpers";
 
@@ -374,6 +384,25 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     createdAt: string;
     revisionId: string | null;
   } | null>(null);
+  const [reviewRequests, setReviewRequests] = useState<ProjectReviewRequestsPayload["requests"]>([]);
+  const [reviewRequestTitle, setReviewRequestTitle] = useState("Request final approval");
+  const [reviewRequestNote, setReviewRequestNote] = useState("Please review and approve this cut.");
+  const [selectedReviewRequestId, setSelectedReviewRequestId] = useState("");
+  const [brandPreset, setBrandPreset] = useState<WorkspaceBrandPresetPayload["brandPreset"] | null>(null);
+  const [brandCaptionStyleOptions, setBrandCaptionStyleOptions] = useState<WorkspaceBrandPresetPayload["captionStylePresets"]>([]);
+  const [brandName, setBrandName] = useState("Default Brand Preset");
+  const [brandCaptionStylePresetId, setBrandCaptionStylePresetId] = useState<string>("");
+  const [brandAudioPreset, setBrandAudioPreset] = useState("dialogue_enhance");
+  const [brandDefaultConnector, setBrandDefaultConnector] = useState<"youtube" | "drive" | "package">("package");
+  const [brandDefaultVisibility, setBrandDefaultVisibility] = useState<"private" | "unlisted" | "public">("private");
+  const [brandTitlePrefix, setBrandTitlePrefix] = useState("");
+  const [brandTagsDraft, setBrandTagsDraft] = useState("creator,launch");
+  const [publishConnector, setPublishConnector] = useState<"youtube" | "drive" | "package">("package");
+  const [publishTitleDraft, setPublishTitleDraft] = useState("Creator Pack Export");
+  const [publishVisibilityDraft, setPublishVisibilityDraft] = useState<"private" | "unlisted" | "public">("private");
+  const [publishLatestJobId, setPublishLatestJobId] = useState<string | null>(null);
+  const [publishLatestStatus, setPublishLatestStatus] = useState<string | null>(null);
+  const [publishBatchSummary, setPublishBatchSummary] = useState<PublishConnectorBatchPayload["summary"] | null>(null);
   const [exportProfiles, setExportProfiles] = useState<ExportProfilesPayload["exportProfiles"]>([]);
   const [selectedExportProfileId, setSelectedExportProfileId] = useState("");
   const [newExportProfileName, setNewExportProfileName] = useState("Social 9x16");
@@ -594,20 +623,45 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
   }, [projectV2Id]);
 
   const loadReviewPublishing = useCallback(async () => {
-    const [sharePayload, commentsPayload, exportPayload] = await Promise.allSettled([
+    const [sharePayload, commentsPayload, exportPayload, requestsPayload, brandPayload] = await Promise.allSettled([
       getProjectV2ShareLinks(projectV2Id),
       getProjectV2ReviewComments(projectV2Id, shareToken),
-      getProjectV2ExportProfiles(projectV2Id)
+      getProjectV2ExportProfiles(projectV2Id),
+      listProjectV2ReviewRequests(projectV2Id, 40),
+      getProjectV2BrandPreset(projectV2Id)
     ]);
     const shareLinksPayload = sharePayload.status === "fulfilled" ? sharePayload.value : { shareLinks: [] };
     const reviewCommentsPayload = commentsPayload.status === "fulfilled" ? commentsPayload.value : { comments: [] };
     const exportProfilesPayload = exportPayload.status === "fulfilled" ? exportPayload.value : { exportProfiles: [] };
+    const reviewRequestsPayload: { requests: ProjectReviewRequestsPayload["requests"] } =
+      requestsPayload.status === "fulfilled" ? requestsPayload.value : { requests: [] };
+    const brandPresetPayload = brandPayload.status === "fulfilled" ? brandPayload.value : null;
 
     setShareLinks(shareLinksPayload.shareLinks);
     setReviewComments(reviewCommentsPayload.comments);
+    setReviewRequests(reviewRequestsPayload.requests);
+    setSelectedReviewRequestId((previous) => {
+      if (previous && reviewRequestsPayload.requests.some((request) => request.id === previous)) {
+        return previous;
+      }
+      return reviewRequestsPayload.requests[0]?.id ?? "";
+    });
     if ("reviewGate" in reviewCommentsPayload) {
       setReviewApprovalRequired(reviewCommentsPayload.reviewGate.approvalRequired);
       setReviewLatestDecision(reviewCommentsPayload.reviewGate.latestDecision);
+    }
+    if (brandPresetPayload) {
+      setBrandPreset(brandPresetPayload.brandPreset);
+      setBrandCaptionStyleOptions(brandPresetPayload.captionStylePresets);
+      setBrandName(brandPresetPayload.brandPreset.name);
+      setBrandCaptionStylePresetId(brandPresetPayload.brandPreset.captionStylePresetId ?? "");
+      setBrandAudioPreset(brandPresetPayload.brandPreset.audioPreset ?? "dialogue_enhance");
+      setBrandDefaultConnector(brandPresetPayload.brandPreset.defaultConnector);
+      setBrandDefaultVisibility(brandPresetPayload.brandPreset.defaultVisibility);
+      setBrandTitlePrefix(brandPresetPayload.brandPreset.defaultTitlePrefix ?? "");
+      setBrandTagsDraft(brandPresetPayload.brandPreset.defaultTags.join(","));
+      setPublishConnector(brandPresetPayload.brandPreset.defaultConnector);
+      setPublishVisibilityDraft(brandPresetPayload.brandPreset.defaultVisibility);
     }
     setExportProfiles(exportProfilesPayload.exportProfiles);
     setSelectedExportProfileId((previous) => {
@@ -2990,6 +3044,168 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
     }
   };
 
+  const createReviewRequestAction = async () => {
+    const title = reviewRequestTitle.trim();
+    if (!title) {
+      return;
+    }
+    setBusy("review_request_create");
+    setPanelError(null);
+    try {
+      await createProjectV2ReviewRequest(projectV2Id, {
+        title,
+        note: reviewRequestNote.trim() || undefined,
+        requiredScopes: ["APPROVE"]
+      });
+      await loadReviewPublishing();
+      appendHistory({
+        label: "Review request",
+        detail: "Created review request",
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create review request";
+      setPanelError(message);
+      appendHistory({
+        label: "Review request",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const decideSelectedReviewRequestAction = async (decision: "APPROVED" | "REJECTED") => {
+    if (!selectedReviewRequestId) {
+      return;
+    }
+    setBusy("review_request_decide");
+    setPanelError(null);
+    try {
+      await decideProjectV2ReviewRequest(projectV2Id, selectedReviewRequestId, {
+        status: decision,
+        note: reviewDecisionNote.trim() || undefined,
+        requireApproval: reviewApprovalRequired
+      });
+      await loadReviewPublishing();
+      appendHistory({
+        label: "Review request",
+        detail: `${decision.toLowerCase()} request`,
+        status: decision === "APPROVED" ? "SUCCESS" : "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to decide review request";
+      setPanelError(message);
+      appendHistory({
+        label: "Review request",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveBrandPresetAction = async () => {
+    setBusy("brand_preset_save");
+    setPanelError(null);
+    try {
+      const tags = brandTagsDraft
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+        .slice(0, 12);
+      const payload = await upsertProjectV2BrandPreset(projectV2Id, {
+        name: brandName.trim() || "Default Brand Preset",
+        captionStylePresetId: brandCaptionStylePresetId || null,
+        audioPreset: brandAudioPreset || null,
+        defaultConnector: brandDefaultConnector,
+        defaultVisibility: brandDefaultVisibility,
+        defaultTitlePrefix: brandTitlePrefix.trim() || null,
+        defaultTags: tags
+      });
+      setBrandPreset({
+        ...payload.brandPreset,
+        metadata: (payload.brandPreset.metadata ?? {}) as Record<string, unknown>
+      });
+      await loadReviewPublishing();
+      appendHistory({
+        label: "Brand preset",
+        detail: "Saved workspace defaults",
+        status: "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save brand preset";
+      setPanelError(message);
+      appendHistory({
+        label: "Brand preset",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const publishConnectorAction = async () => {
+    setBusy("publish_connector_single");
+    setPanelError(null);
+    try {
+      const payload = await publishProjectV2Connector(projectV2Id, publishConnector, {
+        title: publishTitleDraft.trim() || undefined,
+        visibility: publishVisibilityDraft
+      });
+      setPublishLatestJobId(payload.publishJob.id);
+      setPublishLatestStatus(payload.publishJob.status);
+      appendHistory({
+        label: "Publish connector",
+        detail: `${payload.publishJob.connector} ${payload.publishJob.status.toLowerCase()}`,
+        status: payload.publishJob.status === "DONE" ? "SUCCESS" : "INFO"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to publish connector job";
+      setPanelError(message);
+      appendHistory({
+        label: "Publish connector",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const publishConnectorBatchAction = async () => {
+    setBusy("publish_connector_batch");
+    setPanelError(null);
+    try {
+      const payload = await publishProjectV2ConnectorBatch(projectV2Id, {
+        connectors: [brandDefaultConnector, "package"],
+        baseInput: {
+          title: publishTitleDraft.trim() || undefined,
+          visibility: publishVisibilityDraft
+        }
+      });
+      setPublishBatchSummary(payload.summary);
+      appendHistory({
+        label: "Publish batch",
+        detail: `${payload.summary.done}/${payload.summary.total} jobs done`,
+        status: payload.summary.error > 0 ? "INFO" : "SUCCESS"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to run batch publish";
+      setPanelError(message);
+      appendHistory({
+        label: "Publish batch",
+        detail: message,
+        status: "ERROR"
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const applyExistingExportProfile = async () => {
     if (!selectedExportProfileId) {
       return;
@@ -4356,6 +4572,171 @@ export function OpenCutTranscriptShell({ projectV2Id, legacyProjectId, title, st
                   ))}
                   {filteredReviewComments.length === 0 ? <p>No review comments.</p> : null}
                 </div>
+              </div>
+
+              <div className="mt-2 rounded border p-2">
+                <p className="font-medium">Review requests</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Input
+                    value={reviewRequestTitle}
+                    onChange={(event) => setReviewRequestTitle(event.target.value)}
+                    placeholder="Request title"
+                  />
+                  <Input
+                    value={reviewRequestNote}
+                    onChange={(event) => setReviewRequestNote(event.target.value)}
+                    placeholder="Request note"
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-[1fr_auto_auto_auto] gap-2">
+                  <select
+                    value={selectedReviewRequestId}
+                    onChange={(event) => setSelectedReviewRequestId(event.target.value)}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="">Select request...</option>
+                    {reviewRequests.map((request) => (
+                      <option key={request.id} value={request.id}>
+                        {request.status} • {request.title}
+                      </option>
+                    ))}
+                  </select>
+                  <Button size="sm" onClick={createReviewRequestAction} disabled={busy !== null || !reviewRequestTitle.trim()}>
+                    Create
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => decideSelectedReviewRequestAction("APPROVED")} disabled={busy !== null || !selectedReviewRequestId}>
+                    Approve
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => decideSelectedReviewRequestAction("REJECTED")} disabled={busy !== null || !selectedReviewRequestId}>
+                    Reject
+                  </Button>
+                </div>
+                <div className="mt-2 max-h-[90px] space-y-1 overflow-y-auto text-muted-foreground">
+                  {reviewRequests.slice(0, 10).map((request) => (
+                    <div key={request.id} className="rounded border px-2 py-1">
+                      <p>
+                        {request.status} • {request.title}
+                      </p>
+                      <p>{request.logs.length} decision log(s)</p>
+                    </div>
+                  ))}
+                  {reviewRequests.length === 0 ? <p>No review requests yet.</p> : null}
+                </div>
+              </div>
+
+              <div className="mt-2 rounded border p-2">
+                <p className="font-medium">Workspace brand preset</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Input
+                    value={brandName}
+                    onChange={(event) => setBrandName(event.target.value)}
+                    placeholder="Brand preset name"
+                  />
+                  <Input
+                    value={brandTitlePrefix}
+                    onChange={(event) => setBrandTitlePrefix(event.target.value)}
+                    placeholder="Title prefix"
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <select
+                    value={brandDefaultConnector}
+                    onChange={(event) => setBrandDefaultConnector(event.target.value as "youtube" | "drive" | "package")}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="package">Package</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="drive">Drive</option>
+                  </select>
+                  <select
+                    value={brandDefaultVisibility}
+                    onChange={(event) => setBrandDefaultVisibility(event.target.value as "private" | "unlisted" | "public")}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="private">Private</option>
+                    <option value="unlisted">Unlisted</option>
+                    <option value="public">Public</option>
+                  </select>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Input
+                    value={brandAudioPreset}
+                    onChange={(event) => setBrandAudioPreset(event.target.value)}
+                    placeholder="Audio preset"
+                  />
+                  <Input
+                    value={brandTagsDraft}
+                    onChange={(event) => setBrandTagsDraft(event.target.value)}
+                    placeholder="Tags (comma separated)"
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                  <select
+                    value={brandCaptionStylePresetId}
+                    onChange={(event) => setBrandCaptionStylePresetId(event.target.value)}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="">No caption style override</option>
+                    {brandCaptionStyleOptions.map((style) => (
+                      <option key={style.id} value={style.id}>
+                        {style.name}{style.isSystem ? " (system)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <Button size="sm" onClick={saveBrandPresetAction} disabled={busy !== null}>
+                    Save Preset
+                  </Button>
+                </div>
+                <p className="mt-2 text-muted-foreground">
+                  Default connector {brandPreset?.defaultConnector ?? brandDefaultConnector} • visibility {brandPreset?.defaultVisibility ?? brandDefaultVisibility}
+                </p>
+              </div>
+
+              <div className="mt-2 rounded border p-2">
+                <p className="font-medium">Publish connectors</p>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  <select
+                    value={publishConnector}
+                    onChange={(event) => setPublishConnector(event.target.value as "youtube" | "drive" | "package")}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="package">Package</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="drive">Drive</option>
+                  </select>
+                  <Input
+                    value={publishTitleDraft}
+                    onChange={(event) => setPublishTitleDraft(event.target.value)}
+                    placeholder="Publish title"
+                  />
+                  <select
+                    value={publishVisibilityDraft}
+                    onChange={(event) => setPublishVisibilityDraft(event.target.value as "private" | "unlisted" | "public")}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    <option value="private">Private</option>
+                    <option value="unlisted">Unlisted</option>
+                    <option value="public">Public</option>
+                  </select>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Button size="sm" variant="secondary" onClick={publishConnectorAction} disabled={busy !== null}>
+                    Publish Connector
+                  </Button>
+                  <Button size="sm" onClick={publishConnectorBatchAction} disabled={busy !== null}>
+                    Batch Export
+                  </Button>
+                </div>
+                {publishLatestJobId ? (
+                  <p className="mt-2 text-muted-foreground">
+                    Latest publish job {publishLatestJobId.slice(0, 8)} • {publishLatestStatus}
+                  </p>
+                ) : null}
+                {publishBatchSummary ? (
+                  <p className="mt-1 text-muted-foreground">
+                    Batch {publishBatchSummary.done}/{publishBatchSummary.total} done • errors {publishBatchSummary.error}
+                  </p>
+                ) : null}
               </div>
 
               <div className="mt-2 rounded border p-2">

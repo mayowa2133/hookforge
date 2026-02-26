@@ -132,6 +132,21 @@ review_decision=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
 decision_status=$(echo "$review_decision" | jq -r ".request.status")
 [ "$decision_status" = "APPROVED" ]
 
+review_requests_list=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/review/requests?limit=10")
+review_request_count=$(echo "$review_requests_list" | jq -r '.requests | length')
+[ "$review_request_count" -ge 1 ]
+
+brand_before=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/brand-preset")
+brand_default_connector=$(echo "$brand_before" | jq -r ".brandPreset.defaultConnector")
+[ -n "$brand_default_connector" ] && [ "$brand_default_connector" != "null" ]
+
+brand_upsert=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/brand-preset" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Creator Kit","defaultConnector":"youtube","defaultVisibility":"unlisted","defaultTitlePrefix":"HookForge","defaultTags":["creator","launch"]}')
+brand_id=$(echo "$brand_upsert" | jq -r ".brandPreset.id")
+[ -n "$brand_id" ] && [ "$brand_id" != "null" ]
+
 publish_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
   -X POST "$BASE/api/projects-v2/$project_id/publish/connectors/package/export" \
   -H "Content-Type: application/json" \
@@ -142,6 +157,13 @@ publish_job_id=$(echo "$publish_resp" | jq -r ".publishJob.id")
 publish_status_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/projects-v2/$project_id/publish/jobs/$publish_job_id")
 publish_status=$(echo "$publish_status_resp" | jq -r ".publishJob.status")
 [[ "$publish_status" == "DONE" || "$publish_status" == "ERROR" ]]
+
+publish_batch_resp=$(curl -sS -c "$COOKIE" -b "$COOKIE" \
+  -X POST "$BASE/api/projects-v2/$project_id/publish/connectors/batch/export" \
+  -H "Content-Type: application/json" \
+  -d '{"connectors":["youtube","package"],"baseInput":{"visibility":"private","title":"Batch Creator Export"}}')
+publish_batch_total=$(echo "$publish_batch_resp" | jq -r ".summary.total")
+[ "$publish_batch_total" -ge 2 ]
 
 scorecard=$(curl -sS -c "$COOKIE" -b "$COOKIE" "$BASE/api/parity/scorecard")
 overall_score=$(echo "$scorecard" | jq -r ".overallScore")

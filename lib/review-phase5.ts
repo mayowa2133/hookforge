@@ -12,6 +12,9 @@ import {
   evaluateApprovalGate,
   hasShareScope,
   normalizeCommentAnchor,
+  normalizeBrandPresetInput,
+  type Phase5PublishConnector,
+  type Phase5PublishVisibility,
   type Phase5ShareScope
 } from "@/lib/review-phase5-tools";
 import { buildTimelineState } from "@/lib/timeline-legacy";
@@ -914,6 +917,252 @@ export async function applyProjectExportProfile(params: {
       isDefault: entry.isDefault,
       updatedAt: entry.updatedAt.toISOString()
     }))
+  };
+}
+
+export async function getWorkspaceBrandPreset(projectIdOrV2Id: string, request?: Request) {
+  const access = await resolvePhase5Access({
+    projectIdOrV2Id,
+    request,
+    requiredScope: "COMMENT"
+  });
+
+  const [preset, defaultExportProfile, captionStyles] = await Promise.all([
+    prisma.workspaceBrandPreset.findUnique({
+      where: {
+        workspaceId: access.workspace.id
+      }
+    }),
+    prisma.exportProfile.findFirst({
+      where: {
+        workspaceId: access.workspace.id,
+        isDefault: true
+      },
+      orderBy: {
+        updatedAt: "desc"
+      }
+    }),
+    prisma.captionStylePreset.findMany({
+      where: {
+        workspaceId: access.workspace.id
+      },
+      orderBy: [
+        { isSystem: "desc" },
+        { updatedAt: "desc" }
+      ],
+      take: 100
+    })
+  ]);
+
+  const normalized = normalizeBrandPresetInput({
+    name: preset?.name ?? null,
+    captionStylePresetId: preset?.captionStylePresetId ?? defaultExportProfile?.captionStylePresetId ?? null,
+    audioPreset: preset?.audioPreset ?? defaultExportProfile?.audioPreset ?? null,
+    defaultConnector: preset?.defaultConnector ?? "package",
+    defaultVisibility: preset?.defaultVisibility ?? "private",
+    defaultTitlePrefix: preset?.defaultTitlePrefix ?? null,
+    defaultTags: preset?.defaultTags ?? [],
+    metadata: (preset?.metadata && typeof preset.metadata === "object")
+      ? (preset.metadata as Record<string, unknown>)
+      : {}
+  });
+
+  return {
+    workspaceId: access.workspace.id,
+    projectV2Id: access.projectV2.id,
+    brandPreset: {
+      id: preset?.id ?? null,
+      name: normalized.name,
+      captionStylePresetId: normalized.captionStylePresetId,
+      audioPreset: normalized.audioPreset,
+      defaultConnector: normalized.defaultConnector,
+      defaultVisibility: normalized.defaultVisibility,
+      defaultTitlePrefix: normalized.defaultTitlePrefix,
+      defaultTags: normalized.defaultTags,
+      metadata: normalized.metadata,
+      createdAt: preset?.createdAt.toISOString() ?? null,
+      updatedAt: preset?.updatedAt.toISOString() ?? null
+    },
+    exportProfileDefaults: defaultExportProfile
+      ? {
+          id: defaultExportProfile.id,
+          name: defaultExportProfile.name,
+          container: defaultExportProfile.container,
+          resolution: defaultExportProfile.resolution,
+          fps: defaultExportProfile.fps,
+          audioPreset: defaultExportProfile.audioPreset,
+          captionStylePresetId: defaultExportProfile.captionStylePresetId,
+          updatedAt: defaultExportProfile.updatedAt.toISOString()
+        }
+      : null,
+    captionStylePresets: captionStyles.map((style) => ({
+      id: style.id,
+      name: style.name,
+      isSystem: style.isSystem
+    }))
+  };
+}
+
+export async function upsertWorkspaceBrandPreset(params: {
+  projectIdOrV2Id: string;
+  request?: Request;
+  input: {
+    name?: string | null;
+    captionStylePresetId?: string | null;
+    audioPreset?: string | null;
+    defaultConnector?: string | null;
+    defaultVisibility?: string | null;
+    defaultTitlePrefix?: string | null;
+    defaultTags?: string[] | null;
+    metadata?: Record<string, unknown> | null;
+  };
+}) {
+  const access = await resolvePhase5Access({
+    projectIdOrV2Id: params.projectIdOrV2Id,
+    request: params.request,
+    requiredScope: "APPROVE"
+  });
+  if (!access.user?.id || !access.membership || !isManagerRole(access.membership.role)) {
+    throw new Error("Unauthorized");
+  }
+
+  const normalized = normalizeBrandPresetInput(params.input);
+  if (normalized.captionStylePresetId) {
+    const style = await prisma.captionStylePreset.findFirst({
+      where: {
+        id: normalized.captionStylePresetId,
+        workspaceId: access.workspace.id
+      },
+      select: {
+        id: true
+      }
+    });
+    if (!style) {
+      throw new Error("Caption style preset not found");
+    }
+  }
+
+  const sanitizedName = sanitizeOverlayText(normalized.name, "brand preset name");
+  const sanitizedTitlePrefix = normalized.defaultTitlePrefix
+    ? sanitizeOverlayText(normalized.defaultTitlePrefix, "brand title prefix")
+    : null;
+  const preset = await prisma.workspaceBrandPreset.upsert({
+    where: {
+      workspaceId: access.workspace.id
+    },
+    create: {
+      workspaceId: access.workspace.id,
+      updatedByUserId: access.user.id,
+      name: sanitizedName,
+      captionStylePresetId: normalized.captionStylePresetId,
+      audioPreset: normalized.audioPreset,
+      defaultConnector: normalized.defaultConnector,
+      defaultVisibility: normalized.defaultVisibility,
+      defaultTitlePrefix: sanitizedTitlePrefix,
+      defaultTags: normalized.defaultTags,
+      metadata: normalized.metadata as Prisma.InputJsonValue
+    },
+    update: {
+      updatedByUserId: access.user.id,
+      name: sanitizedName,
+      captionStylePresetId: normalized.captionStylePresetId,
+      audioPreset: normalized.audioPreset,
+      defaultConnector: normalized.defaultConnector,
+      defaultVisibility: normalized.defaultVisibility,
+      defaultTitlePrefix: sanitizedTitlePrefix,
+      defaultTags: normalized.defaultTags,
+      metadata: normalized.metadata as Prisma.InputJsonValue
+    }
+  });
+
+  let linkedExportProfile = await prisma.exportProfile.findFirst({
+    where: {
+      workspaceId: access.workspace.id,
+      isDefault: true
+    },
+    orderBy: {
+      updatedAt: "desc"
+    }
+  });
+  if (!linkedExportProfile) {
+    linkedExportProfile = await prisma.exportProfile.create({
+      data: {
+        workspaceId: access.workspace.id,
+        createdByUserId: access.user.id,
+        name: `${sanitizedName} Default Export`,
+        isDefault: true,
+        audioPreset: normalized.audioPreset,
+        captionStylePresetId: normalized.captionStylePresetId,
+        config: {
+          brandPresetId: preset.id,
+          defaultConnector: normalized.defaultConnector,
+          defaultVisibility: normalized.defaultVisibility,
+          defaultTitlePrefix: sanitizedTitlePrefix,
+          defaultTags: normalized.defaultTags
+        } as Prisma.InputJsonValue
+      }
+    });
+  } else {
+    const existingConfig = (linkedExportProfile.config && typeof linkedExportProfile.config === "object")
+      ? (linkedExportProfile.config as Record<string, unknown>)
+      : {};
+    linkedExportProfile = await prisma.exportProfile.update({
+      where: {
+        id: linkedExportProfile.id
+      },
+      data: {
+        audioPreset: normalized.audioPreset,
+        captionStylePresetId: normalized.captionStylePresetId,
+        config: {
+          ...existingConfig,
+          brandPresetId: preset.id,
+          defaultConnector: normalized.defaultConnector,
+          defaultVisibility: normalized.defaultVisibility,
+          defaultTitlePrefix: sanitizedTitlePrefix,
+          defaultTags: normalized.defaultTags
+        } as Prisma.InputJsonValue
+      }
+    });
+  }
+
+  await recordWorkspaceAuditEvent({
+    workspaceId: access.workspace.id,
+    actorUserId: access.user.id,
+    action: "workspace.brand_preset.upsert",
+    targetType: "workspace",
+    targetId: access.workspace.id,
+    details: {
+      brandPresetId: preset.id,
+      defaultConnector: preset.defaultConnector,
+      defaultVisibility: preset.defaultVisibility,
+      linkedExportProfileId: linkedExportProfile.id
+    }
+  });
+
+  return {
+    workspaceId: access.workspace.id,
+    projectV2Id: access.projectV2.id,
+    brandPreset: {
+      id: preset.id,
+      name: preset.name,
+      captionStylePresetId: preset.captionStylePresetId,
+      audioPreset: preset.audioPreset,
+      defaultConnector: preset.defaultConnector as Phase5PublishConnector,
+      defaultVisibility: preset.defaultVisibility as Phase5PublishVisibility,
+      defaultTitlePrefix: preset.defaultTitlePrefix,
+      defaultTags: preset.defaultTags,
+      metadata: preset.metadata,
+      createdAt: preset.createdAt.toISOString(),
+      updatedAt: preset.updatedAt.toISOString()
+    },
+    linkedExportProfile: {
+      id: linkedExportProfile.id,
+      name: linkedExportProfile.name,
+      isDefault: linkedExportProfile.isDefault,
+      audioPreset: linkedExportProfile.audioPreset,
+      captionStylePresetId: linkedExportProfile.captionStylePresetId,
+      updatedAt: linkedExportProfile.updatedAt.toISOString()
+    }
   };
 }
 
