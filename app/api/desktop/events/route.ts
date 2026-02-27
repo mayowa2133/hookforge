@@ -2,7 +2,11 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { requireProjectContext, requireUserWithWorkspace } from "@/lib/api-context";
 import { requireCurrentUser } from "@/lib/auth";
-import { DesktopEventNames } from "@/lib/desktop/events";
+import {
+  DesktopEventNames,
+  normalizeDesktopClientVersion
+} from "@/lib/desktop/events";
+import { DesktopPlatforms, DesktopReleaseChannels } from "@/lib/desktop/releases";
 import { jsonOk, routeErrorToResponse } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 
@@ -13,8 +17,16 @@ const DesktopEventSchema = z.object({
   event: z.enum(DesktopEventNames),
   outcome: z.enum(["SUCCESS", "ERROR", "INFO"]).default("INFO"),
   durationMs: z.number().int().min(0).max(60_000).optional(),
+  sessionId: z.string().trim().min(1).max(120).optional(),
+  clientVersion: z.string().trim().min(1).max(64).optional(),
+  channel: z.enum(DesktopReleaseChannels).optional(),
+  platform: z.enum(DesktopPlatforms).optional(),
   metadata: z.record(z.unknown()).optional()
 });
+
+function isCrashEvent(event: z.infer<typeof DesktopEventSchema>["event"]) {
+  return event === "app_crash" || event === "native_crash";
+}
 
 export async function POST(request: Request) {
   try {
@@ -38,15 +50,24 @@ export async function POST(request: Request) {
       workspaceId = scope.workspace.id;
     }
 
+    const normalizedClientVersion = normalizeDesktopClientVersion(body.clientVersion);
+    const outcome = isCrashEvent(body.event)
+      ? "ERROR"
+      : body.outcome;
+
     const entry = await prisma.qualityFeedback.create({
       data: {
         workspaceId,
         projectId: projectV2Id,
         category: `desktop.${body.event}`,
-        comment: body.outcome,
+        comment: outcome,
         metadata: {
-          outcome: body.outcome,
+          outcome,
           durationMs: body.durationMs ?? null,
+          sessionId: body.sessionId ?? null,
+          clientVersion: normalizedClientVersion,
+          channel: body.channel ?? null,
+          platform: body.platform ?? null,
           ...(body.metadata ?? {})
         } as Prisma.InputJsonObject,
         createdByUserId: user.id

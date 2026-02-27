@@ -12,11 +12,29 @@ export const AUTOPILOT_MACRO_IDS = [
   "tighten_pacing",
   "remove_filler_normalize_audio",
   "social_cut_from_range",
-  "speaker_cleanup_chaptering"
+  "speaker_cleanup_chaptering",
+  "transcript_cleanup",
+  "extract_highlights",
+  "generate_social_assets",
+  "title_description_suggestions",
+  "remove_retakes_word_gaps"
 ] as const;
 
 export type AutopilotPlannerPack = (typeof AUTOPILOT_PLANNER_PACKS)[number];
 export type AutopilotMacroId = (typeof AUTOPILOT_MACRO_IDS)[number];
+export const UNDERLORD_COMMAND_FAMILIES = [
+  "transcript_cleanup",
+  "pacing",
+  "highlight_clips",
+  "chaptering",
+  "social_posts",
+  "metadata_generation",
+  "retake_cleanup",
+  "audio_polish",
+  "publish_prep"
+] as const;
+export type UnderlordCommandFamily = (typeof UNDERLORD_COMMAND_FAMILIES)[number];
+export const UnderlordCommandFamilySchema = z.enum(UNDERLORD_COMMAND_FAMILIES);
 
 export type AutopilotDiffItem = {
   id: string;
@@ -42,6 +60,13 @@ export type AutopilotMacroArgs = {
   chapterCount?: number;
 };
 
+export type AutopilotQualityDeltaPreview = {
+  commandFamily: UnderlordCommandFamily;
+  estimatedScoreDelta: number;
+  confidence: number;
+  rationale: string[];
+};
+
 export const AutopilotPlannerPackSchema = z.enum(AUTOPILOT_PLANNER_PACKS);
 export const AutopilotMacroIdSchema = z.enum(AUTOPILOT_MACRO_IDS);
 export const AutopilotMacroArgsSchema = z.object({
@@ -56,6 +81,7 @@ type ResolvePromptInput = {
   plannerPack?: AutopilotPlannerPack | null;
   macroId?: AutopilotMacroId | null;
   macroArgs?: AutopilotMacroArgs | null;
+  commandFamily?: UnderlordCommandFamily | null;
 };
 
 type ResolvePromptOutput = {
@@ -65,6 +91,8 @@ type ResolvePromptOutput = {
   macroId: AutopilotMacroId | null;
   macroLabel: string | null;
   macroArgs: AutopilotMacroArgs | null;
+  commandFamily: UnderlordCommandFamily;
+  qualityDeltaPreview: AutopilotQualityDeltaPreview;
 };
 
 const PACK_INSTRUCTIONS: Record<AutopilotPlannerPack, string> = {
@@ -75,20 +103,28 @@ const PACK_INSTRUCTIONS: Record<AutopilotPlannerPack, string> = {
   publishing: "Prioritize publish readiness: pacing polish, clarity, and CTA-safe finalization notes."
 };
 
-const MACRO_DEFINITIONS: Record<AutopilotMacroId, { label: string; toPrompt: (args: AutopilotMacroArgs) => string; plannerPack: AutopilotPlannerPack }> = {
+const MACRO_DEFINITIONS: Record<AutopilotMacroId, {
+  label: string;
+  toPrompt: (args: AutopilotMacroArgs) => string;
+  plannerPack: AutopilotPlannerPack;
+  commandFamily: UnderlordCommandFamily;
+}> = {
   tighten_pacing: {
     label: "Tighten Pacing",
     plannerPack: "timeline",
+    commandFamily: "pacing",
     toPrompt: () => "Tighten pacing: split weak intro beats, trim dead air, and keep the first hook concise."
   },
   remove_filler_normalize_audio: {
     label: "Remove Filler + Normalize Audio",
     plannerPack: "audio",
+    commandFamily: "audio_polish",
     toPrompt: () => "Remove filler phrases and improve voice clarity with loudness normalization near -14 LUFS."
   },
   social_cut_from_range: {
     label: "Social Cut From Range",
     plannerPack: "timeline",
+    commandFamily: "highlight_clips",
     toPrompt: (args) => {
       const startMs = Math.max(0, Math.floor(args.startMs ?? 0));
       const endMs = Math.max(startMs + 1000, Math.floor(args.endMs ?? Math.max(30000, startMs + 1000)));
@@ -98,12 +134,128 @@ const MACRO_DEFINITIONS: Record<AutopilotMacroId, { label: string; toPrompt: (ar
   speaker_cleanup_chaptering: {
     label: "Speaker Cleanup + Chaptering",
     plannerPack: "transcript",
+    commandFamily: "chaptering",
     toPrompt: (args) => {
       const speaker = (args.speakerLabel ?? "primary host").trim();
       const chapterCount = Math.max(2, Math.floor(args.chapterCount ?? 4));
       return `Normalize speaker labels around ${speaker} and propose ${chapterCount} concise chapter cues for major topic shifts.`;
     }
+  },
+  transcript_cleanup: {
+    label: "Transcript Cleanup",
+    plannerPack: "transcript",
+    commandFamily: "transcript_cleanup",
+    toPrompt: () => "Clean transcript grammar and punctuation while preserving original meaning and speaker intent."
+  },
+  extract_highlights: {
+    label: "Extract Highlights",
+    plannerPack: "timeline",
+    commandFamily: "highlight_clips",
+    toPrompt: () => "Find the strongest moments and propose 3 concise highlight clips with hook-first ordering."
+  },
+  generate_social_assets: {
+    label: "Generate Social Assets",
+    plannerPack: "publishing",
+    commandFamily: "social_posts",
+    toPrompt: () => "Generate platform-ready social post copy and CTA variants aligned to the final edit."
+  },
+  title_description_suggestions: {
+    label: "Title + Description Suggestions",
+    plannerPack: "publishing",
+    commandFamily: "metadata_generation",
+    toPrompt: () => "Suggest 5 titles and 3 descriptions optimized for clarity, retention, and discoverability."
+  },
+  remove_retakes_word_gaps: {
+    label: "Remove Retakes + Word Gaps",
+    plannerPack: "audio",
+    commandFamily: "retake_cleanup",
+    toPrompt: () => "Detect likely retakes and long word gaps, then propose safe cuts with transcript alignment."
   }
+};
+
+const PLANNER_PACK_FAMILY_MAP: Record<AutopilotPlannerPack, UnderlordCommandFamily> = {
+  timeline: "pacing",
+  transcript: "transcript_cleanup",
+  captions: "transcript_cleanup",
+  audio: "audio_polish",
+  publishing: "publish_prep"
+};
+
+const COMMAND_FAMILY_PROMPTS: Record<UnderlordCommandFamily, {
+  label: string;
+  plannerPack: AutopilotPlannerPack;
+  toPrompt: (args: AutopilotMacroArgs) => string;
+}> = {
+  transcript_cleanup: {
+    label: "Transcript Cleanup",
+    plannerPack: "transcript",
+    toPrompt: () => "Clean transcript grammar, punctuation, and filler artifacts while preserving exact meaning and speaker intent."
+  },
+  pacing: {
+    label: "Tighten Pacing",
+    plannerPack: "timeline",
+    toPrompt: () => "Tighten pacing by splitting weak beats and trimming dead air while preserving hook continuity."
+  },
+  highlight_clips: {
+    label: "Extract Highlight Clips",
+    plannerPack: "timeline",
+    toPrompt: () => "Extract highlight-ready clip moments and label them clearly for social repurposing."
+  },
+  chaptering: {
+    label: "Generate Chapters",
+    plannerPack: "transcript",
+    toPrompt: (args) => {
+      const chapterCount = Math.max(2, Math.floor(args.chapterCount ?? 4));
+      return `Generate ${chapterCount} concise chapter markers and align labels with transcript topic shifts.`;
+    }
+  },
+  social_posts: {
+    label: "Generate Social Assets",
+    plannerPack: "publishing",
+    toPrompt: () => "Generate social copy variants and CTA framing aligned to the edited timeline."
+  },
+  metadata_generation: {
+    label: "Generate Titles + Descriptions",
+    plannerPack: "publishing",
+    toPrompt: () => "Generate channel-ready title and description variants with discoverability-safe phrasing."
+  },
+  retake_cleanup: {
+    label: "Retake Cleanup",
+    plannerPack: "audio",
+    toPrompt: () => "Detect likely retake segments and remove long word-gap artifacts with conservative cuts."
+  },
+  audio_polish: {
+    label: "Audio Polish",
+    plannerPack: "audio",
+    toPrompt: () => "Remove filler speech and normalize voice clarity while preserving natural cadence."
+  },
+  publish_prep: {
+    label: "Publish Prep",
+    plannerPack: "publishing",
+    toPrompt: () => "Prepare final publish settings, export readiness, and end-card clarity adjustments."
+  }
+};
+
+export const UNDERLORD_COMMAND_CATALOG = (UNDERLORD_COMMAND_FAMILIES as readonly UnderlordCommandFamily[]).map((family) => ({
+  id: family,
+  label: COMMAND_FAMILY_PROMPTS[family].label,
+  plannerPack: COMMAND_FAMILY_PROMPTS[family].plannerPack,
+  defaultPrompt: COMMAND_FAMILY_PROMPTS[family].toPrompt({}),
+  macroAliases: (Object.entries(MACRO_DEFINITIONS) as Array<[AutopilotMacroId, (typeof MACRO_DEFINITIONS)[AutopilotMacroId]]>)
+    .filter(([, entry]) => entry.commandFamily === family)
+    .map(([macroId]) => macroId)
+}));
+
+const FAMILY_DELTA_BASE: Record<UnderlordCommandFamily, number> = {
+  transcript_cleanup: 5.5,
+  pacing: 7.2,
+  highlight_clips: 8.1,
+  chaptering: 6.2,
+  social_posts: 4.4,
+  metadata_generation: 4.1,
+  retake_cleanup: 6.8,
+  audio_polish: 7.4,
+  publish_prep: 5.1
 };
 
 function normalizePrompt(input: string | null | undefined) {
@@ -126,10 +278,54 @@ function normalizeMacroArgs(input: AutopilotMacroArgs | null | undefined): Autop
   };
 }
 
+function inferCommandFamily(params: {
+  prompt: string;
+  plannerPack: AutopilotPlannerPack;
+  macroId: AutopilotMacroId | null;
+}) {
+  if (params.macroId) {
+    return MACRO_DEFINITIONS[params.macroId].commandFamily;
+  }
+  const lowered = params.prompt.toLowerCase();
+  if (lowered.includes("chapter")) return "chaptering";
+  if (lowered.includes("highlight") || lowered.includes("clip")) return "highlight_clips";
+  if (lowered.includes("title") || lowered.includes("description")) return "metadata_generation";
+  if (lowered.includes("retake") || lowered.includes("gap")) return "retake_cleanup";
+  if (lowered.includes("social")) return "social_posts";
+  if (lowered.includes("pacing")) return "pacing";
+  if (lowered.includes("audio") || lowered.includes("filler")) return "audio_polish";
+  if (lowered.includes("transcript")) return "transcript_cleanup";
+  return PLANNER_PACK_FAMILY_MAP[params.plannerPack];
+}
+
+function buildQualityDeltaPreview(params: {
+  commandFamily: UnderlordCommandFamily;
+  hasMacro: boolean;
+  prompt: string;
+}): AutopilotQualityDeltaPreview {
+  const base = FAMILY_DELTA_BASE[params.commandFamily];
+  const macroBoost = params.hasMacro ? 0.8 : 0;
+  const promptLengthBoost = Math.min(1.2, Math.max(0, params.prompt.length / 220));
+  const estimatedScoreDelta = Number(Math.min(15, (base + macroBoost + promptLengthBoost)).toFixed(2));
+  const confidence = Number((params.hasMacro ? 0.86 : 0.73).toFixed(2));
+  const rationale = [
+    `Base uplift for ${params.commandFamily.replaceAll("_", " ")} actions.`,
+    params.hasMacro
+      ? "Macro selected: deterministic intent improves planner precision."
+      : "Freeform prompt selected: planner confidence depends on prompt specificity."
+  ];
+  return {
+    commandFamily: params.commandFamily,
+    estimatedScoreDelta,
+    confidence,
+    rationale
+  };
+}
+
 export function resolveAutopilotPrompt(input: ResolvePromptInput): ResolvePromptOutput {
   const prompt = normalizePrompt(input.prompt);
-  if (!prompt && !input.macroId) {
-    throw new Error("Autopilot requires either prompt or macroId.");
+  if (!prompt && !input.macroId && !input.commandFamily) {
+    throw new Error("Autopilot requires prompt, macroId, or commandFamily.");
   }
 
   if (input.macroId) {
@@ -138,25 +334,49 @@ export function resolveAutopilotPrompt(input: ResolvePromptInput): ResolvePrompt
     const plannerPack = normalizePack(input.plannerPack, definition.plannerPack);
     const macroPrompt = definition.toPrompt(macroArgs ?? {});
     const resolvedPrompt = `[Planner Pack: ${plannerPack}] ${PACK_INSTRUCTIONS[plannerPack]} ${macroPrompt}`;
+    const commandFamily = definition.commandFamily;
+    const qualityDeltaPreview = buildQualityDeltaPreview({
+      commandFamily,
+      hasMacro: true,
+      prompt: macroPrompt
+    });
     return {
       originalPrompt: prompt || definition.label,
       resolvedPrompt,
       plannerPack,
       macroId: input.macroId,
       macroLabel: definition.label,
-      macroArgs
+      macroArgs,
+      commandFamily,
+      qualityDeltaPreview
     };
   }
-
-  const plannerPack = normalizePack(input.plannerPack, "timeline");
-  const resolvedPrompt = `[Planner Pack: ${plannerPack}] ${PACK_INSTRUCTIONS[plannerPack]} ${prompt}`;
+  const macroArgs = normalizeMacroArgs(input.macroArgs);
+  const familyFromInput = input.commandFamily ?? null;
+  const fallbackPack = familyFromInput ? COMMAND_FAMILY_PROMPTS[familyFromInput].plannerPack : "timeline";
+  const plannerPack = normalizePack(input.plannerPack, fallbackPack);
+  const commandFamily = familyFromInput ?? inferCommandFamily({
+    prompt: prompt || COMMAND_FAMILY_PROMPTS[PLANNER_PACK_FAMILY_MAP[plannerPack]].toPrompt(macroArgs ?? {}),
+    plannerPack,
+    macroId: null
+  });
+  const familyPrompt = COMMAND_FAMILY_PROMPTS[commandFamily].toPrompt(macroArgs ?? {});
+  const effectivePrompt = prompt || familyPrompt;
+  const resolvedPrompt = `[Planner Pack: ${plannerPack}] ${PACK_INSTRUCTIONS[plannerPack]} ${effectivePrompt}`;
+  const qualityDeltaPreview = buildQualityDeltaPreview({
+    commandFamily,
+    hasMacro: false,
+    prompt: effectivePrompt
+  });
   return {
-    originalPrompt: prompt,
+    originalPrompt: effectivePrompt,
     resolvedPrompt,
     plannerPack,
     macroId: null,
     macroLabel: null,
-    macroArgs: null
+    macroArgs,
+    commandFamily,
+    qualityDeltaPreview
   };
 }
 
@@ -196,4 +416,3 @@ export function getTimelineOperationItemIds(groups: AutopilotDiffGroup[]) {
     ?.items.filter((item) => item.type === "operation")
     .map((item) => item.id) ?? [];
 }
-

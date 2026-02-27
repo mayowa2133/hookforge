@@ -8,9 +8,9 @@ import {
   type CompletedMultipartPart
 } from "@/lib/storage";
 import { buildProjectStorageKey } from "@/lib/storage";
-import { summarizeRecordingProgress } from "@/lib/recordings/progress";
+import { buildDeterministicRecordingRecoveryPlan, summarizeRecordingProgress } from "@/lib/recordings/progress";
 
-export { summarizeRecordingProgress } from "@/lib/recordings/progress";
+export { buildDeterministicRecordingRecoveryPlan, summarizeRecordingProgress } from "@/lib/recordings/progress";
 
 export const RECORDING_SESSION_TTL_SEC = 60 * 60 * 24;
 export const RECORDING_MIN_PART_SIZE_BYTES = 5 * 1024 * 1024;

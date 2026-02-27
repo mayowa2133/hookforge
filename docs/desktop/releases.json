@@ -1,0 +1,83 @@
+{
+  "generatedAt": "2026-02-26T20:59:53.470Z",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "platform": "darwin-arm64",
+      "channel": "stable",
+      "buildId": "mac-arm64-100",
+      "publishedAt": "2026-02-20T12:00:00.000Z",
+      "downloadUrl": "https://downloads.hookforge.dev/desktop/stable/HookForge-1.0.0-arm64.dmg",
+      "checksumSha256": "f7f8f0f2c802076f99003eb51f1965cd352213f4f740f4f57bb4ab68e5f16af3",
+      "signed": true,
+      "notes": "Desktop GA baseline",
+      "minOsVersion": "13.0",
+      "signature": "1541afcce6d80101d3deb8561276923d1afb91720c420a1afa558c447e889744"
+    },
+    {
+      "version": "1.0.0",
+      "platform": "darwin-x64",
+      "channel": "stable",
+      "buildId": "mac-x64-100",
+      "publishedAt": "2026-02-20T12:00:00.000Z",
+      "downloadUrl": "https://downloads.hookforge.dev/desktop/stable/HookForge-1.0.0-x64.dmg",
+      "checksumSha256": "ea8577629c57e61d771ee2753fdca712f8b10489034bf81284dcc83627f9624d",
+      "signed": true,
+      "notes": "Desktop GA baseline",
+      "minOsVersion": "12.0",
+      "signature": "4c28cee225973dca6d62cea7fcfc9b1c93ffa810a5599e2aa08da0d88e1fa337"
+    },
+    {
+      "version": "1.0.0",
+      "platform": "win32-x64",
+      "channel": "stable",
+      "buildId": "win-x64-100",
+      "publishedAt": "2026-02-20T12:00:00.000Z",
+      "downloadUrl": "https://downloads.hookforge.dev/desktop/stable/HookForge-1.0.0-x64.exe",
+      "checksumSha256": "97d63057cee083ea8d6e154d4f4385f55bad3924ec4f9a24f17d0bb650903f7c",
+      "signed": true,
+      "notes": "Desktop GA baseline",
+      "minOsVersion": "10",
+      "signature": "06bc7a04fa6f13765253481035d98012449298cb6f1288122cf9bf397e321299"
+    },
+    {
+      "version": "1.1.0-beta.1",
+      "platform": "darwin-arm64",
+      "channel": "beta",
+      "buildId": "mac-arm64-110b1",
+      "publishedAt": "2026-02-25T09:00:00.000Z",
+      "downloadUrl": "https://downloads.hookforge.dev/desktop/beta/HookForge-1.1.0-beta.1-arm64.dmg",
+      "checksumSha256": "4c630f3598aef7f5dc0d90ca7c523a9ca0c8f8fbb63e86ca0bf810c285b03f66",
+      "signed": true,
+      "notes": "Beta channel with desktop relink and offline draft sync",
+      "minOsVersion": "13.0",
+      "signature": "4802b7e53db15e4de0bd219ba911025568494fd4b5ca41ceecc8fee738ed1fdd"
+    },
+    {
+      "version": "1.1.0-beta.1",
+      "platform": "darwin-x64",
+      "channel": "beta",
+      "buildId": "mac-x64-110b1",
+      "publishedAt": "2026-02-25T09:00:00.000Z",
+      "downloadUrl": "https://downloads.hookforge.dev/desktop/beta/HookForge-1.1.0-beta.1-x64.dmg",
+      "checksumSha256": "f2763701122cc57082dc1cccd7418d49d159e4012ea96ab40431f835dfd4f640",
+      "signed": true,
+      "notes": "Beta channel with desktop relink and offline draft sync",
+      "minOsVersion": "12.0",
+      "signature": "051b60771dd313efe9c0684987f45ae534d6b9ae5c1ec6731d76cebcfcd86264"
+    },
+    {
+      "version": "1.1.0-beta.1",
+      "platform": "win32-x64",
+      "channel": "beta",
+      "buildId": "win-x64-110b1",
+      "publishedAt": "2026-02-25T09:00:00.000Z",
+      "downloadUrl": "https://downloads.hookforge.dev/desktop/beta/HookForge-1.1.0-beta.1-x64.exe",
+      "checksumSha256": "9dc61ef52f6e3796bf52fb5ec8ead5f8138f6dcf9f48a93409e8d64efe58f7bb",
+      "signed": true,
+      "notes": "Beta channel with desktop relink and offline draft sync",
+      "minOsVersion": "10",
+      "signature": "90f6bcdcd4d5d96b5694093eb72306afb9dcdc79901091b3b0179f74e4fe2f3e"
+    }
+  ]
+}

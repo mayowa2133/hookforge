@@ -32,6 +32,9 @@ export function routeErrorToResponse(error: unknown) {
     if (normalized.includes("disabled")) {
       return jsonError(message, 403);
     }
+    if (normalized.includes("conflict")) {
+      return jsonError(message, 409);
+    }
     if (normalized.includes("not found")) {
       return jsonError(message, 404);
     }

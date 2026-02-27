@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   appendPublishingDiffGroup,
+  AutopilotMacroIdSchema,
+  UnderlordCommandFamilySchema,
+  UNDERLORD_COMMAND_CATALOG,
   getTimelineOperationItemIds,
   resolveAutopilotPrompt
 } from "@/lib/autopilot-tools";
@@ -84,8 +87,41 @@ describe("autopilot tools", () => {
     expect(ids).toEqual(["timeline-op-1", "timeline-op-2"]);
   });
 
+  it("exposes underlord command family and quality delta preview metadata", () => {
+    const resolved = resolveAutopilotPrompt({
+      prompt: "Generate chapter markers and transcript cleanup notes",
+      plannerPack: "transcript"
+    });
+
+    expect(resolved.commandFamily).toBe("chaptering");
+    expect(resolved.qualityDeltaPreview.estimatedScoreDelta).toBeGreaterThan(0);
+    expect(resolved.qualityDeltaPreview.confidence).toBeGreaterThan(0.6);
+  });
+
+  it("supports expanded macro taxonomy for underlord command families", () => {
+    expect(() => AutopilotMacroIdSchema.parse("transcript_cleanup")).not.toThrow();
+    expect(() => AutopilotMacroIdSchema.parse("extract_highlights")).not.toThrow();
+    expect(() => AutopilotMacroIdSchema.parse("remove_retakes_word_gaps")).not.toThrow();
+  });
+
+  it("resolves command-family plans without explicit prompt", () => {
+    const resolved = resolveAutopilotPrompt({
+      commandFamily: "metadata_generation"
+    });
+
+    expect(resolved.commandFamily).toBe("metadata_generation");
+    expect(resolved.originalPrompt.length).toBeGreaterThan(10);
+    expect(resolved.resolvedPrompt).toContain("[Planner Pack:");
+  });
+
+  it("exposes command family schema and catalog coverage", () => {
+    expect(() => UnderlordCommandFamilySchema.parse("pacing")).not.toThrow();
+    expect(UNDERLORD_COMMAND_CATALOG.length).toBeGreaterThanOrEqual(9);
+    expect(UNDERLORD_COMMAND_CATALOG.every((entry) => entry.defaultPrompt.length > 0)).toBe(true);
+  });
+
   it("validates replay schema requiring explicit confirmation", async () => {
-    const { AutopilotReplaySchema } = await import("@/lib/autopilot");
+    const { AutopilotPlanSchema, AutopilotReplaySchema } = await import("@/lib/autopilot");
     expect(() =>
       AutopilotReplaySchema.parse({
         sessionId: "sess_1",
@@ -99,5 +135,10 @@ describe("autopilot tools", () => {
         confirmed: false
       })
     ).toThrow();
+    expect(() =>
+      AutopilotPlanSchema.parse({
+        commandFamily: "highlight_clips"
+      })
+    ).not.toThrow();
   });
 });

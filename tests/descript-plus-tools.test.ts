@@ -60,6 +60,14 @@ describe("descript+ tools", () => {
     ).not.toThrow();
     expect(() =>
       StudioJoinTokenSchema.parse({
+        participantName: "Producer",
+        role: "PRODUCER",
+        pushToTalk: true,
+        ttlSec: 1800
+      })
+    ).not.toThrow();
+    expect(() =>
+      StudioJoinTokenSchema.parse({
         participantName: "x",
         ttlSec: 10
       })
@@ -83,13 +91,18 @@ describe("descript+ tools", () => {
     expect(() =>
       ReviewRequestCreateSchema.parse({
         title: "Final review",
-        requiredScopes: ["APPROVE"]
+        requiredScopes: ["APPROVE"],
+        approvalChain: [
+          { role: "ADMIN", order: 1 },
+          { role: "OWNER", order: 2 }
+        ]
       })
     ).not.toThrow();
     expect(() =>
       ReviewRequestDecisionSchema.parse({
         status: "APPROVED",
-        note: "Ship it"
+        note: "Ship it",
+        approvalChainStepId: "approval_admin_primary"
       })
     ).not.toThrow();
 
@@ -97,7 +110,18 @@ describe("descript+ tools", () => {
     expect(() =>
       PublishExportSchema.parse({
         title: "Launch export",
-        visibility: "private"
+        visibility: "private",
+        distributionPreset: {
+          name: "YouTube Growth",
+          connector: "youtube",
+          visibility: "unlisted"
+        },
+        metadataPack: {
+          name: "SEO defaults",
+          metadata: {
+            categoryId: "22"
+          }
+        }
       })
     ).not.toThrow();
     expect(() =>

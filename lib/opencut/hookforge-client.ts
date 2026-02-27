@@ -369,12 +369,53 @@ type CreateReviewRequestRequest = {
   title: string;
   note?: string;
   requiredScopes?: Array<"VIEW" | "COMMENT" | "APPROVE" | "EDIT">;
+  approvalChain?: Array<{
+    id?: string;
+    role: "OWNER" | "ADMIN" | "EDITOR";
+    label?: string;
+    required?: boolean;
+    order?: number;
+  }>;
 };
 
 type DecideReviewRequestRequest = {
   status: "APPROVED" | "REJECTED";
   note?: string;
   requireApproval?: boolean;
+  approvalChainStepId?: string;
+};
+
+type RecordDescriptDiffRequest = {
+  comparisonMonth: string;
+  source?: string;
+  notes?: string;
+  discoveredFeatures?: Array<{
+    title: string;
+    changeType: "added" | "changed" | "removed";
+    mappedFeatureId?: string;
+    status?: "mapped" | "gap" | "deferred";
+  }>;
+  unresolvedDriftCount?: number;
+};
+
+type FreezeReleaseCandidateRequest = {
+  releaseTag: string;
+  notes?: string;
+};
+
+type UnfreezeReleaseCandidateRequest = {
+  notes?: string;
+};
+
+type RecordPhase6PilotFeedbackRequest = {
+  cohort: "dogfood" | "pilot";
+  sessionId: string;
+  workflowSuccessPct: number;
+  blockerCount?: number;
+  crashCount?: number;
+  participantCount?: number;
+  rating?: number;
+  notes?: string;
 };
 
 type CreateExportProfileRequest = {
@@ -401,6 +442,27 @@ type PublishConnectorExportRequest = {
   description?: string;
   tags?: string[];
   visibility?: "private" | "unlisted" | "public";
+  distributionPresetId?: string;
+  distributionPreset?: {
+    id?: string;
+    name?: string;
+    connector?: "youtube" | "drive" | "package" | "all";
+    visibility?: "private" | "unlisted" | "public" | null;
+    titleTemplate?: string | null;
+    descriptionTemplate?: string | null;
+    tags?: string[];
+    metadata?: Record<string, unknown>;
+    isDefault?: boolean;
+  };
+  metadataPackId?: string;
+  metadataPack?: {
+    id?: string;
+    name?: string;
+    connector?: "youtube" | "drive" | "package" | "all";
+    metadata?: Record<string, unknown>;
+    tags?: string[];
+  };
+  platformMetadata?: Record<string, unknown>;
 };
 
 type PublishConnectorBatchRequest = {
@@ -417,6 +479,62 @@ type BrandPresetUpsertRequest = {
   defaultVisibility?: "private" | "unlisted" | "public";
   defaultTitlePrefix?: string | null;
   defaultTags?: string[];
+  brandKit?: {
+    primaryColor?: string;
+    secondaryColor?: string;
+    accentColor?: string;
+    fontFamily?: string;
+    logoAssetId?: string;
+    watermarkAssetId?: string;
+  };
+  customFonts?: Array<{
+    id?: string;
+    name: string;
+    family?: string;
+    weight?: number;
+    style?: "normal" | "italic";
+    format?: "ttf" | "otf" | "woff" | "woff2";
+    assetId?: string;
+    url?: string;
+    isVariable?: boolean;
+    fallback?: string;
+  }>;
+  layoutPacks?: Array<{
+    id?: string;
+    name: string;
+    aspectRatio?: string;
+    sceneLayoutIds?: string[];
+    tags?: string[];
+    isDefault?: boolean;
+  }>;
+  templatePacks?: Array<{
+    id?: string;
+    name: string;
+    category?: string;
+    layoutPackId?: string | null;
+    captionStylePresetId?: string | null;
+    audioPreset?: string | null;
+    tags?: string[];
+    metadata?: Record<string, unknown>;
+  }>;
+  distributionPresets?: Array<{
+    id?: string;
+    name: string;
+    connector?: "youtube" | "drive" | "package" | "all";
+    visibility?: "private" | "unlisted" | "public" | null;
+    titleTemplate?: string | null;
+    descriptionTemplate?: string | null;
+    tags?: string[];
+    metadata?: Record<string, unknown>;
+    isDefault?: boolean;
+  }>;
+  metadataPacks?: Array<{
+    id?: string;
+    name: string;
+    connector?: "youtube" | "drive" | "package" | "all";
+    metadata?: Record<string, unknown>;
+    tags?: string[];
+  }>;
   metadata?: Record<string, unknown>;
 };
 
@@ -603,8 +721,29 @@ export type RecordingSessionRecoverResponse = {
     progressPct: number;
   };
   state: {
-    phase: "RESUMED" | "RECOVERABLE" | "TERMINAL";
+    phase: "RESUMED" | "RECOVERABLE" | "TERMINAL" | "REPAIR_REQUIRED";
     failedReason: string | null;
+  };
+  recoveryPlan?: {
+    ranges: Array<{ startPart: number; endPart: number }>;
+    conflicts: Array<{
+      code: "MISSING_PARTS" | "DUPLICATE_PART_NUMBER" | "CHECKSUM_MISMATCH";
+      severity: "WARN" | "FAIL";
+      message: string;
+      partNumbers: number[];
+    }>;
+    repairActions: string[];
+    recoverySuccessScore: number;
+    expectedRecoveryState: "READY_TO_RESUME" | "READY_TO_FINALIZE" | "REQUIRES_REPAIR";
+  };
+  merge?: {
+    ranges: Array<{ startPart: number; endPart: number }>;
+    repairActions: string[];
+    successScore: number;
+  };
+  reliability?: {
+    recoverySuccessTargetPct: number;
+    estimatedRecoverySuccessPct: number;
   };
 };
 
@@ -621,6 +760,12 @@ export type StudioRoomSummary = {
   updatedAt: string;
   participantCount: number;
   artifactCount: number;
+  roleCounts?: {
+    HOST: number;
+    PRODUCER: number;
+    GUEST: number;
+    VIEWER: number;
+  };
 };
 
 export type StudioRoomsListResponse = {
@@ -648,15 +793,39 @@ export type StudioRoomDetailsResponse = {
     roomName: string;
     status: "ACTIVE" | "CLOSED";
     metadata: unknown;
+    template?: {
+      id: "podcast" | "interview" | "panel";
+      title: string;
+      description: string;
+      defaultRoles: Array<"HOST" | "PRODUCER" | "GUEST" | "VIEWER">;
+    };
     startedAt: string | null;
     endedAt: string | null;
     createdAt: string;
     updatedAt: string;
   };
+  roleCounts?: {
+    HOST: number;
+    PRODUCER: number;
+    GUEST: number;
+    VIEWER: number;
+  };
+  safety?: {
+    checks: Array<{ code: string; status: "PASS" | "WARN" | "FAIL"; message: string }>;
+    canStartRecording: boolean;
+  };
   participants: Array<{
     id: string;
     userId: string | null;
-    role: "HOST" | "GUEST";
+    role: "HOST" | "PRODUCER" | "GUEST" | "VIEWER";
+    policy?: {
+      role: "HOST" | "PRODUCER" | "GUEST" | "VIEWER";
+      canManageParticipants: boolean;
+      canControlRoom: boolean;
+      canPublishTracks: boolean;
+      canPushToTalkBypass: boolean;
+      canViewDiagnostics: boolean;
+    };
     displayName: string;
     externalParticipantId: string | null;
     joinedAt: string;
@@ -677,7 +846,15 @@ export type StudioJoinTokenResponse = {
       id: string;
       identity: string;
       displayName: string;
-      role: "HOST" | "GUEST";
+      role: "HOST" | "PRODUCER" | "GUEST" | "VIEWER";
+      policy?: {
+        role: "HOST" | "PRODUCER" | "GUEST" | "VIEWER";
+        canManageParticipants: boolean;
+        canControlRoom: boolean;
+        canPublishTracks: boolean;
+        canPushToTalkBypass: boolean;
+        canViewDiagnostics: boolean;
+      };
     };
   };
 };
@@ -688,6 +865,10 @@ export type StudioStartRecordingResponse = {
     id: string;
     status: "ACTIVE" | "CLOSED";
     startedAt: string | null;
+  };
+  safety?: {
+    checks: Array<{ code: string; status: "PASS" | "WARN" | "FAIL"; message: string }>;
+    canStartRecording: boolean;
   };
 };
 
@@ -704,6 +885,68 @@ export type StudioStopRecordingResponse = {
     generatedClipCount: number;
     durationSec: number;
   };
+  mergePlan?: {
+    deterministicMergeId: string;
+    segmentCount: number;
+  };
+};
+
+export type StudioControlRoomStateResponse = {
+  projectV2Id: string;
+  activeRoomCount: number;
+  closedRoomCount: number;
+  safetyStats: {
+    pass: number;
+    warn: number;
+    fail: number;
+  };
+  reliability: {
+    sessionSuccessTargetPct: number;
+    estimatedSessionSuccessPct: number;
+  };
+  rooms: Array<{
+    id: string;
+    roomName: string;
+    status: "ACTIVE" | "CLOSED";
+    participantCount: number;
+    artifactCount: number;
+    roleCounts: {
+      HOST: number;
+      PRODUCER: number;
+      GUEST: number;
+      VIEWER: number;
+    };
+    template: "podcast" | "interview" | "panel";
+    pushToTalkEnabled: boolean;
+    activeIssues: Array<{ id: string; note: string; status: string; createdAt: string }>;
+    healthScore: number;
+    startedAt: string | null;
+    endedAt: string | null;
+    diagnostics: string[];
+    safety: {
+      checks: Array<{ code: string; status: "PASS" | "WARN" | "FAIL"; message: string }>;
+      canStartRecording: boolean;
+    };
+  }>;
+};
+
+export type StudioControlRoomActionResponse = {
+  action: string;
+  roomId: string;
+  actorRole: "HOST" | "PRODUCER" | "GUEST" | "VIEWER";
+  result: Record<string, unknown>;
+  state: StudioControlRoomStateResponse;
+};
+
+export type StudioRoomTemplatesResponse = {
+  templates: Array<{
+    id: "podcast" | "interview" | "panel";
+    title: string;
+    description: string;
+    defaultRoles: Array<"HOST" | "PRODUCER" | "GUEST" | "VIEWER">;
+    captureProfile: Record<string, unknown>;
+    recordingSafety: Record<string, unknown>;
+  }>;
 };
 
 export type ChatEditResponse = {
@@ -1322,6 +1565,7 @@ export type ParityLaunchReadinessPayload = {
     maxQueueFailed: number;
     maxEditorOpenP95Ms: number;
     maxCommandP95Ms: number;
+    minDesktopCrashFreePct?: number;
   };
   snapshot: {
     parityScore: number;
@@ -1332,6 +1576,7 @@ export type ParityLaunchReadinessPayload = {
     queueFailed: number;
     editorOpenP95Ms: number | null;
     commandP95Ms: number | null;
+    desktopCrashFreePct?: number | null;
   };
   guardrails: {
     status: "READY" | "CANARY_ONLY" | "ROLLBACK_RECOMMENDED";
@@ -1357,6 +1602,168 @@ export type ParityLaunchReadinessPayload = {
   } | null;
 };
 
+export type Phase6CertificationReadoutPayload = {
+  workspaceId: string;
+  generatedAt: string;
+  baselineDate: string;
+  requiredBaselineDate: string;
+  overallPassed: boolean;
+  certificationPassed: boolean;
+  dimensions: Array<{
+    id:
+      | "feature_matrix"
+      | "workflow_parity"
+      | "ux_slo_parity"
+      | "quality_parity"
+      | "ecosystem_parity"
+      | "operational_parity";
+    label: string;
+    passed: boolean;
+    summary: string;
+    evidence: Record<string, unknown>;
+  }>;
+  streak: {
+    consecutivePassDays: number;
+    targetDays: number;
+    passed: boolean;
+  };
+  monthlyDiff: {
+    hasRecord: boolean;
+    comparisonMonth: string | null;
+    comparedAt: string | null;
+    source: string | null;
+    unresolvedDriftCount: number;
+    discoveredFeatureCount: number;
+    freshnessDays: number | null;
+    currentMonth: string;
+    meetsFreshnessWindow: boolean;
+    meetsCurrentMonth: boolean;
+    passed: boolean;
+  };
+  releaseCandidate: {
+    frozen: boolean;
+    frozenAt: string | null;
+    frozenDays: number;
+    releaseTag: string | null;
+    notes: string | null;
+  };
+  pilotFeedback: {
+    dogfood: {
+      cohort: "dogfood";
+      totalSessions: number;
+      averageWorkflowSuccessPct: number | null;
+      averageRating: number | null;
+      totalBlockers: number;
+      totalCrashes: number;
+      totalParticipants: number;
+    };
+    pilot: {
+      cohort: "pilot";
+      totalSessions: number;
+      averageWorkflowSuccessPct: number | null;
+      averageRating: number | null;
+      totalBlockers: number;
+      totalCrashes: number;
+      totalParticipants: number;
+    };
+  };
+  latestBenchmark: {
+    id: string;
+    createdAt: string;
+    finishedAt: string | null;
+    betterThanDescript: boolean | null;
+    summary: Record<string, unknown> | null;
+  } | null;
+};
+
+export type DescriptDiffStatusPayload = {
+  hasRecord: boolean;
+  comparisonMonth: string | null;
+  comparedAt: string | null;
+  source: string | null;
+  unresolvedDriftCount: number;
+  discoveredFeatureCount: number;
+  freshnessDays: number | null;
+  currentMonth: string;
+  meetsFreshnessWindow: boolean;
+  meetsCurrentMonth: boolean;
+  passed: boolean;
+};
+
+export type ReleaseCandidateStatusPayload = {
+  frozen: boolean;
+  frozenAt: string | null;
+  frozenDays: number;
+  releaseTag: string | null;
+  notes: string | null;
+};
+
+export type Phase6PilotFeedbackRecordedPayload = {
+  id: string;
+  cohort: "dogfood" | "pilot";
+  recordedAt: string;
+};
+
+export type BrandStudioDetails = {
+  brandKit: {
+    primaryColor: string | null;
+    secondaryColor: string | null;
+    accentColor: string | null;
+    fontFamily: string | null;
+    logoAssetId: string | null;
+    watermarkAssetId: string | null;
+  };
+  customFonts: Array<{
+    id: string;
+    name: string;
+    family: string;
+    weight: number | null;
+    style: "normal" | "italic";
+    format: "ttf" | "otf" | "woff" | "woff2";
+    assetId: string | null;
+    url: string | null;
+    isVariable: boolean;
+    fallback: string | null;
+  }>;
+  layoutPacks: Array<{
+    id: string;
+    name: string;
+    aspectRatio: string;
+    sceneLayoutIds: string[];
+    tags: string[];
+    isDefault: boolean;
+  }>;
+  templatePacks: Array<{
+    id: string;
+    name: string;
+    category: string;
+    layoutPackId: string | null;
+    captionStylePresetId: string | null;
+    audioPreset: string | null;
+    tags: string[];
+    metadata: Record<string, unknown>;
+  }>;
+  distributionPresets: Array<{
+    id: string;
+    name: string;
+    connector: "youtube" | "drive" | "package" | "all";
+    visibility: "private" | "unlisted" | "public" | null;
+    titleTemplate: string | null;
+    descriptionTemplate: string | null;
+    tags: string[];
+    metadata: Record<string, unknown>;
+    isDefault: boolean;
+  }>;
+  metadataPacks: Array<{
+    id: string;
+    name: string;
+    connector: "youtube" | "drive" | "package" | "all";
+    metadata: Record<string, unknown>;
+    tags: string[];
+  }>;
+  metadata: Record<string, unknown>;
+};
+
 export type ProjectShareLinksPayload = {
   projectId: string;
   projectV2Id: string;
@@ -1369,6 +1776,7 @@ export type ProjectShareLinksPayload = {
     createdAt: string;
     isActive: boolean;
     shareUrl: string;
+    reviewerPageUrl: string;
   }>;
 };
 
@@ -1380,6 +1788,7 @@ export type CreateShareLinkPayload = {
     revokedAt: string | null;
     createdAt: string;
     shareUrl: string;
+    reviewerPageUrl: string;
   };
 };
 
@@ -1477,12 +1886,37 @@ export type ProjectReviewRequestsPayload = {
     decidedByUserId: string | null;
     createdAt: string;
     updatedAt: string;
+    approvalChain: Array<{
+      id: string;
+      role: "OWNER" | "ADMIN" | "EDITOR";
+      label: string;
+      required: boolean;
+      order: number;
+    }>;
+    approvalChainState: {
+      steps: Array<{
+        id: string;
+        role: "OWNER" | "ADMIN" | "EDITOR";
+        label: string;
+        required: boolean;
+        order: number;
+        status: "APPROVED" | "REJECTED" | "PENDING";
+        decidedByUserId: string | null;
+        decidedAt: string | null;
+      }>;
+      totalRequiredCount: number;
+      completedRequiredCount: number;
+      hasRejection: boolean;
+      isComplete: boolean;
+      nextRequiredStepId: string | null;
+    };
     logs: Array<{
       id: string;
       status: "APPROVED" | "REJECTED";
       note: string | null;
       decidedByUserId: string | null;
       createdAt: string;
+      approvalChainStepId: string | null;
     }>;
   }>;
 };
@@ -1494,6 +1928,13 @@ export type CreateReviewRequestPayload = {
     title: string;
     note: string | null;
     requiredScopes: string[];
+    approvalChain: Array<{
+      id: string;
+      role: "OWNER" | "ADMIN" | "EDITOR";
+      label: string;
+      required: boolean;
+      order: number;
+    }>;
     createdAt: string;
   };
 };
@@ -1505,9 +1946,27 @@ export type DecideReviewRequestPayload = {
     decisionId: string | null;
     decidedAt: string | null;
     decidedByUserId: string | null;
+    approvalChainState: {
+      steps: Array<{
+        id: string;
+        role: "OWNER" | "ADMIN" | "EDITOR";
+        label: string;
+        required: boolean;
+        order: number;
+        status: "APPROVED" | "REJECTED" | "PENDING";
+        decidedByUserId: string | null;
+        decidedAt: string | null;
+      }>;
+      totalRequiredCount: number;
+      completedRequiredCount: number;
+      hasRejection: boolean;
+      isComplete: boolean;
+      nextRequiredStepId: string | null;
+    };
   };
   decision: SubmitReviewDecisionPayload["decision"];
   logId: string;
+  approvalChainStepId: string;
 };
 
 export type ExportProfilesPayload = {
@@ -1571,6 +2030,7 @@ export type WorkspaceBrandPresetPayload = {
     defaultTitlePrefix: string | null;
     defaultTags: string[];
     metadata: Record<string, unknown>;
+    details: BrandStudioDetails;
     createdAt: string | null;
     updatedAt: string | null;
   };
@@ -1604,6 +2064,7 @@ export type WorkspaceBrandPresetUpsertPayload = {
     defaultTitlePrefix: string | null;
     defaultTags: string[];
     metadata: Record<string, unknown> | null;
+    details: BrandStudioDetails;
     createdAt: string;
     updatedAt: string;
   };
@@ -1647,7 +2108,133 @@ export type PublishConnectorBatchPayload = {
     total: number;
     done: number;
     error: number;
+    byConnector: Record<string, number>;
   };
+};
+
+export type DistributionPresetsPayload = {
+  workspaceId: string;
+  projectV2Id: string;
+  distributionPresets: BrandStudioDetails["distributionPresets"];
+  metadataPacks: BrandStudioDetails["metadataPacks"];
+  updatedAt: string | null;
+};
+
+export type ReviewerPagePayload = {
+  workspaceId: string;
+  projectId: string;
+  projectV2Id: string;
+  reviewerPage: {
+    projectTitle: string;
+    currentRevisionId: string | null;
+    approvalRequired: boolean;
+    accessSource: "AUTH" | "SHARE_LINK";
+    shareLink: {
+      id: string;
+      scope: "VIEW" | "COMMENT" | "APPROVE";
+      expiresAt: string | null;
+      reviewerPageUrl: string;
+    } | null;
+  };
+  summary: {
+    comments: {
+      total: number;
+      open: number;
+      resolved: number;
+    };
+    publish: {
+      total: number;
+      done: number;
+      error: number;
+      running: number;
+    };
+    latestDecision: {
+      id: string;
+      status: "APPROVED" | "REJECTED";
+      revisionId: string | null;
+      note: string | null;
+      decidedByUserId: string | null;
+      createdAt: string;
+    } | null;
+  };
+  reviewRequests: ProjectReviewRequestsPayload["requests"];
+  shareLinks: Array<{
+    id: string;
+    scope: "VIEW" | "COMMENT" | "APPROVE";
+    createdAt: string;
+    isActive: boolean;
+    reviewerPageUrl: string;
+  }>;
+  recentComments: Array<{
+    id: string;
+    status: "OPEN" | "RESOLVED";
+    body: string;
+    createdAt: string;
+    resolvedAt: string | null;
+  }>;
+  recentPublishJobs: Array<{
+    id: string;
+    connector: string;
+    status: "QUEUED" | "RUNNING" | "DONE" | "ERROR";
+    createdAt: string;
+    updatedAt: string;
+  }>;
+};
+
+export type ReviewVersionComparePayload = {
+  projectId: string;
+  projectV2Id: string;
+  comparable: boolean;
+  baseRevision: {
+    id: string;
+    revisionNumber: number;
+    timelineHash: string;
+    createdAt: string;
+    createdBy: {
+      id: string;
+      email: string;
+    } | null;
+  } | null;
+  targetRevision: {
+    id: string;
+    revisionNumber: number;
+    timelineHash: string;
+    createdAt: string;
+    createdBy: {
+      id: string;
+      email: string;
+    } | null;
+  };
+  summary: {
+    base: {
+      total: number;
+      byType: Record<string, number>;
+      sample: Array<{ op: string; keys: string[] }>;
+    } | null;
+    target: {
+      total: number;
+      byType: Record<string, number>;
+      sample: Array<{ op: string; keys: string[] }>;
+    };
+    changedOperationCount: number;
+    deltaByType: Record<string, number>;
+  };
+};
+
+export type ReviewAuditTrailPayload = {
+  workspaceId: string;
+  projectId: string;
+  projectV2Id: string;
+  events: Array<{
+    id: string;
+    action: string;
+    targetType: string;
+    targetId: string | null;
+    actorUserId: string | null;
+    severity: string;
+    metadata: unknown;
+    createdAt: string;
+  }>;
 };
 
 export type PresetCatalogResponse = {
@@ -1669,10 +2256,64 @@ type OpenCutTelemetryRequest = {
 
 type DesktopEventRequest = {
   projectId?: string;
-  event: "editor_boot" | "command_latency" | "background_upload_notice" | "background_render_notice" | "drop_import" | "desktop_menu_action" | "desktop_shortcut_action";
+  event:
+    | "editor_boot"
+    | "command_latency"
+    | "background_upload_notice"
+    | "background_render_notice"
+    | "drop_import"
+    | "drag_drop_ingest"
+    | "offline_draft_sync"
+    | "media_relink"
+    | "desktop_notification"
+    | "app_crash"
+    | "native_crash"
+    | "update_check"
+    | "update_apply"
+    | "desktop_menu_action"
+    | "desktop_shortcut_action";
   outcome?: "SUCCESS" | "ERROR" | "INFO";
   durationMs?: number;
+  sessionId?: string;
+  clientVersion?: string;
+  channel?: "stable" | "beta" | "canary";
+  platform?: "darwin-arm64" | "darwin-x64" | "win32-x64";
   metadata?: Record<string, unknown>;
+};
+
+type DesktopDropIngestRequest = {
+  files: Array<{
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    durationSec?: number;
+    sourcePath?: string;
+  }>;
+};
+
+type DesktopOfflineDraftUpsertRequest = {
+  draftId: string;
+  clientId: string;
+  basedOnRevisionId?: string | null;
+  clear?: boolean;
+  operations?: Array<Record<string, unknown>>;
+};
+
+type DesktopMediaRelinkRequest = {
+  missingAssets: Array<{
+    assetId: string;
+    originalFileName: string;
+    expectedDurationSec?: number;
+    expectedSizeBytes?: number;
+  }>;
+  candidates: Array<{
+    candidateId?: string;
+    fileName: string;
+    absolutePath: string;
+    durationSec?: number;
+    sizeBytes?: number;
+  }>;
+  apply?: boolean;
 };
 
 export type OpenCutMetricsResponse = {
@@ -1694,6 +2335,32 @@ export type DesktopConfigPayload = {
     supported: boolean;
     shell: string;
     status: string;
+    appId: string;
+    defaultUpdateChannel: "stable" | "beta" | "canary";
+    packagedTargets: {
+      macos: {
+        supported: boolean;
+        architectures: Array<"arm64" | "x64">;
+        signedBuilds: boolean;
+        installerFormats: string[];
+      };
+      windows: {
+        supported: boolean;
+        architectures: Array<"x64">;
+        signedBuilds: boolean;
+        installerFormats: string[];
+      };
+    };
+    autoUpdate: {
+      enabled: boolean;
+      channels: Array<"stable" | "beta" | "canary">;
+      releaseEndpoint: string;
+    };
+    crashReporting: {
+      enabled: boolean;
+      eventCategories: string[];
+      privacy: string;
+    };
   };
   cutover: {
     defaultEditorShell: "OPENCUT" | "LEGACY";
@@ -1703,6 +2370,12 @@ export type DesktopConfigPayload = {
   budgets: {
     editorOpenP95Ms: number;
     commandLatencyP95Ms: number;
+    crashFreeSessionsPct: number;
+  };
+  desktopCi: {
+    paritySuite: string;
+    requiredTargets: Array<"darwin-arm64" | "darwin-x64" | "win32-x64">;
+    crashFreeTargetPct: number;
   };
   nativeMenu: Array<{
     id: string;
@@ -1713,10 +2386,22 @@ export type DesktopConfigPayload = {
     transport: string[];
     timeline: string[];
     transcript: string[];
+    desktop: string[];
+  };
+  workflows: {
+    dragDropIngest: boolean;
+    offlineDraftSync: boolean;
+    mediaRelink: boolean;
+    desktopNotifications: boolean;
   };
   endpoints: {
     desktopEvents: string;
+    desktopReleases: string;
     projectPerfHints: string;
+    projectDesktopIngestDrop: string;
+    projectDesktopOfflineDrafts: string;
+    projectDesktopMediaRelink: string;
+    projectDesktopNotifications: string;
     queueHealth: string;
   };
 };
@@ -1729,6 +2414,13 @@ export type ProjectPerfHintsPayload = {
     clips: number;
     transcriptSegments: number;
     transcriptWords: number;
+  };
+  desktopSlo: {
+    crashFreeSessionsTargetPct: number;
+    crashFreeSessionsPct: number | null;
+    totalSessions: number;
+    crashSessions: number;
+    largeProjectMode: boolean;
   };
   budgets: {
     editorOpenP95Ms: number;
@@ -1750,6 +2442,142 @@ export type ProjectPerfHintsPayload = {
     message: string;
     action: string;
   }>;
+  updatedAt: string;
+};
+
+export type DesktopReleasesPayload = {
+  generatedAt: string;
+  platform: "darwin-arm64" | "darwin-x64" | "win32-x64";
+  channel: "stable" | "beta" | "canary";
+  currentVersion: string | null;
+  latest: {
+    version: string;
+    platform: "darwin-arm64" | "darwin-x64" | "win32-x64";
+    channel: "stable" | "beta" | "canary";
+    buildId: string;
+    publishedAt: string;
+    downloadUrl: string;
+    checksumSha256: string;
+    signature: string;
+    signed: boolean;
+    notes: string;
+    minOsVersion: string | null;
+  } | null;
+  updateAvailable: boolean;
+  signedReleaseCount: number;
+};
+
+export type ProjectDesktopDropIngestPayload = {
+  projectId: string;
+  projectV2Id: string;
+  ingestPlan: {
+    accepted: Array<{
+      fileName: string;
+      mimeType: string;
+      sizeBytes: number;
+      slot: "primary" | "broll" | "audio";
+      reason: string;
+    }>;
+    rejected: Array<{
+      fileName: string;
+      mimeType: string;
+      sizeBytes: number;
+      reason: string;
+    }>;
+    summary: {
+      total: number;
+      accepted: number;
+      rejected: number;
+    };
+  };
+  nextStep: {
+    presignEndpoint: string;
+    registerEndpoint: string;
+  };
+};
+
+export type ProjectDesktopOfflineDraftsPayload = {
+  projectId: string;
+  projectV2Id: string;
+  currentRevisionId: string | null;
+  drafts: Array<{
+    draftId: string;
+    clientId: string;
+    basedOnRevisionId: string | null;
+    operations: Array<Record<string, unknown>>;
+    status: "IN_SYNC" | "DIRTY" | "CONFLICT";
+    updatedAt: string;
+  }>;
+  summary: {
+    total: number;
+    dirty: number;
+    conflict: number;
+    inSync: number;
+  };
+  updatedAt: string;
+};
+
+export type ProjectDesktopOfflineDraftUpsertPayload = ProjectDesktopOfflineDraftsPayload & {
+  draft: ProjectDesktopOfflineDraftsPayload["drafts"][number] | null;
+};
+
+export type ProjectDesktopMediaRelinkPayload = {
+  projectId: string;
+  projectV2Id: string;
+  recommendations: Array<{
+    assetId: string;
+    status: "MATCHED" | "UNMATCHED";
+    selectedCandidate: {
+      candidateId: string;
+      fileName: string;
+      absolutePath: string;
+      confidence: "HIGH" | "MEDIUM" | "LOW";
+      score: number;
+    } | null;
+    alternatives: Array<{
+      candidateId: string;
+      fileName: string;
+      absolutePath: string;
+      score: number;
+    }>;
+  }>;
+  summary: {
+    totalMissing: number;
+    matched: number;
+    unmatched: number;
+    highConfidenceMatches: number;
+  };
+  applied: boolean;
+};
+
+export type ProjectDesktopNotificationsPayload = {
+  projectId: string;
+  projectV2Id: string;
+  notifications: Array<{
+    id: string;
+    kind: "UPLOAD" | "RENDER" | "RELINK" | "OFFLINE_DRAFT" | "SYSTEM";
+    severity: "INFO" | "WARN" | "CRITICAL";
+    title: string;
+    body: string;
+    createdAt: string;
+    action: {
+      type: "OPEN_PANEL" | "OPEN_SETTINGS" | "OPEN_PROJECT";
+      payload: string;
+    };
+  }>;
+  summary: {
+    total: number;
+    unread: number;
+    acknowledged: number;
+  };
+  updatedAt: string;
+};
+
+export type ProjectDesktopNotificationsAckPayload = {
+  projectId: string;
+  projectV2Id: string;
+  acknowledgedCount: number;
+  totalAcknowledged: number;
   updatedAt: string;
 };
 
@@ -2087,13 +2915,17 @@ export async function listProjectV2StudioRooms(projectIdOrV2Id: string) {
 
 export async function createProjectV2StudioRoom(
   projectIdOrV2Id: string,
-  body: { name?: string; region?: string; metadata?: Record<string, unknown> }
+  body: { name?: string; template?: "podcast" | "interview" | "panel"; region?: string; metadata?: Record<string, unknown> }
 ) {
   return requestJson<StudioRoomCreateResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/rooms`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+}
+
+export async function listProjectV2StudioRoomTemplates(projectIdOrV2Id: string) {
+  return requestJson<StudioRoomTemplatesResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/rooms/templates`);
 }
 
 export async function getProjectV2StudioRoom(projectIdOrV2Id: string, roomId: string) {
@@ -2103,9 +2935,43 @@ export async function getProjectV2StudioRoom(projectIdOrV2Id: string, roomId: st
 export async function issueProjectV2StudioJoinToken(
   projectIdOrV2Id: string,
   roomId: string,
-  body: { participantName: string; role: "HOST" | "GUEST"; ttlSec?: number }
+  body: {
+    participantName: string;
+    role: "HOST" | "PRODUCER" | "GUEST" | "VIEWER";
+    pushToTalk?: boolean;
+    ttlSec?: number;
+  }
 ) {
   return requestJson<StudioJoinTokenResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/rooms/${roomId}/join-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2StudioControlRoomState(projectIdOrV2Id: string) {
+  return requestJson<StudioControlRoomStateResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/control-room/state`);
+}
+
+export async function postProjectV2StudioControlRoomAction(
+  projectIdOrV2Id: string,
+  body: {
+    roomId: string;
+    action:
+      | "participant_mute"
+      | "participant_unmute"
+      | "participant_remove"
+      | "push_to_talk_enable"
+      | "push_to_talk_disable"
+      | "run_safety_checks"
+      | "mark_issue"
+      | "resolve_issue";
+    participantId?: string;
+    issueId?: string;
+    note?: string;
+  }
+) {
+  return requestJson<StudioControlRoomActionResponse>(`/api/projects-v2/${projectIdOrV2Id}/studio/control-room/actions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
@@ -2234,6 +3100,56 @@ export async function getParityLaunchReadiness() {
   return requestJson<ParityLaunchReadinessPayload>("/api/parity/launch/readiness");
 }
 
+export async function getPhase6CertificationReadout() {
+  return requestJson<Phase6CertificationReadoutPayload>("/api/parity/certification/readout");
+}
+
+export async function runPhase6Certification() {
+  return requestJson<Phase6CertificationReadoutPayload>("/api/parity/certification/run", {
+    method: "POST"
+  });
+}
+
+export async function getParityDescriptDiffStatus() {
+  return requestJson<DescriptDiffStatusPayload>("/api/parity/descript-diff");
+}
+
+export async function recordParityDescriptDiff(body: RecordDescriptDiffRequest) {
+  return requestJson<DescriptDiffStatusPayload>("/api/parity/descript-diff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getParityReleaseCandidateStatus() {
+  return requestJson<ReleaseCandidateStatusPayload>("/api/parity/release-candidate");
+}
+
+export async function freezeParityReleaseCandidate(body: FreezeReleaseCandidateRequest) {
+  return requestJson<ReleaseCandidateStatusPayload>("/api/parity/release-candidate/freeze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function unfreezeParityReleaseCandidate(body: UnfreezeReleaseCandidateRequest = {}) {
+  return requestJson<ReleaseCandidateStatusPayload>("/api/parity/release-candidate/unfreeze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function recordPhase6PilotFeedback(body: RecordPhase6PilotFeedbackRequest) {
+  return requestJson<Phase6PilotFeedbackRecordedPayload>("/api/parity/pilot-feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
 export async function getProjectV2PerfHints(projectIdOrV2Id: string) {
   return requestJson<ProjectPerfHintsPayload>(`/api/projects-v2/${projectIdOrV2Id}/perf-hints`);
 }
@@ -2310,6 +3226,32 @@ export async function decideProjectV2ReviewRequest(
   );
 }
 
+export async function getProjectV2ReviewerPage(projectIdOrV2Id: string, shareToken?: string) {
+  const suffix = shareToken ? `?shareToken=${encodeURIComponent(shareToken)}` : "";
+  return requestJson<ReviewerPagePayload>(`/api/projects-v2/${projectIdOrV2Id}/review/reviewer-page${suffix}`);
+}
+
+export async function getProjectV2ReviewVersionCompare(
+  projectIdOrV2Id: string,
+  params?: { baseRevisionId?: string; targetRevisionId?: string }
+) {
+  const searchParams = new URLSearchParams();
+  if (params?.baseRevisionId) {
+    searchParams.set("baseRevisionId", params.baseRevisionId);
+  }
+  if (params?.targetRevisionId) {
+    searchParams.set("targetRevisionId", params.targetRevisionId);
+  }
+  const suffix = searchParams.toString();
+  return requestJson<ReviewVersionComparePayload>(
+    `/api/projects-v2/${projectIdOrV2Id}/review/version-compare${suffix ? `?${suffix}` : ""}`
+  );
+}
+
+export async function getProjectV2ReviewAuditTrail(projectIdOrV2Id: string, limit = 100) {
+  return requestJson<ReviewAuditTrailPayload>(`/api/projects-v2/${projectIdOrV2Id}/review/audit?limit=${limit}`);
+}
+
 export async function getProjectV2ExportProfiles(projectIdOrV2Id: string) {
   return requestJson<ExportProfilesPayload>(`/api/projects-v2/${projectIdOrV2Id}/export/profile`);
 }
@@ -2355,6 +3297,10 @@ export async function publishProjectV2ConnectorBatch(projectIdOrV2Id: string, bo
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+}
+
+export async function getProjectV2DistributionPresets(projectIdOrV2Id: string) {
+  return requestJson<DistributionPresetsPayload>(`/api/projects-v2/${projectIdOrV2Id}/publish/distribution-presets`);
 }
 
 export async function getProjectV2PublishJob(projectIdOrV2Id: string, jobId: string) {
@@ -2405,11 +3351,77 @@ export async function getDesktopConfig() {
   return requestJson<DesktopConfigPayload>(`/api/desktop/config`);
 }
 
+export async function getDesktopReleases(params?: {
+  platform?: "darwin-arm64" | "darwin-x64" | "win32-x64";
+  channel?: "stable" | "beta" | "canary";
+  currentVersion?: string;
+}) {
+  const search = new URLSearchParams();
+  if (params?.platform) {
+    search.set("platform", params.platform);
+  }
+  if (params?.channel) {
+    search.set("channel", params.channel);
+  }
+  if (params?.currentVersion) {
+    search.set("currentVersion", params.currentVersion);
+  }
+  const suffix = search.toString();
+  return requestJson<DesktopReleasesPayload>(`/api/desktop/releases${suffix ? `?${suffix}` : ""}`);
+}
+
 export async function trackDesktopEvent(body: DesktopEventRequest) {
   return requestJson<{ tracked: boolean; eventId: string; createdAt: string }>(`/api/desktop/events`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
+  });
+}
+
+export async function planProjectV2DesktopDropIngest(projectIdOrV2Id: string, body: DesktopDropIngestRequest) {
+  return requestJson<ProjectDesktopDropIngestPayload>(`/api/projects-v2/${projectIdOrV2Id}/desktop/ingest-drop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2DesktopOfflineDrafts(projectIdOrV2Id: string) {
+  return requestJson<ProjectDesktopOfflineDraftsPayload>(`/api/projects-v2/${projectIdOrV2Id}/desktop/offline-drafts`);
+}
+
+export async function upsertProjectV2DesktopOfflineDraft(
+  projectIdOrV2Id: string,
+  body: DesktopOfflineDraftUpsertRequest
+) {
+  return requestJson<ProjectDesktopOfflineDraftUpsertPayload>(`/api/projects-v2/${projectIdOrV2Id}/desktop/offline-drafts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function recommendProjectV2DesktopMediaRelink(
+  projectIdOrV2Id: string,
+  body: DesktopMediaRelinkRequest
+) {
+  return requestJson<ProjectDesktopMediaRelinkPayload>(`/api/projects-v2/${projectIdOrV2Id}/desktop/media-relink`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getProjectV2DesktopNotifications(projectIdOrV2Id: string, includeAcknowledged = false) {
+  const suffix = includeAcknowledged ? "?includeAcknowledged=1" : "";
+  return requestJson<ProjectDesktopNotificationsPayload>(`/api/projects-v2/${projectIdOrV2Id}/desktop/notifications${suffix}`);
+}
+
+export async function acknowledgeProjectV2DesktopNotifications(projectIdOrV2Id: string, notificationIds: string[]) {
+  return requestJson<ProjectDesktopNotificationsAckPayload>(`/api/projects-v2/${projectIdOrV2Id}/desktop/notifications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notificationIds })
   });
 }
 

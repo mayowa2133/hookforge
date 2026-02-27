@@ -1,0 +1,312 @@
+{
+  "baselineDate": "2026-02-26",
+  "competitor": "Descript",
+  "features": [
+    {
+      "id": "recording_local_resumable",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/recordings/session", "/api/projects-v2/:id/recordings/session/:sessionId/finalize"],
+        "ui": ["/opencut/projects-v2/[id]#recording-panel"],
+        "tests": ["tests/recording-session.test.ts", "scripts/e2e-descript-core.sh"]
+      }
+    },
+    {
+      "id": "studio_rooms_remote",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/studio/rooms", "/api/projects-v2/:id/studio/rooms/:roomId/join-token"],
+        "ui": ["/opencut/projects-v2/[id]#studio-rooms"],
+        "tests": ["tests/descript-plus-tools.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "studio_room_roles_and_templates",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/studio/rooms/templates", "/api/projects-v2/:id/studio/rooms/:roomId/join-token"],
+        "ui": ["/opencut/projects-v2/[id]#studio-rooms"],
+        "tests": ["tests/phase3-studio-tools.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "studio_control_room_actions_and_diagnostics",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/studio/control-room/state", "/api/projects-v2/:id/studio/control-room/actions"],
+        "ui": ["/opencut/projects-v2/[id]#control-room"],
+        "tests": ["tests/phase3-studio-tools.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "recording_recovery_deterministic_merge_repair",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/recordings/session/:sessionId/recover"],
+        "ui": ["/opencut/projects-v2/[id]#recording-recovery"],
+        "tests": ["tests/recording-session.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "transcript_ranges_editing",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/transcript/ranges/preview", "/api/projects-v2/:id/transcript/ranges/apply"],
+        "ui": ["/opencut/projects-v2/[id]#transcript"],
+        "tests": ["tests/transcript-ranges.test.ts", "scripts/e2e-descript-plus.sh"]
+      }
+    },
+    {
+      "id": "transcript_search_replace_checkpoint",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/transcript/search-replace/preview", "/api/projects-v2/:id/transcript/checkpoints/create"],
+        "ui": ["/opencut/projects-v2/[id]#transcript-search"],
+        "tests": ["tests/descript-plus-tools.test.ts"]
+      }
+    },
+    {
+      "id": "audio_enhancement_preview_apply_undo",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/audio/enhance/preview", "/api/projects-v2/:id/audio/enhance/undo"],
+        "ui": ["/opencut/projects-v2/[id]#audio-quality"],
+        "tests": ["tests/phase3-audio-tools.test.ts", "tests/phase3-audio-safety.test.ts"]
+      }
+    },
+    {
+      "id": "filler_detection_and_cleanup",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/audio/filler/preview", "/api/projects-v2/:id/audio/filler/apply"],
+        "ui": ["/opencut/projects-v2/[id]#audio-quality"],
+        "tests": ["tests/phase3-tools.test.ts"]
+      }
+    },
+    {
+      "id": "eye_contact_preview_apply_undo",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/eye-contact/preview", "/api/projects-v2/:id/eye-contact/apply", "/api/projects-v2/:id/eye-contact/undo"],
+        "ui": ["/opencut/projects-v2/[id]#eye-contact"],
+        "tests": ["tests/phase2-tools.test.ts"]
+      }
+    },
+    {
+      "id": "green_screen_background_workflow",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/background/preview", "/api/projects-v2/:id/background/apply", "/api/projects-v2/:id/background/undo"],
+        "ui": ["/opencut/projects-v2/[id]#background"],
+        "tests": ["tests/phase2-tools.test.ts"]
+      }
+    },
+    {
+      "id": "multicam_recommendation_auto_switch",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/multicam/recommendations", "/api/projects-v2/:id/multicam/apply"],
+        "ui": ["/opencut/projects-v2/[id]#multicam"],
+        "tests": ["tests/phase2-tools.test.ts"]
+      }
+    },
+    {
+      "id": "chat_plan_apply_undo",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/chat/plan", "/api/projects-v2/:id/chat/apply", "/api/projects-v2/:id/chat/undo"],
+        "ui": ["/opencut/projects-v2/[id]#chat"],
+        "tests": ["tests/chat-v2-tools.test.ts", "tests/chat-edit-pipeline.test.ts"]
+      }
+    },
+    {
+      "id": "autopilot_plan_apply_replay",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/autopilot/plan", "/api/projects-v2/:id/autopilot/replay"],
+        "ui": ["/opencut/projects-v2/[id]#autopilot"],
+        "tests": ["tests/autopilot-tools.test.ts", "tests/descript-plus-tools.test.ts"]
+      }
+    },
+    {
+      "id": "underlord_alias_surface",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/underlord/plan", "/api/projects-v2/:id/underlord/apply"],
+        "ui": ["/opencut/projects-v2/[id]#underlord"],
+        "tests": ["tests/autopilot-tools.test.ts"]
+      }
+    },
+    {
+      "id": "revision_lineage_graph",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/revisions/graph"],
+        "ui": ["/opencut/projects-v2/[id]#history"],
+        "tests": ["tests/chat-v2-tools.test.ts"]
+      }
+    },
+    {
+      "id": "collab_comments_and_approval",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/review/comments", "/api/projects-v2/:id/review/approve"],
+        "ui": ["/opencut/projects-v2/[id]#collaboration"],
+        "tests": ["tests/review-phase5-tools.test.ts", "scripts/e2e-phase5.sh"]
+      }
+    },
+    {
+      "id": "share_links_scoped_access",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/share-links"],
+        "ui": ["/opencut/projects-v2/[id]#share"],
+        "tests": ["tests/review-phase5-tools.test.ts"]
+      }
+    },
+    {
+      "id": "publishing_connectors",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/publish/connectors/:connector/export", "/api/projects-v2/:id/publish/connectors/batch/export"],
+        "ui": ["/opencut/projects-v2/[id]#publish"],
+        "tests": ["tests/descript-plus-tools.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "brand_preset_defaults",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/brand-preset"],
+        "ui": ["/opencut/projects-v2/[id]#brand"],
+        "tests": ["tests/review-phase5-tools.test.ts"]
+      }
+    },
+    {
+      "id": "brand_studio_assets_templates_and_kits",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/workspace/brand-studio", "/api/workspace/brand-studio/assets", "/api/workspace/brand-studio/templates"],
+        "ui": ["/opencut/projects-v2/[id]#brand-studio"],
+        "tests": ["tests/review-phase5-tools.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "publishing_distribution_presets_and_metadata_packs",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/publish/distribution-presets", "/api/projects-v2/:id/publish/connectors/:connector/export", "/api/projects-v2/:id/publish/connectors/batch/export"],
+        "ui": ["/opencut/projects-v2/[id]#publish"],
+        "tests": ["tests/descript-plus-tools.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "reviewer_page_version_compare_approval_chain_audit",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/review/reviewer-page", "/api/projects-v2/:id/review/version-compare", "/api/projects-v2/:id/review/audit", "/api/projects-v2/:id/review/requests/:requestId/decision"],
+        "ui": ["/opencut/projects-v2/[id]#reviewer-page"],
+        "tests": ["tests/opencut-client.test.ts", "tests/review-phase5-tools.test.ts", "tests/descript-plus-tools.test.ts"]
+      }
+    },
+    {
+      "id": "desktop_packaging_release_channels_signed_updates",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/desktop/config", "/api/desktop/releases"],
+        "ui": ["/opencut/projects-v2/[id]#desktop-updates"],
+        "tests": ["tests/desktop-releases.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "desktop_native_ingest_offline_drafts_media_relink_notifications",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/projects-v2/:id/desktop/ingest-drop", "/api/projects-v2/:id/desktop/offline-drafts", "/api/projects-v2/:id/desktop/media-relink", "/api/projects-v2/:id/desktop/notifications"],
+        "ui": ["/opencut/projects-v2/[id]#desktop-workflows"],
+        "tests": ["tests/desktop-phase5-workflows.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "desktop_crash_reporting_and_crash_free_slo",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/desktop/events", "/api/projects-v2/:id/perf-hints", "/api/parity/launch/readiness"],
+        "ui": ["/opencut/projects-v2/[id]#desktop-stability"],
+        "tests": ["tests/desktop-perf-tools.test.ts", "tests/phase6-launch-readiness.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "desktop_guardrails_and_perf",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/desktop/config", "/api/projects-v2/:id/perf-hints", "/api/parity/launch/readiness"],
+        "ui": ["/opencut/projects-v2/[id]#desktop-performance"],
+        "tests": ["tests/desktop-perf-tools.test.ts", "tests/phase6-launch-readiness.test.ts"]
+      }
+    },
+    {
+      "id": "enterprise_sso_and_policy",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/workspace/security/policy", "/api/workspace/security/sso/providers"],
+        "ui": ["/settings/security"],
+        "tests": ["tests/sso-oidc-flow.test.ts", "tests/sso-saml-flow.test.ts", "tests/enterprise-auth-guards.test.ts"]
+      }
+    },
+    {
+      "id": "mobile_top_workflow_parity_observability",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/mobile/telemetry", "/api/mobile/workflows/top"],
+        "ui": ["/mobile"],
+        "tests": ["tests/mobile-tools.test.ts", "tests/phase6-tools.test.ts"]
+      }
+    },
+    {
+      "id": "parity_scorecard_and_benchmarks",
+      "status": "verified",
+      "coverage": {
+        "api": ["/api/parity/scorecard", "/api/parity/benchmarks/run"],
+        "ui": ["/launch"],
+        "tests": ["tests/descript-plus-tools.test.ts", "tests/quality-gates.test.ts"]
+      }
+    },
+    {
+      "id": "phase6_certification_suite_feature_workflow_ux_slo_quality_ecosystem_operational",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/parity/certification/readout", "/api/parity/certification/run"],
+        "ui": ["/launch"],
+        "tests": ["tests/phase6-certification-tools.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "monthly_descript_diff_and_drift_remediation_gate",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/parity/descript-diff"],
+        "ui": ["/launch"],
+        "tests": ["tests/phase6-certification-tools.test.ts", "tests/parity-feature-matrix.test.ts"]
+      }
+    },
+    {
+      "id": "release_candidate_freeze_dogfood_pilot_tracking",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/parity/release-candidate", "/api/parity/release-candidate/freeze", "/api/parity/release-candidate/unfreeze", "/api/parity/pilot-feedback"],
+        "ui": ["/launch"],
+        "tests": ["tests/phase6-certification-tools.test.ts", "tests/opencut-client.test.ts"]
+      }
+    },
+    {
+      "id": "thirty_day_simultaneous_pass_certification_gate",
+      "status": "implemented",
+      "coverage": {
+        "api": ["/api/parity/certification/readout", "/api/parity/certification/run"],
+        "ui": ["/launch"],
+        "tests": ["tests/phase6-certification-tools.test.ts", "scripts/check-parity-gates.ts"]
+      }
+    }
+  ]
+}

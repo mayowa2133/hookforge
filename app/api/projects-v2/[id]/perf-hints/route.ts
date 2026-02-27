@@ -1,6 +1,7 @@
 import { buildProjectPerfHints } from "@/lib/desktop/perf";
-import { extractDurationMs } from "@/lib/desktop/events";
+import { extractDurationMs, summarizeDesktopReliability } from "@/lib/desktop/events";
 import { requireProjectContext } from "@/lib/api-context";
+import { env } from "@/lib/env";
 import { jsonOk, routeErrorToResponse } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { buildTimelineState } from "@/lib/timeline-legacy";
@@ -45,7 +46,12 @@ export async function GET(_request: Request, { params }: Context) {
           workspaceId: ctx.workspace.id,
           projectId: ctx.projectV2.id,
           category: {
-            in: ["desktop.editor_boot", "desktop.command_latency"]
+            in: [
+              "desktop.editor_boot",
+              "desktop.command_latency",
+              "desktop.app_crash",
+              "desktop.native_crash"
+            ]
           }
         },
         orderBy: {
@@ -81,6 +87,16 @@ export async function GET(_request: Request, { params }: Context) {
         commandDurationsMs.push(durationMs);
       }
     }
+    const reliability = summarizeDesktopReliability(
+      feedbackRows.map((row) => ({
+        event: row.category.startsWith("desktop.") ? row.category.slice("desktop.".length) : row.category,
+        outcome: typeof row.metadata === "object" && row.metadata && "outcome" in row.metadata
+          ? (row.metadata as { outcome?: unknown }).outcome as string | null
+          : null,
+        metadata: row.metadata
+      }))
+    );
+    const largeProjectMode = clipCount >= 280 || wordCount >= 10_000 || segmentCount >= 2_500;
 
     const perf = buildProjectPerfHints({
       trackCount,
@@ -100,6 +116,13 @@ export async function GET(_request: Request, { params }: Context) {
         clips: clipCount,
         transcriptSegments: segmentCount,
         transcriptWords: wordCount
+      },
+      desktopSlo: {
+        crashFreeSessionsTargetPct: env.DESCRIPT_PLUS_MIN_DESKTOP_CRASH_FREE_PCT,
+        crashFreeSessionsPct: reliability.crashFreeSessionsPct,
+        totalSessions: reliability.totalSessions,
+        crashSessions: reliability.crashSessions,
+        largeProjectMode
       },
       ...perf,
       updatedAt: new Date().toISOString()

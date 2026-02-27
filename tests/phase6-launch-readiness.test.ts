@@ -73,7 +73,8 @@ describe("phase6 launch readiness", () => {
         queueBacklog: 5000,
         queueFailed: 320,
         editorOpenP95Ms: 3200,
-        commandP95Ms: 180
+        commandP95Ms: 180,
+        desktopCrashFreePct: 95
       },
       thresholds: {
         minParityScore: 75,
@@ -82,7 +83,8 @@ describe("phase6 launch readiness", () => {
         maxQueueBacklog: 1200,
         maxQueueFailed: 200,
         maxEditorOpenP95Ms: 2500,
-        maxCommandP95Ms: 100
+        maxCommandP95Ms: 100,
+        minDesktopCrashFreePct: 99.5
       }
     });
 
@@ -90,6 +92,7 @@ describe("phase6 launch readiness", () => {
     expect(triggers.some((trigger) => trigger.code === "PARITY_SCORE_BELOW_MIN")).toBe(true);
     expect(triggers.some((trigger) => trigger.code === "QUEUE_UNHEALTHY")).toBe(true);
     expect(triggers.some((trigger) => trigger.code === "COMMAND_LATENCY_HIGH")).toBe(true);
+    expect(triggers.some((trigger) => trigger.code === "DESKTOP_CRASH_FREE_BELOW_MIN")).toBe(true);
   });
 
   it("summarizes benchmark deltas against Descript baseline", () => {

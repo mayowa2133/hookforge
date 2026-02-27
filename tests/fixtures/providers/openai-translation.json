@@ -1,0 +1,20 @@
+{
+  "request": {
+    "operation": "CAPTION_TRANSLATE",
+    "payload": {
+      "text": "HookForge ships short videos fast.",
+      "sourceLanguage": "en",
+      "targetLanguage": "es",
+      "tone": "casual",
+      "glossary": {
+        "hookforge": "HookForge"
+      }
+    }
+  },
+  "response": {
+    "id": "resp_fixture_translation_1",
+    "output_text": "HookForge publica videos cortos rapido.",
+    "model": "gpt-4.1-mini"
+  }
+}
+

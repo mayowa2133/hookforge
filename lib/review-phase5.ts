@@ -8,11 +8,15 @@ import { recordWorkspaceAuditEvent } from "@/lib/workspace-audit";
 import { hasWorkspaceCapability, isManagerRole } from "@/lib/workspace-roles";
 import {
   buildProjectShareUrl,
+  buildReviewerPageUrl,
   clampInt,
   evaluateApprovalGate,
   hasShareScope,
   normalizeCommentAnchor,
   normalizeBrandPresetInput,
+  normalizeBrandStudioMetadata,
+  buildApprovalChainState,
+  normalizeApprovalChain,
   type Phase5PublishConnector,
   type Phase5PublishVisibility,
   type Phase5ShareScope
@@ -323,7 +327,8 @@ export async function listProjectShareLinks(projectIdOrV2Id: string, request?: R
       revokedAt: link.revokedAt?.toISOString() ?? null,
       createdAt: link.createdAt.toISOString(),
       isActive: link.revokedAt === null && (link.expiresAt === null || link.expiresAt > now),
-      shareUrl: buildProjectShareUrl(env.NEXT_PUBLIC_APP_URL, access.projectV2.id, link.token)
+      shareUrl: buildProjectShareUrl(env.NEXT_PUBLIC_APP_URL, access.projectV2.id, link.token),
+      reviewerPageUrl: buildReviewerPageUrl(env.NEXT_PUBLIC_APP_URL, access.projectV2.id, link.token)
     }))
   };
 }
@@ -382,7 +387,8 @@ export async function createProjectShareLink(params: {
       expiresAt: link.expiresAt?.toISOString() ?? null,
       revokedAt: link.revokedAt?.toISOString() ?? null,
       createdAt: link.createdAt.toISOString(),
-      shareUrl: buildProjectShareUrl(env.NEXT_PUBLIC_APP_URL, access.projectV2.id, link.token)
+      shareUrl: buildProjectShareUrl(env.NEXT_PUBLIC_APP_URL, access.projectV2.id, link.token),
+      reviewerPageUrl: buildReviewerPageUrl(env.NEXT_PUBLIC_APP_URL, access.projectV2.id, link.token)
     }
   };
 }
@@ -966,6 +972,7 @@ export async function getWorkspaceBrandPreset(projectIdOrV2Id: string, request?:
       ? (preset.metadata as Record<string, unknown>)
       : {}
   });
+  const brandStudioDetails = normalizeBrandStudioMetadata(normalized.metadata);
 
   return {
     workspaceId: access.workspace.id,
@@ -980,6 +987,7 @@ export async function getWorkspaceBrandPreset(projectIdOrV2Id: string, request?:
       defaultTitlePrefix: normalized.defaultTitlePrefix,
       defaultTags: normalized.defaultTags,
       metadata: normalized.metadata,
+      details: brandStudioDetails,
       createdAt: preset?.createdAt.toISOString() ?? null,
       updatedAt: preset?.updatedAt.toISOString() ?? null
     },
@@ -1139,6 +1147,8 @@ export async function upsertWorkspaceBrandPreset(params: {
     }
   });
 
+  const brandStudioDetails = normalizeBrandStudioMetadata(preset.metadata);
+
   return {
     workspaceId: access.workspace.id,
     projectV2Id: access.projectV2.id,
@@ -1152,6 +1162,7 @@ export async function upsertWorkspaceBrandPreset(params: {
       defaultTitlePrefix: preset.defaultTitlePrefix,
       defaultTags: preset.defaultTags,
       metadata: preset.metadata,
+      details: brandStudioDetails,
       createdAt: preset.createdAt.toISOString(),
       updatedAt: preset.updatedAt.toISOString()
     },
@@ -1163,6 +1174,430 @@ export async function upsertWorkspaceBrandPreset(params: {
       captionStylePresetId: linkedExportProfile.captionStylePresetId,
       updatedAt: linkedExportProfile.updatedAt.toISOString()
     }
+  };
+}
+
+function summarizeRevisionOperations(operationsInput: unknown) {
+  const operations = Array.isArray(operationsInput) ? operationsInput : [];
+  const byType: Record<string, number> = {};
+  const sample: Array<{ op: string; keys: string[] }> = [];
+  for (const operation of operations) {
+    const record = parseProjectConfig(operation);
+    const op = typeof record.op === "string"
+      ? record.op
+      : (typeof record.type === "string" ? record.type : "unknown");
+    byType[op] = (byType[op] ?? 0) + 1;
+    if (sample.length < 12) {
+      sample.push({
+        op,
+        keys: Object.keys(record).slice(0, 8)
+      });
+    }
+  }
+  return {
+    total: operations.length,
+    byType,
+    sample
+  };
+}
+
+export async function getProjectReviewVersionCompare(params: {
+  projectIdOrV2Id: string;
+  request?: Request;
+  shareToken?: string | null;
+  baseRevisionId?: string | null;
+  targetRevisionId?: string | null;
+}) {
+  const access = await resolvePhase5Access({
+    projectIdOrV2Id: params.projectIdOrV2Id,
+    request: params.request,
+    explicitShareToken: params.shareToken,
+    requiredScope: "VIEW"
+  });
+
+  const targetRevisionId = params.targetRevisionId ?? access.projectV2.currentRevisionId;
+  if (!targetRevisionId) {
+    throw new Error("No revision available for compare");
+  }
+
+  const targetRevision = await prisma.timelineRevision.findFirst({
+    where: {
+      id: targetRevisionId,
+      projectId: access.projectV2.id
+    },
+    select: {
+      id: true,
+      revisionNumber: true,
+      timelineHash: true,
+      operations: true,
+      createdAt: true,
+      createdBy: {
+        select: {
+          id: true,
+          email: true
+        }
+      }
+    }
+  });
+  if (!targetRevision) {
+    throw new Error("Target revision not found");
+  }
+
+  const baseRevision = params.baseRevisionId
+    ? await prisma.timelineRevision.findFirst({
+        where: {
+          id: params.baseRevisionId,
+          projectId: access.projectV2.id
+        },
+        select: {
+          id: true,
+          revisionNumber: true,
+          timelineHash: true,
+          operations: true,
+          createdAt: true,
+          createdBy: {
+            select: {
+              id: true,
+              email: true
+            }
+          }
+        }
+      })
+    : await prisma.timelineRevision.findFirst({
+        where: {
+          projectId: access.projectV2.id,
+          revisionNumber: {
+            lt: targetRevision.revisionNumber
+          }
+        },
+        orderBy: {
+          revisionNumber: "desc"
+        },
+        select: {
+          id: true,
+          revisionNumber: true,
+          timelineHash: true,
+          operations: true,
+          createdAt: true,
+          createdBy: {
+            select: {
+              id: true,
+              email: true
+            }
+          }
+        }
+      });
+
+  const targetSummary = summarizeRevisionOperations(targetRevision.operations);
+  const baseSummary = baseRevision ? summarizeRevisionOperations(baseRevision.operations) : null;
+  const typeKeys = new Set<string>([
+    ...Object.keys(targetSummary.byType),
+    ...(baseSummary ? Object.keys(baseSummary.byType) : [])
+  ]);
+  const deltaByType = Array.from(typeKeys).sort().reduce<Record<string, number>>((acc, key) => {
+    acc[key] = (targetSummary.byType[key] ?? 0) - (baseSummary?.byType[key] ?? 0);
+    return acc;
+  }, {});
+
+  return {
+    projectId: access.projectV2.legacyProjectId ?? access.projectV2.id,
+    projectV2Id: access.projectV2.id,
+    comparable: Boolean(baseRevision),
+    baseRevision: baseRevision
+      ? {
+          id: baseRevision.id,
+          revisionNumber: baseRevision.revisionNumber,
+          timelineHash: baseRevision.timelineHash,
+          createdAt: baseRevision.createdAt.toISOString(),
+          createdBy: baseRevision.createdBy
+        }
+      : null,
+    targetRevision: {
+      id: targetRevision.id,
+      revisionNumber: targetRevision.revisionNumber,
+      timelineHash: targetRevision.timelineHash,
+      createdAt: targetRevision.createdAt.toISOString(),
+      createdBy: targetRevision.createdBy
+    },
+    summary: {
+      base: baseSummary,
+      target: targetSummary,
+      changedOperationCount: baseSummary ? Math.abs(targetSummary.total - baseSummary.total) : targetSummary.total,
+      deltaByType
+    }
+  };
+}
+
+export async function listProjectReviewAuditTrail(params: {
+  projectIdOrV2Id: string;
+  request?: Request;
+  limit?: number;
+}) {
+  const access = await resolvePhase5Access({
+    projectIdOrV2Id: params.projectIdOrV2Id,
+    request: params.request,
+    requiredScope: "COMMENT"
+  });
+  if (!access.user?.id) {
+    throw new Error("Unauthorized");
+  }
+
+  const limit = clampInt(params.limit ?? 100, 1, 200);
+  const [publishJobs, reviewRequests, comments] = await Promise.all([
+    prisma.publishConnectorJob.findMany({
+      where: {
+        workspaceId: access.workspace.id,
+        projectId: access.projectV2.id
+      },
+      select: {
+        id: true
+      },
+      take: 300
+    }),
+    prisma.reviewRequest.findMany({
+      where: {
+        workspaceId: access.workspace.id,
+        projectId: access.projectV2.id
+      },
+      select: {
+        id: true
+      },
+      take: 300
+    }),
+    prisma.reviewComment.findMany({
+      where: {
+        workspaceId: access.workspace.id,
+        projectId: access.projectV2.id
+      },
+      select: {
+        id: true
+      },
+      take: 500
+    })
+  ]);
+
+  const projectScopedTargetIds = new Set<string>([
+    access.projectV2.id,
+    ...publishJobs.map((job) => job.id),
+    ...reviewRequests.map((request) => request.id),
+    ...comments.map((comment) => comment.id)
+  ]);
+
+  const events = await prisma.auditEvent.findMany({
+    where: {
+      workspaceId: access.workspace.id,
+      OR: [
+        { action: { startsWith: "review." } },
+        { action: { startsWith: "publish." } },
+        { action: { startsWith: "brand_studio." } },
+        { action: "workspace.brand_preset.upsert" }
+      ]
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    take: Math.min(limit * 8, 1000)
+  });
+
+  const filtered = events
+    .filter((event) => {
+      if (event.targetId && projectScopedTargetIds.has(event.targetId)) {
+        return true;
+      }
+      const metadata = parseProjectConfig(event.metadata);
+      return metadata.projectId === access.projectV2.id
+        || metadata.projectV2Id === access.projectV2.id;
+    })
+    .slice(0, limit);
+
+  return {
+    workspaceId: access.workspace.id,
+    projectId: access.projectV2.legacyProjectId ?? access.projectV2.id,
+    projectV2Id: access.projectV2.id,
+    events: filtered.map((event) => ({
+      id: event.id,
+      action: event.action,
+      targetType: event.targetType,
+      targetId: event.targetId,
+      actorUserId: event.actorUserId,
+      severity: event.severity,
+      metadata: event.metadata,
+      createdAt: event.createdAt.toISOString()
+    }))
+  };
+}
+
+export async function getProjectReviewerPage(params: {
+  projectIdOrV2Id: string;
+  request?: Request;
+  shareToken?: string | null;
+}) {
+  const access = await resolvePhase5Access({
+    projectIdOrV2Id: params.projectIdOrV2Id,
+    request: params.request,
+    explicitShareToken: params.shareToken,
+    requiredScope: "VIEW"
+  });
+  const legacyProject = assertLegacyProject(access);
+  const config = parseProjectConfig(legacyProject.config);
+
+  const [comments, latestDecision, requests, logs, publishJobs, links] = await Promise.all([
+    prisma.reviewComment.findMany({
+      where: {
+        projectId: access.projectV2.id
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 200
+    }),
+    prisma.reviewDecision.findFirst({
+      where: {
+        projectId: access.projectV2.id
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      select: {
+        id: true,
+        status: true,
+        revisionId: true,
+        note: true,
+        decidedByUserId: true,
+        createdAt: true
+      }
+    }),
+    prisma.reviewRequest.findMany({
+      where: {
+        workspaceId: access.workspace.id,
+        projectId: access.projectV2.id
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 30
+    }),
+    prisma.reviewDecisionLog.findMany({
+      where: {
+        workspaceId: access.workspace.id,
+        projectId: access.projectV2.id
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 120
+    }),
+    prisma.publishConnectorJob.findMany({
+      where: {
+        workspaceId: access.workspace.id,
+        projectId: access.projectV2.id
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 40
+    }),
+    prisma.shareLink.findMany({
+      where: {
+        projectId: access.projectV2.id
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 20
+    })
+  ]);
+
+  const now = new Date();
+  const commentSummary = {
+    total: comments.length,
+    open: comments.filter((comment) => comment.status === "OPEN").length,
+    resolved: comments.filter((comment) => comment.status === "RESOLVED").length
+  };
+  const publishSummary = {
+    total: publishJobs.length,
+    done: publishJobs.filter((job) => job.status === "DONE").length,
+    error: publishJobs.filter((job) => job.status === "ERROR").length,
+    running: publishJobs.filter((job) => job.status === "RUNNING" || job.status === "QUEUED").length
+  };
+
+  const requestRows = requests.map((request) => {
+    const requestLogs = logs.filter((log) => log.requestId === request.id).slice(0, 20);
+    const chain = normalizeApprovalChain(parseProjectConfig(request.metadata).approvalChain);
+    return {
+      id: request.id,
+      title: request.title,
+      status: request.status,
+      requiredScopes: request.requiredScopes,
+      createdAt: request.createdAt.toISOString(),
+      updatedAt: request.updatedAt.toISOString(),
+      approvalChain: chain,
+      approvalChainState: buildApprovalChainState({
+        chain,
+        decisions: requestLogs.map((entry) => ({
+          status: entry.status,
+          metadata: entry.metadata,
+          decidedByUserId: entry.decidedByUserId,
+          createdAt: entry.createdAt.toISOString()
+        }))
+      })
+    };
+  });
+
+  return {
+    workspaceId: access.workspace.id,
+    projectId: access.projectV2.legacyProjectId ?? access.projectV2.id,
+    projectV2Id: access.projectV2.id,
+    reviewerPage: {
+      projectTitle: access.projectV2.title,
+      currentRevisionId: access.projectV2.currentRevisionId,
+      approvalRequired: config.reviewApprovalRequired === true,
+      accessSource: access.accessSource,
+      shareLink: access.shareLink
+        ? {
+            id: access.shareLink.id,
+            scope: access.shareLink.scope,
+            expiresAt: access.shareLink.expiresAt?.toISOString() ?? null,
+            reviewerPageUrl: buildReviewerPageUrl(env.NEXT_PUBLIC_APP_URL, access.projectV2.id, access.shareLink.token)
+          }
+        : null
+    },
+    summary: {
+      comments: commentSummary,
+      publish: publishSummary,
+      latestDecision: latestDecision
+        ? {
+            id: latestDecision.id,
+            status: latestDecision.status,
+            revisionId: latestDecision.revisionId,
+            note: latestDecision.note,
+            decidedByUserId: latestDecision.decidedByUserId,
+            createdAt: latestDecision.createdAt.toISOString()
+          }
+        : null
+    },
+    reviewRequests: requestRows,
+    shareLinks: links.map((link) => ({
+      id: link.id,
+      scope: link.scope,
+      createdAt: link.createdAt.toISOString(),
+      isActive: link.revokedAt === null && (link.expiresAt === null || link.expiresAt > now),
+      reviewerPageUrl: buildReviewerPageUrl(env.NEXT_PUBLIC_APP_URL, access.projectV2.id, link.token)
+    })),
+    recentComments: comments.slice(0, 20).map((comment) => ({
+      id: comment.id,
+      status: comment.status,
+      body: comment.body,
+      createdAt: comment.createdAt.toISOString(),
+      resolvedAt: comment.resolvedAt?.toISOString() ?? null
+    })),
+    recentPublishJobs: publishJobs.slice(0, 20).map((job) => ({
+      id: job.id,
+      connector: job.connector,
+      status: job.status,
+      createdAt: job.createdAt.toISOString(),
+      updatedAt: job.updatedAt.toISOString()
+    }))
   };
 }
 

@@ -10,6 +10,13 @@ const SUPPORTED_CHAT_OPS = new Set<ChatEditOperation["op"]>([
   "caption_style",
   "zoom",
   "audio_duck",
+  "transcript_cleanup",
+  "highlight_extract",
+  "chapter_markers",
+  "social_assets",
+  "metadata_pack",
+  "retake_cleanup",
+  "publish_prep",
   "generic"
 ]);
 

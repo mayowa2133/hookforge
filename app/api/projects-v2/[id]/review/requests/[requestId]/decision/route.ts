@@ -16,7 +16,8 @@ export async function POST(request: Request, { params }: Context) {
         requestId: params.requestId,
         status: body.status,
         note: body.note,
-        requireApproval: body.requireApproval
+        requireApproval: body.requireApproval,
+        approvalChainStepId: body.approvalChainStepId
       })
     );
   } catch (error) {

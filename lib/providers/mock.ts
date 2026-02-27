@@ -1,10 +1,16 @@
 import type { ProviderAdapter, ProviderCapability, ProviderRequest, ProviderResponse } from "./types";
 
-export function createMockProvider(name: string, capability: ProviderCapability, configured: boolean): ProviderAdapter {
+export function createMockProvider<C extends ProviderCapability>(
+  name: string,
+  capability: C,
+  configured: boolean
+): ProviderAdapter<C> {
   return {
     name,
     capability,
     configured,
+    isMock: true,
+    supportsOperations: ["*"],
     async run(request: ProviderRequest): Promise<ProviderResponse> {
       return {
         providerName: name,

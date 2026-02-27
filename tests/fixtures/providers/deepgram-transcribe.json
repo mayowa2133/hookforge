@@ -1,0 +1,36 @@
+{
+  "request": {
+    "operation": "TRANSCRIBE",
+    "payload": {
+      "language": "en",
+      "durationMs": 12000,
+      "diarization": true,
+      "punctuationStyle": "auto",
+      "audioUrl": "https://cdn.example.com/audio.wav"
+    }
+  },
+  "response": {
+    "results": {
+      "channels": [
+        {
+          "alternatives": [
+            {
+              "transcript": "hello from the deepgram fixture",
+              "words": [
+                { "word": "hello", "start": 0.0, "end": 0.32, "confidence": 0.98 },
+                { "word": "fixture", "start": 0.35, "end": 0.76, "confidence": 0.97 }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "request_id": "fixture-deepgram-1",
+      "model_info": {
+        "name": "nova-2"
+      }
+    }
+  }
+}
+

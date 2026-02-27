@@ -78,6 +78,8 @@ export async function processAIJob(aiJobId: string) {
     });
 
     const durationMs = Date.now() - startedAt;
+    const providerDurationMs = providerResponse.usage?.durationMs ?? durationMs;
+    const providerCostUsd = providerResponse.usage?.costUsd ?? 0;
 
     await prisma.aIProviderRun.create({
       data: {
@@ -94,8 +96,8 @@ export async function processAIJob(aiJobId: string) {
         } as Prisma.InputJsonValue,
         tokensIn: providerResponse.usage?.tokensIn,
         tokensOut: providerResponse.usage?.tokensOut,
-        durationMs: providerResponse.usage?.durationMs ?? durationMs,
-        costUsd: providerResponse.usage?.costUsd
+        durationMs: providerDurationMs,
+        costUsd: providerCostUsd
       }
     });
 
@@ -128,8 +130,23 @@ export async function processAIJob(aiJobId: string) {
       provider: provider.name,
       routeSource: routing.routeSource
     });
+    metrics.increment("provider_call_completed", 1, {
+      capability,
+      provider: provider.name,
+      routeSource: routing.routeSource
+    });
     metrics.observe("ai_job_duration_ms", durationMs, {
       type: aiJob.type,
+      provider: provider.name,
+      routeSource: routing.routeSource
+    });
+    metrics.observe("provider_call_duration_ms", providerDurationMs, {
+      capability,
+      provider: provider.name,
+      routeSource: routing.routeSource
+    });
+    metrics.observe("provider_call_cost_usd", providerCostUsd, {
+      capability,
       provider: provider.name,
       routeSource: routing.routeSource
     });
@@ -149,6 +166,11 @@ export async function processAIJob(aiJobId: string) {
       }
     });
     metrics.increment("ai_job_failed", 1, { type: aiJob.type });
+    metrics.increment("provider_call_failed", 1, {
+      capability,
+      provider: provider.name,
+      routeSource: routing.routeSource
+    });
     logger.error("AI job failed", {
       aiJobId: aiJob.id,
       type: aiJob.type,

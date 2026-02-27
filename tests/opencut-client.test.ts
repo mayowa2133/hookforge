@@ -11,16 +11,31 @@ import {
   createProjectV2ShareLink,
   autoTranscript,
   getDesktopConfig,
+  getDesktopReleases,
   getProjectV2ExportProfiles,
+  getProjectV2DesktopOfflineDrafts,
+  getProjectV2DesktopNotifications,
   getProjectV2PerfHints,
   getProjectV2ReviewComments,
+  getProjectV2ReviewerPage,
+  getProjectV2ReviewVersionCompare,
+  getProjectV2ReviewAuditTrail,
   listProjectV2ReviewRequests,
   getProjectV2ShareLinks,
   getProjectV2BrandPreset,
+  getProjectV2DistributionPresets,
   getProjectV2PublishJob,
   getOpsQueueHealth,
   getOpsSloSummary,
   getParityLaunchReadiness,
+  getPhase6CertificationReadout,
+  runPhase6Certification,
+  getParityDescriptDiffStatus,
+  recordParityDescriptDiff,
+  getParityReleaseCandidateStatus,
+  freezeParityReleaseCandidate,
+  unfreezeParityReleaseCandidate,
+  recordPhase6PilotFeedback,
   getProjectV2EditorHealth,
   getProjectV2EditorState,
   getProjectV2Presets,
@@ -51,14 +66,17 @@ import {
   batchSetTranscriptSpeaker,
   cancelProjectV2RecordingSession,
   createProjectV2StudioRoom,
+  getProjectV2StudioControlRoomState,
   finalizeProjectV2RecordingSession,
   getProjectV2StudioRoom,
+  listProjectV2StudioRoomTemplates,
   listTranscriptCheckpoints,
   startRender,
   submitProjectV2ReviewDecision,
   decideProjectV2ReviewRequest,
   issueProjectV2StudioJoinToken,
   listProjectV2StudioRooms,
+  postProjectV2StudioControlRoomAction,
   recoverProjectV2RecordingSession,
   restoreTranscriptCheckpoint,
   startProjectV2RecordingSession,
@@ -74,10 +92,14 @@ import {
   undoProjectV2ChatEdit,
   updateProjectV2ReviewCommentStatus,
   postProjectV2RecordingChunk,
+  planProjectV2DesktopDropIngest,
   getProjectV2RecordingSession,
   previewTranscriptSearchReplace,
   createTranscriptCheckpoint,
-  replayProjectV2Autopilot
+  replayProjectV2Autopilot,
+  recommendProjectV2DesktopMediaRelink,
+  acknowledgeProjectV2DesktopNotifications,
+  upsertProjectV2DesktopOfflineDraft
 } from "@/lib/opencut/hookforge-client";
 
 function mockResponse(body: unknown, ok = true, status = 200) {
@@ -586,7 +608,8 @@ describe("opencut hookforge client", () => {
           expiresAt: null,
           revokedAt: null,
           createdAt: new Date().toISOString(),
-          shareUrl: "https://example.com/share"
+          shareUrl: "https://example.com/share",
+          reviewerPageUrl: "https://example.com/reviewer"
         }
       }))
       .mockResolvedValueOnce(mockResponse({
@@ -648,16 +671,85 @@ describe("opencut hookforge client", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         mockResponse({
-          desktop: { supported: true, shell: "web-first-desktop-shell", status: "beta-ready" },
+          desktop: {
+            supported: true,
+            shell: "web-first-desktop-shell",
+            status: "ga-ready",
+            appId: "dev.hookforge.desktop",
+            defaultUpdateChannel: "stable",
+            packagedTargets: {
+              macos: {
+                supported: true,
+                architectures: ["arm64", "x64"],
+                signedBuilds: true,
+                installerFormats: ["dmg", "zip"]
+              },
+              windows: {
+                supported: true,
+                architectures: ["x64"],
+                signedBuilds: true,
+                installerFormats: ["exe", "msi"]
+              }
+            },
+            autoUpdate: {
+              enabled: true,
+              channels: ["stable", "beta", "canary"],
+              releaseEndpoint: "/api/desktop/releases"
+            },
+            crashReporting: {
+              enabled: true,
+              eventCategories: ["desktop.app_crash", "desktop.native_crash"],
+              privacy: "no-pii-stack-traces"
+            }
+          },
           cutover: { defaultEditorShell: "OPENCUT", immediateReplacement: true, legacyFallbackAllowlistEnabled: false },
-          budgets: { editorOpenP95Ms: 2500, commandLatencyP95Ms: 100 },
+          budgets: { editorOpenP95Ms: 2500, commandLatencyP95Ms: 100, crashFreeSessionsPct: 99.5 },
+          desktopCi: {
+            paritySuite: "test:e2e:phase012345",
+            requiredTargets: ["darwin-arm64", "darwin-x64", "win32-x64"],
+            crashFreeTargetPct: 99.5
+          },
           nativeMenu: [],
-          shortcuts: { transport: [], timeline: [], transcript: [] },
+          shortcuts: { transport: [], timeline: [], transcript: [], desktop: [] },
+          workflows: {
+            dragDropIngest: true,
+            offlineDraftSync: true,
+            mediaRelink: true,
+            desktopNotifications: true
+          },
           endpoints: {
             desktopEvents: "/api/desktop/events",
+            desktopReleases: "/api/desktop/releases",
             projectPerfHints: "/api/projects-v2/:id/perf-hints",
+            projectDesktopIngestDrop: "/api/projects-v2/:id/desktop/ingest-drop",
+            projectDesktopOfflineDrafts: "/api/projects-v2/:id/desktop/offline-drafts",
+            projectDesktopMediaRelink: "/api/projects-v2/:id/desktop/media-relink",
+            projectDesktopNotifications: "/api/projects-v2/:id/desktop/notifications",
             queueHealth: "/api/ops/queues/health"
           }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          generatedAt: new Date().toISOString(),
+          platform: "darwin-arm64",
+          channel: "stable",
+          currentVersion: "1.0.0",
+          latest: {
+            version: "1.1.0",
+            platform: "darwin-arm64",
+            channel: "stable",
+            buildId: "build_110",
+            publishedAt: new Date().toISOString(),
+            downloadUrl: "https://downloads.example.com/desktop.dmg",
+            checksumSha256: "f7f8f0f2c802076f99003eb51f1965cd352213f4f740f4f57bb4ab68e5f16af3",
+            signature: "b190f36f362a3815c7ef53add7f8f2ba5c0106f57cc23d17a27f1bf4bc584cf0",
+            signed: true,
+            notes: "update",
+            minOsVersion: "13.0"
+          },
+          updateAvailable: true,
+          signedReleaseCount: 2
         })
       )
       .mockResolvedValueOnce(
@@ -665,6 +757,13 @@ describe("opencut hookforge client", () => {
           projectId: "pv2_1",
           legacyProjectId: "legacy_1",
           counts: { tracks: 2, clips: 8, transcriptSegments: 16, transcriptWords: 120 },
+          desktopSlo: {
+            crashFreeSessionsTargetPct: 99.5,
+            crashFreeSessionsPct: 100,
+            totalSessions: 2,
+            crashSessions: 0,
+            largeProjectMode: false
+          },
           budgets: { editorOpenP95Ms: 2500, commandLatencyP95Ms: 100 },
           observed: { editorOpenP95Ms: 1800, commandLatencyP95Ms: 74 },
           suggested: { timelineWindowSize: 60, segmentWindowSize: 220, enableLaneCollapse: false, preferredZoomPercent: 100 },
@@ -678,9 +777,96 @@ describe("opencut hookforge client", () => {
           eventId: "evt_1",
           createdAt: new Date().toISOString()
         }, true, 201)
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_1",
+          ingestPlan: {
+            accepted: [
+              {
+                fileName: "episode.mov",
+                mimeType: "video/mp4",
+                sizeBytes: 1024,
+                slot: "primary",
+                reason: "Ready for timeline ingest"
+              }
+            ],
+            rejected: [],
+            summary: {
+              total: 1,
+              accepted: 1,
+              rejected: 0
+            }
+          },
+          nextStep: {
+            presignEndpoint: "/api/projects/legacy_1/assets/presign",
+            registerEndpoint: "/api/projects-v2/pv2_1/media/register"
+          }
+        }, true, 202)
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_1",
+          currentRevisionId: "rev_1",
+          drafts: [],
+          summary: { total: 0, dirty: 0, conflict: 0, inSync: 0 },
+          updatedAt: new Date().toISOString()
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_1",
+          currentRevisionId: "rev_1",
+          draft: {
+            draftId: "draft_1",
+            clientId: "desktop_1",
+            basedOnRevisionId: "rev_1",
+            operations: [{ op: "split" }],
+            status: "DIRTY",
+            updatedAt: new Date().toISOString()
+          },
+          drafts: [],
+          summary: { total: 1, dirty: 1, conflict: 0, inSync: 0 },
+          updatedAt: new Date().toISOString()
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_1",
+          recommendations: [],
+          summary: { totalMissing: 1, matched: 1, unmatched: 0, highConfidenceMatches: 1 },
+          applied: true
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_1",
+          notifications: [],
+          summary: { total: 0, unread: 0, acknowledged: 0 },
+          updatedAt: new Date().toISOString()
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_1",
+          projectV2Id: "pv2_1",
+          acknowledgedCount: 1,
+          totalAcknowledged: 1,
+          updatedAt: new Date().toISOString()
+        })
       );
 
     const config = await getDesktopConfig();
+    const releases = await getDesktopReleases({
+      platform: "darwin-arm64",
+      channel: "stable",
+      currentVersion: "1.0.0"
+    });
     const perf = await getProjectV2PerfHints("pv2_1");
     const tracked = await trackDesktopEvent({
       projectId: "pv2_1",
@@ -688,17 +874,50 @@ describe("opencut hookforge client", () => {
       durationMs: 88,
       outcome: "SUCCESS"
     });
+    const ingest = await planProjectV2DesktopDropIngest("pv2_1", {
+      files: [{ fileName: "episode.mov", mimeType: "video/mp4", sizeBytes: 1024 }]
+    });
+    const drafts = await getProjectV2DesktopOfflineDrafts("pv2_1");
+    const draftUpsert = await upsertProjectV2DesktopOfflineDraft("pv2_1", {
+      draftId: "draft_1",
+      clientId: "desktop_1",
+      basedOnRevisionId: "rev_1",
+      operations: [{ op: "split" }]
+    });
+    const relink = await recommendProjectV2DesktopMediaRelink("pv2_1", {
+      missingAssets: [{ assetId: "asset_1", originalFileName: "episode.mov" }],
+      candidates: [{ fileName: "episode.mov", absolutePath: "/tmp/episode.mov" }],
+      apply: true
+    });
+    const notifications = await getProjectV2DesktopNotifications("pv2_1");
+    const ack = await acknowledgeProjectV2DesktopNotifications("pv2_1", ["n1"]);
 
     expect(config.desktop.supported).toBe(true);
+    expect(config.desktop.packagedTargets.macos.signedBuilds).toBe(true);
+    expect(releases.updateAvailable).toBe(true);
     expect(perf.budgets.commandLatencyP95Ms).toBe(100);
+    expect(perf.desktopSlo.crashFreeSessionsTargetPct).toBe(99.5);
     expect(tracked.tracked).toBe(true);
+    expect(ingest.ingestPlan.summary.accepted).toBe(1);
+    expect(drafts.summary.total).toBe(0);
+    expect(draftUpsert.summary.dirty).toBe(1);
+    expect(relink.applied).toBe(true);
+    expect(notifications.summary.total).toBe(0);
+    expect(ack.acknowledgedCount).toBe(1);
     expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/desktop/config", undefined);
-    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/projects-v2/pv2_1/perf-hints", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/desktop/releases?platform=darwin-arm64&channel=stable&currentVersion=1.0.0", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/projects-v2/pv2_1/perf-hints", undefined);
     expect(fetchSpy).toHaveBeenNthCalledWith(
-      3,
+      4,
       "/api/desktop/events",
       expect.objectContaining({ method: "POST" })
     );
+    expect(fetchSpy).toHaveBeenNthCalledWith(5, "/api/projects-v2/pv2_1/desktop/ingest-drop", expect.objectContaining({ method: "POST" }));
+    expect(fetchSpy).toHaveBeenNthCalledWith(6, "/api/projects-v2/pv2_1/desktop/offline-drafts", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(7, "/api/projects-v2/pv2_1/desktop/offline-drafts", expect.objectContaining({ method: "POST" }));
+    expect(fetchSpy).toHaveBeenNthCalledWith(8, "/api/projects-v2/pv2_1/desktop/media-relink", expect.objectContaining({ method: "POST" }));
+    expect(fetchSpy).toHaveBeenNthCalledWith(9, "/api/projects-v2/pv2_1/desktop/notifications", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(10, "/api/projects-v2/pv2_1/desktop/notifications", expect.objectContaining({ method: "POST" }));
   });
 
   it("supports phase3 audio analysis, enhance, filler, and undo endpoints", async () => {
@@ -1197,7 +1416,8 @@ describe("opencut hookforge client", () => {
             createdAt: now,
             updatedAt: now,
             participantCount: 1,
-            artifactCount: 0
+            artifactCount: 0,
+            roleCounts: { HOST: 1, PRODUCER: 0, GUEST: 0, VIEWER: 0 }
           }
         ]
       }))
@@ -1314,6 +1534,83 @@ describe("opencut hookforge client", () => {
     expect(fetchSpy).toHaveBeenNthCalledWith(
       6,
       "/api/projects-v2/pv2_8/studio/rooms/room_2/stop-recording",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("supports studio templates and control-room state/action APIs", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(mockResponse({
+        templates: [
+          {
+            id: "podcast",
+            title: "Podcast",
+            description: "Two speaker setup",
+            defaultRoles: ["HOST", "PRODUCER", "GUEST"],
+            captureProfile: {},
+            recordingSafety: {}
+          }
+        ]
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        projectV2Id: "pv2_9",
+        activeRoomCount: 1,
+        closedRoomCount: 0,
+        safetyStats: { pass: 4, warn: 1, fail: 0 },
+        reliability: { sessionSuccessTargetPct: 95, estimatedSessionSuccessPct: 92 },
+        rooms: [
+          {
+            id: "room_9",
+            roomName: "podcast-room",
+            status: "ACTIVE",
+            participantCount: 3,
+            artifactCount: 1,
+            roleCounts: { HOST: 1, PRODUCER: 1, GUEST: 1, VIEWER: 0 },
+            template: "podcast",
+            pushToTalkEnabled: false,
+            activeIssues: [],
+            healthScore: 92,
+            startedAt: null,
+            endedAt: null,
+            diagnostics: [],
+            safety: {
+              checks: [{ code: "HOST_PRESENT", status: "PASS", message: "ok" }],
+              canStartRecording: true
+            }
+          }
+        ]
+      }))
+      .mockResolvedValueOnce(mockResponse({
+        action: "participant_mute",
+        roomId: "room_9",
+        actorRole: "PRODUCER",
+        result: { participantId: "p_9", muted: true },
+        state: {
+          projectV2Id: "pv2_9",
+          activeRoomCount: 1,
+          closedRoomCount: 0,
+          safetyStats: { pass: 4, warn: 1, fail: 0 },
+          reliability: { sessionSuccessTargetPct: 95, estimatedSessionSuccessPct: 92 },
+          rooms: []
+        }
+      }));
+
+    const templates = await listProjectV2StudioRoomTemplates("pv2_9");
+    const controlState = await getProjectV2StudioControlRoomState("pv2_9");
+    const action = await postProjectV2StudioControlRoomAction("pv2_9", {
+      roomId: "room_9",
+      action: "participant_mute",
+      participantId: "p_9"
+    });
+
+    expect(templates.templates[0]?.id).toBe("podcast");
+    expect(controlState.rooms[0]?.roleCounts.PRODUCER).toBe(1);
+    expect(action.actorRole).toBe("PRODUCER");
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/projects-v2/pv2_9/studio/rooms/templates", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/projects-v2/pv2_9/studio/control-room/state", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects-v2/pv2_9/studio/control-room/actions",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -1617,6 +1914,251 @@ describe("opencut hookforge client", () => {
     expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/parity/launch/readiness", undefined);
   });
 
+  it("supports phase6 certification, drift, release-candidate, and pilot feedback endpoints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          generatedAt: new Date().toISOString(),
+          baselineDate: "2026-02-26",
+          requiredBaselineDate: "2026-02-26",
+          overallPassed: true,
+          certificationPassed: true,
+          dimensions: [],
+          streak: {
+            consecutivePassDays: 30,
+            targetDays: 30,
+            passed: true
+          },
+          monthlyDiff: {
+            hasRecord: true,
+            comparisonMonth: "2026-02",
+            comparedAt: new Date().toISOString(),
+            source: "manual",
+            unresolvedDriftCount: 0,
+            discoveredFeatureCount: 2,
+            freshnessDays: 2,
+            currentMonth: "2026-02",
+            meetsFreshnessWindow: true,
+            meetsCurrentMonth: true,
+            passed: true
+          },
+          releaseCandidate: {
+            frozen: true,
+            frozenAt: new Date().toISOString(),
+            frozenDays: 14,
+            releaseTag: "rc-2026-02-26",
+            notes: null
+          },
+          pilotFeedback: {
+            dogfood: {
+              cohort: "dogfood",
+              totalSessions: 12,
+              averageWorkflowSuccessPct: 100,
+              averageRating: 4.8,
+              totalBlockers: 0,
+              totalCrashes: 0,
+              totalParticipants: 30
+            },
+            pilot: {
+              cohort: "pilot",
+              totalSessions: 6,
+              averageWorkflowSuccessPct: 100,
+              averageRating: 4.7,
+              totalBlockers: 0,
+              totalCrashes: 0,
+              totalParticipants: 14
+            }
+          },
+          latestBenchmark: null
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          generatedAt: new Date().toISOString(),
+          baselineDate: "2026-02-26",
+          requiredBaselineDate: "2026-02-26",
+          overallPassed: true,
+          certificationPassed: true,
+          dimensions: [],
+          streak: {
+            consecutivePassDays: 30,
+            targetDays: 30,
+            passed: true
+          },
+          monthlyDiff: {
+            hasRecord: true,
+            comparisonMonth: "2026-02",
+            comparedAt: new Date().toISOString(),
+            source: "manual",
+            unresolvedDriftCount: 0,
+            discoveredFeatureCount: 2,
+            freshnessDays: 2,
+            currentMonth: "2026-02",
+            meetsFreshnessWindow: true,
+            meetsCurrentMonth: true,
+            passed: true
+          },
+          releaseCandidate: {
+            frozen: true,
+            frozenAt: new Date().toISOString(),
+            frozenDays: 14,
+            releaseTag: "rc-2026-02-26",
+            notes: null
+          },
+          pilotFeedback: {
+            dogfood: {
+              cohort: "dogfood",
+              totalSessions: 12,
+              averageWorkflowSuccessPct: 100,
+              averageRating: 4.8,
+              totalBlockers: 0,
+              totalCrashes: 0,
+              totalParticipants: 30
+            },
+            pilot: {
+              cohort: "pilot",
+              totalSessions: 6,
+              averageWorkflowSuccessPct: 100,
+              averageRating: 4.7,
+              totalBlockers: 0,
+              totalCrashes: 0,
+              totalParticipants: 14
+            }
+          },
+          latestBenchmark: null
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          hasRecord: true,
+          comparisonMonth: "2026-02",
+          comparedAt: new Date().toISOString(),
+          source: "manual",
+          unresolvedDriftCount: 0,
+          discoveredFeatureCount: 2,
+          freshnessDays: 2,
+          currentMonth: "2026-02",
+          meetsFreshnessWindow: true,
+          meetsCurrentMonth: true,
+          passed: true
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          hasRecord: true,
+          comparisonMonth: "2026-02",
+          comparedAt: new Date().toISOString(),
+          source: "manual",
+          unresolvedDriftCount: 0,
+          discoveredFeatureCount: 3,
+          freshnessDays: 1,
+          currentMonth: "2026-02",
+          meetsFreshnessWindow: true,
+          meetsCurrentMonth: true,
+          passed: true
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          frozen: true,
+          frozenAt: new Date().toISOString(),
+          frozenDays: 7,
+          releaseTag: "rc-2026-02-26",
+          notes: null
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          frozen: true,
+          frozenAt: new Date().toISOString(),
+          frozenDays: 0,
+          releaseTag: "rc-2026-02-29",
+          notes: "freeze"
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          frozen: false,
+          frozenAt: null,
+          frozenDays: 0,
+          releaseTag: null,
+          notes: "unfrozen"
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          id: "qf_1",
+          cohort: "dogfood",
+          recordedAt: new Date().toISOString()
+        })
+      );
+
+    const readout = await getPhase6CertificationReadout();
+    const run = await runPhase6Certification();
+    const diff = await getParityDescriptDiffStatus();
+    const recordedDiff = await recordParityDescriptDiff({
+      comparisonMonth: "2026-02",
+      source: "manual",
+      discoveredFeatures: [{ title: "New feature", changeType: "added", status: "mapped" }],
+      unresolvedDriftCount: 0
+    });
+    const rcStatus = await getParityReleaseCandidateStatus();
+    const frozen = await freezeParityReleaseCandidate({
+      releaseTag: "rc-2026-02-29",
+      notes: "freeze"
+    });
+    const unfrozen = await unfreezeParityReleaseCandidate({ notes: "unfrozen" });
+    const pilotFeedback = await recordPhase6PilotFeedback({
+      cohort: "dogfood",
+      sessionId: "dogfood-1",
+      workflowSuccessPct: 100,
+      blockerCount: 0,
+      crashCount: 0,
+      participantCount: 2,
+      rating: 5
+    });
+
+    expect(readout.certificationPassed).toBe(true);
+    expect(run.streak.targetDays).toBe(30);
+    expect(diff.passed).toBe(true);
+    expect(recordedDiff.discoveredFeatureCount).toBe(3);
+    expect(rcStatus.frozen).toBe(true);
+    expect(frozen.releaseTag).toBe("rc-2026-02-29");
+    expect(unfrozen.frozen).toBe(false);
+    expect(pilotFeedback.cohort).toBe("dogfood");
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/parity/certification/readout", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/api/parity/certification/run",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/parity/descript-diff", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
+      "/api/parity/descript-diff",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(5, "/api/parity/release-candidate", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      6,
+      "/api/parity/release-candidate/freeze",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      7,
+      "/api/parity/release-candidate/unfreeze",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      8,
+      "/api/parity/pilot-feedback",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("tracks opencut telemetry events", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockResponse({
@@ -1817,7 +2359,24 @@ describe("opencut hookforge client", () => {
     );
   });
 
-  it("supports review requests, brand presets, and publish connectors", async () => {
+  it("supports review requests, brand studio, publishing presets, and reviewer workflows", async () => {
+    const brandDetails = {
+      brandKit: {
+        primaryColor: "#101820",
+        secondaryColor: "#f2aa4c",
+        accentColor: null,
+        fontFamily: "Satoshi",
+        logoAssetId: null,
+        watermarkAssetId: null
+      },
+      customFonts: [],
+      layoutPacks: [],
+      templatePacks: [],
+      distributionPresets: [],
+      metadataPacks: [],
+      metadata: {}
+    };
+
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         mockResponse({
@@ -1834,6 +2393,9 @@ describe("opencut hookforge client", () => {
             title: "Final review",
             note: "Please approve",
             requiredScopes: ["APPROVE"],
+            approvalChain: [
+              { id: "admin_step", role: "ADMIN", label: "Admin approval", required: true, order: 1 }
+            ],
             createdAt: new Date().toISOString()
           }
         })
@@ -1845,7 +2407,26 @@ describe("opencut hookforge client", () => {
             status: "APPROVED",
             decisionId: "dec_1",
             decidedAt: new Date().toISOString(),
-            decidedByUserId: "user_1"
+            decidedByUserId: "user_1",
+            approvalChainState: {
+              steps: [
+                {
+                  id: "admin_step",
+                  role: "ADMIN",
+                  label: "Admin approval",
+                  required: true,
+                  order: 1,
+                  status: "APPROVED",
+                  decidedByUserId: "user_1",
+                  decidedAt: new Date().toISOString()
+                }
+              ],
+              totalRequiredCount: 1,
+              completedRequiredCount: 1,
+              hasRejection: false,
+              isComplete: true,
+              nextRequiredStepId: null
+            }
           },
           decision: {
             id: "dec_1",
@@ -1854,7 +2435,8 @@ describe("opencut hookforge client", () => {
             note: null,
             createdAt: new Date().toISOString()
           },
-          logId: "log_1"
+          logId: "log_1",
+          approvalChainStepId: "admin_step"
         })
       )
       .mockResolvedValueOnce(
@@ -1871,6 +2453,7 @@ describe("opencut hookforge client", () => {
             defaultTitlePrefix: null,
             defaultTags: [],
             metadata: {},
+            details: brandDetails,
             createdAt: null,
             updatedAt: null
           },
@@ -1892,6 +2475,7 @@ describe("opencut hookforge client", () => {
             defaultTitlePrefix: "HookForge",
             defaultTags: ["saas"],
             metadata: {},
+            details: brandDetails,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           },
@@ -1947,7 +2531,11 @@ describe("opencut hookforge client", () => {
           summary: {
             total: 2,
             done: 2,
-            error: 0
+            error: 0,
+            byConnector: {
+              youtube: 1,
+              package: 1
+            }
           }
         })
       )
@@ -1966,15 +2554,124 @@ describe("opencut hookforge client", () => {
             updatedAt: new Date().toISOString()
           }
         })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          projectV2Id: "pv2_12",
+          distributionPresets: [
+            {
+              id: "dist_yt",
+              name: "YouTube Growth",
+              connector: "youtube",
+              visibility: "unlisted",
+              titleTemplate: "{{title}}",
+              descriptionTemplate: null,
+              tags: ["clips"],
+              metadata: {},
+              isDefault: true
+            }
+          ],
+          metadataPacks: [],
+          updatedAt: new Date().toISOString()
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          projectId: "legacy_12",
+          projectV2Id: "pv2_12",
+          reviewerPage: {
+            projectTitle: "Episode",
+            currentRevisionId: "rev_2",
+            approvalRequired: true,
+            accessSource: "AUTH",
+            shareLink: null
+          },
+          summary: {
+            comments: {
+              total: 2,
+              open: 1,
+              resolved: 1
+            },
+            publish: {
+              total: 2,
+              done: 2,
+              error: 0,
+              running: 0
+            },
+            latestDecision: null
+          },
+          reviewRequests: [],
+          shareLinks: [],
+          recentComments: [],
+          recentPublishJobs: []
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          projectId: "legacy_12",
+          projectV2Id: "pv2_12",
+          comparable: true,
+          baseRevision: {
+            id: "rev_1",
+            revisionNumber: 1,
+            timelineHash: "hash_1",
+            createdAt: new Date().toISOString(),
+            createdBy: null
+          },
+          targetRevision: {
+            id: "rev_2",
+            revisionNumber: 2,
+            timelineHash: "hash_2",
+            createdAt: new Date().toISOString(),
+            createdBy: null
+          },
+          summary: {
+            base: {
+              total: 1,
+              byType: { trim: 1 },
+              sample: [{ op: "trim", keys: ["op"] }]
+            },
+            target: {
+              total: 2,
+              byType: { trim: 1, cut: 1 },
+              sample: [{ op: "trim", keys: ["op"] }]
+            },
+            changedOperationCount: 1,
+            deltaByType: { cut: 1, trim: 0 }
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse({
+          workspaceId: "ws_1",
+          projectId: "legacy_12",
+          projectV2Id: "pv2_12",
+          events: [
+            {
+              id: "evt_1",
+              action: "review.request.create",
+              targetType: "review_request",
+              targetId: "req_1",
+              actorUserId: "user_1",
+              severity: "INFO",
+              metadata: {},
+              createdAt: new Date().toISOString()
+            }
+          ]
+        })
       );
 
     const list = await listProjectV2ReviewRequests("pv2_12", 20);
     const created = await createProjectV2ReviewRequest("pv2_12", {
       title: "Final review",
-      requiredScopes: ["APPROVE"]
+      requiredScopes: ["APPROVE"],
+      approvalChain: [{ role: "ADMIN", order: 1 }]
     });
     const decided = await decideProjectV2ReviewRequest("pv2_12", "req_1", {
-      status: "APPROVED"
+      status: "APPROVED",
+      approvalChainStepId: "admin_step"
     });
     const brand = await getProjectV2BrandPreset("pv2_12");
     const brandSaved = await upsertProjectV2BrandPreset("pv2_12", {
@@ -1984,7 +2681,8 @@ describe("opencut hookforge client", () => {
       defaultTitlePrefix: "HookForge"
     });
     const publishOne = await publishProjectV2Connector("pv2_12", "youtube", {
-      title: "Episode export"
+      title: "Episode export",
+      distributionPresetId: "dist_yt"
     });
     const publishBatch = await publishProjectV2ConnectorBatch("pv2_12", {
       connectors: ["youtube", "package"],
@@ -1993,15 +2691,24 @@ describe("opencut hookforge client", () => {
       }
     });
     const publishJob = await getProjectV2PublishJob("pv2_12", "job_1");
+    const distribution = await getProjectV2DistributionPresets("pv2_12");
+    const reviewerPage = await getProjectV2ReviewerPage("pv2_12", "token_1");
+    const compare = await getProjectV2ReviewVersionCompare("pv2_12", { targetRevisionId: "rev_2" });
+    const audit = await getProjectV2ReviewAuditTrail("pv2_12", 25);
 
     expect(list.requests).toHaveLength(0);
     expect(created.request.id).toBe("req_1");
-    expect(decided.request.status).toBe("APPROVED");
+    expect(decided.approvalChainStepId).toBe("admin_step");
     expect(brand.brandPreset.defaultConnector).toBe("package");
     expect(brandSaved.brandPreset.id).toBe("brand_1");
     expect(publishOne.publishJob.id).toBe("job_1");
     expect(publishBatch.summary.total).toBe(2);
+    expect(publishBatch.summary.byConnector.youtube).toBe(1);
     expect(publishJob.publishJob.status).toBe("DONE");
+    expect(distribution.distributionPresets[0]?.id).toBe("dist_yt");
+    expect(reviewerPage.reviewerPage.projectTitle).toBe("Episode");
+    expect(compare.targetRevision.id).toBe("rev_2");
+    expect(audit.events[0]?.id).toBe("evt_1");
 
     expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/projects-v2/pv2_12/review/requests?limit=20", undefined);
     expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/projects-v2/pv2_12/review/requests", expect.objectContaining({ method: "POST" }));
@@ -2015,5 +2722,9 @@ describe("opencut hookforge client", () => {
     expect(fetchSpy).toHaveBeenNthCalledWith(6, "/api/projects-v2/pv2_12/publish/connectors/youtube/export", expect.objectContaining({ method: "POST" }));
     expect(fetchSpy).toHaveBeenNthCalledWith(7, "/api/projects-v2/pv2_12/publish/connectors/batch/export", expect.objectContaining({ method: "POST" }));
     expect(fetchSpy).toHaveBeenNthCalledWith(8, "/api/projects-v2/pv2_12/publish/jobs/job_1", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(9, "/api/projects-v2/pv2_12/publish/distribution-presets", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(10, "/api/projects-v2/pv2_12/review/reviewer-page?shareToken=token_1", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(11, "/api/projects-v2/pv2_12/review/version-compare?targetRevisionId=rev_2", undefined);
+    expect(fetchSpy).toHaveBeenNthCalledWith(12, "/api/projects-v2/pv2_12/review/audit?limit=25", undefined);
   });
 });

@@ -1,5 +1,19 @@
 export type ChatEditOperation = {
-  op: "split" | "trim" | "reorder" | "caption_style" | "zoom" | "audio_duck" | "generic";
+  op:
+    | "split"
+    | "trim"
+    | "reorder"
+    | "caption_style"
+    | "zoom"
+    | "audio_duck"
+    | "transcript_cleanup"
+    | "highlight_extract"
+    | "chapter_markers"
+    | "social_assets"
+    | "metadata_pack"
+    | "retake_cleanup"
+    | "publish_prep"
+    | "generic";
   target?: string;
   value?: string | number | boolean;
   confidence: number;
@@ -56,6 +70,33 @@ function buildConstrainedSuggestions(prompt: string, operations: ChatEditOperati
     });
   }
 
+  if (operations.some((entry) => entry.op === "chapter_markers")) {
+    suggestions.push({
+      id: "chaptering",
+      title: "Create chapter markers",
+      prompt: "Create four chapter markers based on transcript topic shifts.",
+      reason: "Creates deterministic labeling cues for navigation and publishing."
+    });
+  }
+
+  if (operations.some((entry) => entry.op === "highlight_extract")) {
+    suggestions.push({
+      id: "highlight-extract",
+      title: "Extract highlights",
+      prompt: "Extract three highlight-ready clips and label each as Highlight 1/2/3.",
+      reason: "Keeps clip extraction deterministic and reviewable."
+    });
+  }
+
+  if (operations.some((entry) => entry.op === "social_assets" || entry.op === "metadata_pack")) {
+    suggestions.push({
+      id: "social-metadata",
+      title: "Prepare social metadata",
+      prompt: "Generate social copy and metadata suggestions aligned to the current edit.",
+      reason: "Publishing outputs remain deterministic and auditable."
+    });
+  }
+
   if (suggestions.length === 0) {
     suggestions.push(
       {
@@ -108,6 +149,37 @@ function buildOperations(promptInput: string): ChatEditOperation[] {
 
   if (includesAny(prompt, ["music lower", "duck", "voice clearer", "reduce music"])) {
     operations.push({ op: "audio_duck", target: "audio-track", confidence: 0.76 });
+  }
+  if (includesAny(prompt, ["audio polish", "normalize voice", "filler cleanup", "voice clarity"])) {
+    operations.push({ op: "audio_duck", target: "audio-track", confidence: 0.8 });
+  }
+
+  if (includesAny(prompt, ["transcript cleanup", "clean transcript", "fix transcript", "grammar"])) {
+    operations.push({ op: "transcript_cleanup", target: "transcript", confidence: 0.85 });
+  }
+
+  if (includesAny(prompt, ["highlight", "extract clip", "best moments", "clip extraction"])) {
+    operations.push({ op: "highlight_extract", target: "timeline", confidence: 0.82 });
+  }
+
+  if (includesAny(prompt, ["chapter", "chaptering", "chapter marker"])) {
+    operations.push({ op: "chapter_markers", target: "timeline", confidence: 0.83 });
+  }
+
+  if (includesAny(prompt, ["social post", "social assets", "social copy"])) {
+    operations.push({ op: "social_assets", target: "publishing", confidence: 0.8 });
+  }
+
+  if (includesAny(prompt, ["title", "description", "metadata"])) {
+    operations.push({ op: "metadata_pack", target: "publishing", confidence: 0.81 });
+  }
+
+  if (includesAny(prompt, ["retake", "word gap", "remove retakes", "cleanup retake"])) {
+    operations.push({ op: "retake_cleanup", target: "timeline", confidence: 0.79 });
+  }
+
+  if (includesAny(prompt, ["publish prep", "publish readiness", "finalize publish", "publish settings"])) {
+    operations.push({ op: "publish_prep", target: "publishing", confidence: 0.82 });
   }
 
   if (operations.length === 0) {

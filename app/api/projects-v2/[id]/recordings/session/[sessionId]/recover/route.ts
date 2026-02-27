@@ -2,9 +2,9 @@ import { z } from "zod";
 import { requireProjectContext } from "@/lib/api-context";
 import { jsonOk, routeErrorToResponse } from "@/lib/http";
 import {
+  buildDeterministicRecordingRecoveryPlan,
   listRecordingChunks,
   requireRecordingSessionForUser,
-  summarizeRecordingProgress,
   updateRecordingSessionStatus
 } from "@/lib/recordings/session";
 import { prisma } from "@/lib/prisma";
@@ -30,12 +30,17 @@ export async function POST(request: Request, { params }: Context) {
     }
 
     const chunks = await listRecordingChunks(session.id);
-    const progress = summarizeRecordingProgress(session.totalParts, chunks);
+    const recoveryPlan = buildDeterministicRecordingRecoveryPlan({
+      totalParts: session.totalParts,
+      chunks
+    });
+    const progress = recoveryPlan.progress;
+    const hasBlockingConflict = recoveryPlan.conflicts.some((conflict) => conflict.severity === "FAIL");
     const recoverable = session.status === "FAILED" || session.status === "CANCELED";
     let resumed = false;
     let nextStatus = session.status;
 
-    if (body.mode === "resume" && recoverable) {
+    if (body.mode === "resume" && recoverable && !hasBlockingConflict) {
       const updated = await updateRecordingSessionStatus({
         sessionId: session.id,
         status: "ACTIVE",
@@ -58,7 +63,8 @@ export async function POST(request: Request, { params }: Context) {
           previousStatus: session.status,
           nextStatus,
           completedParts: progress.completedParts,
-          totalParts: progress.totalParts
+          totalParts: progress.totalParts,
+          recoveryPlan
         }
       }
     });
@@ -69,9 +75,25 @@ export async function POST(request: Request, { params }: Context) {
       resumed,
       status: nextStatus,
       progress,
+      recoveryPlan,
+      merge: {
+        ranges: recoveryPlan.ranges,
+        repairActions: recoveryPlan.repairActions,
+        successScore: recoveryPlan.recoverySuccessScore
+      },
+      reliability: {
+        recoverySuccessTargetPct: 99,
+        estimatedRecoverySuccessPct: recoveryPlan.recoverySuccessScore
+      },
       state: {
-        phase: resumed ? "RESUMED" : recoverable ? "RECOVERABLE" : "TERMINAL",
-        failedReason: session.failedReason
+        phase: resumed
+          ? "RESUMED"
+          : hasBlockingConflict
+            ? "REPAIR_REQUIRED"
+            : recoverable
+              ? "RECOVERABLE"
+              : "TERMINAL",
+        failedReason: hasBlockingConflict ? "Recovery conflicts require manual repair." : session.failedReason
       }
     });
   } catch (error) {

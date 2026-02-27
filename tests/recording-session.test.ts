@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeRecordingProgress } from "@/lib/recordings/progress";
+import { buildDeterministicRecordingRecoveryPlan, summarizeRecordingProgress } from "@/lib/recordings/progress";
 
 describe("recording session helpers", () => {
   it("computes recording progress and missing parts deterministically", () => {
@@ -28,5 +28,22 @@ describe("recording session helpers", () => {
     expect(progress.remainingParts).toBe(0);
     expect(progress.progressPct).toBe(100);
     expect(progress.missingPartNumbers).toEqual([]);
+  });
+
+  it("builds deterministic recovery plan with conflict repair actions", () => {
+    const plan = buildDeterministicRecordingRecoveryPlan({
+      totalParts: 4,
+      chunks: [
+        { partNumber: 1, eTag: "etag-1", checksumSha256: "a".repeat(64) },
+        { partNumber: 2, eTag: "etag-2", checksumSha256: "b".repeat(64) },
+        { partNumber: 2, eTag: "etag-2b", checksumSha256: "c".repeat(64) }
+      ]
+    });
+
+    expect(plan.ranges).toEqual([{ startPart: 1, endPart: 2 }]);
+    expect(plan.conflicts.some((conflict) => conflict.code === "MISSING_PARTS")).toBe(true);
+    expect(plan.conflicts.some((conflict) => conflict.code === "CHECKSUM_MISMATCH")).toBe(true);
+    expect(plan.expectedRecoveryState).toBe("REQUIRES_REPAIR");
+    expect(plan.repairActions.length).toBeGreaterThan(0);
   });
 });

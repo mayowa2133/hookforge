@@ -12,6 +12,8 @@ import {
   AutopilotMacroArgsSchema,
   AutopilotMacroIdSchema,
   AutopilotPlannerPackSchema,
+  UnderlordCommandFamilySchema,
+  UNDERLORD_COMMAND_CATALOG,
   getTimelineOperationItemIds,
   resolveAutopilotPrompt,
   type AutopilotDiffGroup
@@ -20,13 +22,14 @@ import { prisma } from "@/lib/prisma";
 
 export const AutopilotPlanSchema = z.object({
   prompt: z.string().trim().min(4).max(1000).optional(),
+  commandFamily: UnderlordCommandFamilySchema.optional(),
   plannerPack: AutopilotPlannerPackSchema.optional(),
   macroId: AutopilotMacroIdSchema.optional(),
   macroArgs: AutopilotMacroArgsSchema,
   attachmentAssetIds: z.array(z.string().min(1)).max(20).optional()
 }).refine(
-  (value) => Boolean(value.prompt?.trim()) || Boolean(value.macroId),
-  "Autopilot requires either prompt or macroId."
+  (value) => Boolean(value.prompt?.trim()) || Boolean(value.macroId) || Boolean(value.commandFamily),
+  "Autopilot requires prompt, macroId, or commandFamily."
 );
 
 export const AutopilotApplySchema = z.object({
@@ -54,6 +57,29 @@ export const AutopilotReplaySchema = z.object({
   reuseOperationDecisions: z.boolean().optional()
 });
 
+async function recordAutopilotApplyFailure(params: {
+  workspaceId: string;
+  projectId: string;
+  sessionId: string;
+  message: string;
+  payload?: Record<string, unknown>;
+}) {
+  await prisma.autopilotAction.create({
+    data: {
+      workspaceId: params.workspaceId,
+      projectId: params.projectId,
+      sessionId: params.sessionId,
+      actionType: "APPLY",
+      status: "FAILED",
+      payload: {
+        conflict: params.message.toLowerCase().includes("conflict"),
+        ...(params.payload ?? {})
+      },
+      errorMessage: params.message
+    }
+  });
+}
+
 function toAutopilotStatus(params: { applied: boolean; suggestionsOnly: boolean }) {
   if (params.suggestionsOnly) {
     return "SUGGESTIONS_ONLY" as const;
@@ -68,6 +94,7 @@ export async function createAutopilotPlan(projectIdOrV2Id: string, input: z.infe
   const ctx = await requireProjectContext(projectIdOrV2Id);
   const resolved = resolveAutopilotPrompt({
     prompt: input.prompt,
+    commandFamily: input.commandFamily,
     plannerPack: input.plannerPack,
     macroId: input.macroId,
     macroArgs: input.macroArgs
@@ -99,11 +126,13 @@ export async function createAutopilotPlan(projectIdOrV2Id: string, input: z.infe
       createdByUserId: ctx.user.id,
       metadata: {
         plannerPack: resolved.plannerPack,
+        commandFamily: resolved.commandFamily,
         macroId: resolved.macroId,
         macroLabel: resolved.macroLabel,
         macroArgs: resolved.macroArgs,
         originalPrompt: resolved.originalPrompt,
         resolvedPrompt: resolved.resolvedPrompt,
+        qualityDeltaPreview: resolved.qualityDeltaPreview,
         attachmentAssetIds: input.attachmentAssetIds ?? [],
         confidenceRationale: output.confidenceRationale ?? plan.confidenceRationale,
         diffGroups,
@@ -124,6 +153,7 @@ export async function createAutopilotPlan(projectIdOrV2Id: string, input: z.infe
         safetyMode: session.safetyMode,
         confidence: session.confidence,
         plannerPack: resolved.plannerPack,
+        commandFamily: resolved.commandFamily,
         macroId: resolved.macroId
       }
     }
@@ -136,8 +166,10 @@ export async function createAutopilotPlan(projectIdOrV2Id: string, input: z.infe
     safetyMode: session.safetyMode,
     confidence: session.confidence,
     plannerPack: resolved.plannerPack,
+    commandFamily: resolved.commandFamily,
     macroId: resolved.macroId,
     macroLabel: resolved.macroLabel,
+    qualityDeltaPreview: resolved.qualityDeltaPreview,
     confidenceRationale: output.confidenceRationale ?? plan.confidenceRationale,
     diffGroups,
     opsPreview: plan.execution.appliedTimelineOperations,
@@ -163,7 +195,18 @@ export async function applyAutopilotPlan(params: {
     throw new Error("Autopilot session not found");
   }
   if (session.planRevisionHash !== params.planRevisionHash) {
-    throw new Error("Autopilot plan revision hash mismatch");
+    const message = "Conflict: Autopilot plan revision hash mismatch";
+    await recordAutopilotApplyFailure({
+      workspaceId: ctx.workspace.id,
+      projectId: ctx.projectV2.id,
+      sessionId: session.id,
+      message,
+      payload: {
+        expectedPlanRevisionHash: session.planRevisionHash,
+        providedPlanRevisionHash: params.planRevisionHash
+      }
+    });
+    throw new Error(message);
   }
   if (session.safetyMode === "SUGGESTIONS_ONLY") {
     return {
@@ -190,12 +233,29 @@ export async function applyAutopilotPlan(params: {
   const timelineItemIds = getTimelineOperationItemIds(diffGroups);
   if (session.safetyMode === "APPLY_WITH_CONFIRM" && timelineItemIds.length > 0) {
     if (!params.operationDecisions || params.operationDecisions.length === 0) {
-      throw new Error("Apply-with-confirm requires explicit operation decisions.");
+      const message = "Conflict: apply-with-confirm requires explicit operation decisions.";
+      await recordAutopilotApplyFailure({
+        workspaceId: ctx.workspace.id,
+        projectId: ctx.projectV2.id,
+        sessionId: session.id,
+        message
+      });
+      throw new Error(message);
     }
     const decidedItemIds = new Set(params.operationDecisions.map((decision) => decision.itemId));
     const missing = timelineItemIds.filter((id) => !decidedItemIds.has(id));
     if (missing.length > 0) {
-      throw new Error(`Explicit decisions missing for ${missing.length} timeline item(s).`);
+      const message = `Conflict: explicit decisions missing for ${missing.length} timeline item(s).`;
+      await recordAutopilotApplyFailure({
+        workspaceId: ctx.workspace.id,
+        projectId: ctx.projectV2.id,
+        sessionId: session.id,
+        message,
+        payload: {
+          missingItemIds: missing
+        }
+      });
+      throw new Error(message);
     }
   }
   const result = await applyChatPlanWithHash(
@@ -324,6 +384,7 @@ export async function replayAutopilotSession(params: {
     : {};
   const plan = await createAutopilotPlan(ctx.projectV2.id, {
     prompt: typeof metadata.originalPrompt === "string" ? metadata.originalPrompt : sourceSession.prompt,
+    commandFamily: typeof metadata.commandFamily === "string" ? metadata.commandFamily as z.infer<typeof UnderlordCommandFamilySchema> : undefined,
     plannerPack: typeof metadata.plannerPack === "string" ? metadata.plannerPack as z.infer<typeof AutopilotPlannerPackSchema> : undefined,
     macroId: typeof metadata.macroId === "string" ? metadata.macroId as z.infer<typeof AutopilotMacroIdSchema> : undefined,
     macroArgs: typeof metadata.macroArgs === "object" && metadata.macroArgs !== null ? metadata.macroArgs as z.infer<typeof AutopilotMacroArgsSchema> : undefined,
@@ -382,12 +443,30 @@ export async function replayAutopilotSession(params: {
     };
   }
 
-  const applyResult = await applyAutopilotPlan({
-    projectIdOrV2Id: ctx.projectV2.id,
-    sessionId: plan.sessionId,
-    planRevisionHash: plan.planRevisionHash,
-    operationDecisions
-  });
+  let applyResult: Awaited<ReturnType<typeof applyAutopilotPlan>>;
+  try {
+    applyResult = await applyAutopilotPlan({
+      projectIdOrV2Id: ctx.projectV2.id,
+      sessionId: plan.sessionId,
+      planRevisionHash: plan.planRevisionHash,
+      operationDecisions
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Autopilot replay failed";
+    const conflict = message.toLowerCase().includes("conflict");
+    if (conflict) {
+      return {
+        replayedFromSessionId: sourceSession.id,
+        newSessionId: plan.sessionId,
+        applied: false,
+        requiresExplicitDecisions: false,
+        conflict: true,
+        error: message,
+        plan
+      };
+    }
+    throw error;
+  }
 
   return {
     replayedFromSessionId: sourceSession.id,
@@ -396,6 +475,78 @@ export async function replayAutopilotSession(params: {
     requiresExplicitDecisions: false,
     plan,
     applyResult
+  };
+}
+
+export function listUnderlordCommandCatalog() {
+  return {
+    families: UNDERLORD_COMMAND_CATALOG,
+    macroCount: UNDERLORD_COMMAND_CATALOG.reduce((sum, family) => sum + family.macroAliases.length, 0)
+  };
+}
+
+export async function getAutopilotActionHistory(projectIdOrV2Id: string, limit = 200) {
+  const ctx = await requireProjectContext(projectIdOrV2Id);
+  const safeLimit = Math.max(1, Math.min(limit, 500));
+  const actions = await prisma.autopilotAction.findMany({
+    where: {
+      workspaceId: ctx.workspace.id,
+      projectId: ctx.projectV2.id
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    take: safeLimit
+  });
+  const sessions = await prisma.autopilotSession.findMany({
+    where: {
+      workspaceId: ctx.workspace.id,
+      projectId: ctx.projectV2.id,
+      id: {
+        in: actions.map((action) => action.sessionId)
+      }
+    },
+    select: {
+      id: true,
+      prompt: true,
+      metadata: true,
+      createdAt: true
+    }
+  });
+  const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+  const history = actions.map((action) => {
+    const session = sessionMap.get(action.sessionId);
+    const metadata = session?.metadata && typeof session.metadata === "object"
+      ? (session.metadata as Record<string, unknown>)
+      : {};
+    const payload = action.payload && typeof action.payload === "object"
+      ? (action.payload as Record<string, unknown>)
+      : {};
+    const conflict =
+      Boolean(payload.conflict) ||
+      (action.errorMessage ? action.errorMessage.toLowerCase().includes("conflict") : false);
+    return {
+      id: action.id,
+      sessionId: action.sessionId,
+      actionType: action.actionType,
+      status: action.status,
+      prompt: session?.prompt ?? null,
+      commandFamily: typeof metadata.commandFamily === "string" ? metadata.commandFamily : null,
+      plannerPack: typeof metadata.plannerPack === "string" ? metadata.plannerPack : null,
+      conflict,
+      errorMessage: action.errorMessage,
+      payload: action.payload,
+      createdAt: action.createdAt.toISOString(),
+      sessionCreatedAt: session?.createdAt.toISOString() ?? null
+    };
+  });
+
+  return {
+    projectId: ctx.legacyProject.id,
+    projectV2Id: ctx.projectV2.id,
+    total: history.length,
+    conflictCount: history.filter((entry) => entry.conflict).length,
+    history
   };
 }
 

@@ -7,6 +7,8 @@ function provider(name: string, words: Array<{ startMs: number; endMs: number; t
     name,
     capability: "asr",
     configured: true,
+    isMock: true,
+    supportsOperations: ["TRANSCRIBE"],
     run: async () => ({
       providerName: name,
       model: `${name}-model`,

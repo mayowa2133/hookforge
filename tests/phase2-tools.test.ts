@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildBackgroundOperations,
+  buildEyeContactOperations,
+  buildMulticamApplyOperations,
+  buildMulticamRecommendations,
   buildTimelineOpsFromChatPlan,
   consumeChatUndoEntry,
   consumeChatUndoEntryWithLineage,
@@ -137,5 +141,107 @@ describe("phase2 timeline/chat tools", () => {
       requireLatestLineage: true
     });
     expect("error" in valid).toBe(false);
+  });
+
+  it("builds eye-contact and background operation plans with quality summaries", () => {
+    const eyePlan = buildEyeContactOperations({
+      state: makeState(),
+      intensity: 0.6,
+      gazeTarget: "camera"
+    });
+    expect(eyePlan.operations.length).toBeGreaterThan(0);
+    expect(eyePlan.quality.realismScore).toBeGreaterThan(0.8);
+    expect(eyePlan.quality.threshold).toBe(0.86);
+
+    const backgroundPlan = buildBackgroundOperations({
+      state: makeState(),
+      mode: "replace",
+      strength: 0.7
+    });
+    expect(backgroundPlan.operations.some((operation) => operation.op === "upsert_effect")).toBe(true);
+    expect(backgroundPlan.fallbackUsed).toBe(true);
+    expect(backgroundPlan.quality.matteStabilityScore).toBeGreaterThan(0.8);
+  });
+
+  it("builds multicam recommendations and apply operations from transcript cues", () => {
+    const recommendations = buildMulticamRecommendations({
+      segments: [
+        {
+          id: "seg-1",
+          startMs: 0,
+          endMs: 1500,
+          text: "Today we set up the foundation.",
+          speakerLabel: "Speaker 1",
+          confidenceAvg: 0.92
+        },
+        {
+          id: "seg-2",
+          startMs: 1500,
+          endMs: 3100,
+          text: "But now we need a faster way to switch angles!",
+          speakerLabel: "Speaker 2",
+          confidenceAvg: 0.91
+        },
+        {
+          id: "seg-3",
+          startMs: 3100,
+          endMs: 4700,
+          text: "Finally we lock in the outro.",
+          speakerLabel: "Speaker 1",
+          confidenceAvg: 0.89
+        }
+      ]
+    });
+    expect(recommendations.length).toBe(3);
+    expect(recommendations[0]?.autoSwitchSuggestion).toBeDefined();
+
+    const multicamState: TimelineState = {
+      ...makeState(),
+      tracks: [
+        {
+          ...makeState().tracks[0],
+          clips: [
+            {
+              id: "clip-video-1",
+              assetId: "asset-video-1",
+              slotKey: "main",
+              label: "main-1",
+              timelineInMs: 0,
+              timelineOutMs: 2200,
+              sourceInMs: 0,
+              sourceOutMs: 2200,
+              effects: []
+            },
+            {
+              id: "clip-video-2",
+              assetId: "asset-video-2",
+              slotKey: "top",
+              label: "main-2",
+              timelineInMs: 2200,
+              timelineOutMs: 4800,
+              sourceInMs: 0,
+              sourceOutMs: 2600,
+              effects: []
+            }
+          ]
+        },
+        ...makeState().tracks.slice(1)
+      ]
+    };
+
+    const applyPlan = buildMulticamApplyOperations({
+      state: multicamState,
+      strategy: "speaker_change",
+      segments: recommendations.map((entry) => ({
+        id: entry.segmentId,
+        startMs: entry.startMs,
+        endMs: entry.endMs,
+        text: entry.reason,
+        speakerLabel: entry.speakerLabel
+      }))
+    });
+    expect(applyPlan.operations.some((operation) => operation.op === "set_transition")).toBe(true);
+    expect(applyPlan.operations.some((operation) => operation.op === "upsert_effect")).toBe(true);
+    expect(applyPlan.quality.cutAccuracyScore).toBeGreaterThan(0.8);
   });
 });

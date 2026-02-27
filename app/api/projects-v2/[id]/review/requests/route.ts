@@ -15,7 +15,8 @@ export async function POST(request: Request, { params }: Context) {
         projectIdOrV2Id: params.id,
         title: body.title,
         note: body.note,
-        requiredScopes: body.requiredScopes
+        requiredScopes: body.requiredScopes,
+        approvalChain: body.approvalChain
       }),
       201
     );

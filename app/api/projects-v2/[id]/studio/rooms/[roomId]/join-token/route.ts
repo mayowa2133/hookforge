@@ -16,6 +16,7 @@ export async function POST(request: Request, { params }: Context) {
         roomId: params.roomId,
         participantName: body.participantName,
         role: body.role,
+        pushToTalk: body.pushToTalk,
         ttlSec: body.ttlSec
       })
     );

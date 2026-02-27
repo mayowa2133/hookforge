@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { extractDurationMs } from "@/lib/desktop/events";
+import { extractDurationMs, summarizeDesktopReliability } from "@/lib/desktop/events";
 import { env } from "@/lib/env";
 import { computePercentile, getQueueHealth, getSloSummary } from "@/lib/ops";
 import { buildParityScorecardForWorkspace } from "@/lib/parity/scorecard";
@@ -15,6 +15,7 @@ export type LaunchReadinessThresholds = {
   maxQueueFailed: number;
   maxEditorOpenP95Ms: number;
   maxCommandP95Ms: number;
+  minDesktopCrashFreePct: number;
 };
 
 export type LaunchGuardrailTrigger = {
@@ -26,7 +27,8 @@ export type LaunchGuardrailTrigger = {
     | "QUEUE_BACKLOG_HIGH"
     | "QUEUE_FAILED_HIGH"
     | "EDITOR_OPEN_LATENCY_HIGH"
-    | "COMMAND_LATENCY_HIGH";
+    | "COMMAND_LATENCY_HIGH"
+    | "DESKTOP_CRASH_FREE_BELOW_MIN";
   message: string;
   severity: "WARN" | "CRITICAL";
 };
@@ -42,6 +44,7 @@ type LaunchSnapshot = {
   queueFailed: number;
   editorOpenP95Ms: number | null;
   commandP95Ms: number | null;
+  desktopCrashFreePct: number | null;
 };
 
 export function resolveLaunchThresholds(): LaunchReadinessThresholds {
@@ -52,7 +55,8 @@ export function resolveLaunchThresholds(): LaunchReadinessThresholds {
     maxQueueBacklog: env.DESCRIPT_PLUS_MAX_QUEUE_BACKLOG,
     maxQueueFailed: env.DESCRIPT_PLUS_MAX_QUEUE_FAILED,
     maxEditorOpenP95Ms: env.DESCRIPT_PLUS_MAX_EDITOR_OPEN_P95_MS,
-    maxCommandP95Ms: env.DESCRIPT_PLUS_MAX_COMMAND_P95_MS
+    maxCommandP95Ms: env.DESCRIPT_PLUS_MAX_COMMAND_P95_MS,
+    minDesktopCrashFreePct: env.DESCRIPT_PLUS_MIN_DESKTOP_CRASH_FREE_PCT
   };
 }
 
@@ -151,6 +155,13 @@ export function evaluateLaunchGuardrails(params: {
       code: "COMMAND_LATENCY_HIGH",
       message: `Command latency p95 ${snapshot.commandP95Ms}ms exceeds max ${thresholds.maxCommandP95Ms}ms.`,
       severity: "WARN"
+    });
+  }
+  if (snapshot.desktopCrashFreePct !== null && snapshot.desktopCrashFreePct < thresholds.minDesktopCrashFreePct) {
+    triggers.push({
+      code: "DESKTOP_CRASH_FREE_BELOW_MIN",
+      message: `Desktop crash-free sessions ${snapshot.desktopCrashFreePct.toFixed(2)}% is below minimum ${thresholds.minDesktopCrashFreePct}%.`,
+      severity: "CRITICAL"
     });
   }
 
@@ -259,7 +270,12 @@ export async function buildDescriptPlusLaunchReadiness(params: {
       where: {
         workspaceId: params.workspaceId,
         category: {
-          in: ["desktop.editor_boot", "desktop.command_latency"]
+          in: [
+            "desktop.editor_boot",
+            "desktop.command_latency",
+            "desktop.app_crash",
+            "desktop.native_crash"
+          ]
         },
         createdAt: {
           gte: since
@@ -304,6 +320,15 @@ export async function buildDescriptPlusLaunchReadiness(params: {
       commandDurations.push(duration);
     }
   }
+  const reliability = summarizeDesktopReliability(
+    feedbackRows.map((row) => ({
+      event: row.category.startsWith("desktop.") ? row.category.slice("desktop.".length) : row.category,
+      outcome: typeof row.metadata === "object" && row.metadata && "outcome" in row.metadata
+        ? (row.metadata as { outcome?: unknown }).outcome as string | null
+        : null,
+      metadata: row.metadata
+    }))
+  );
 
   const queueBacklog = queue.queues.reduce((sum, entry) => sum + entry.backlog, 0);
   const queueFailed = queue.queues.reduce((sum, entry) => sum + (entry.counts.failed ?? 0), 0);
@@ -315,7 +340,8 @@ export async function buildDescriptPlusLaunchReadiness(params: {
     queueBacklog,
     queueFailed,
     editorOpenP95Ms: editorOpenDurations.length > 0 ? computePercentile(editorOpenDurations, 95) : null,
-    commandP95Ms: commandDurations.length > 0 ? computePercentile(commandDurations, 95) : null
+    commandP95Ms: commandDurations.length > 0 ? computePercentile(commandDurations, 95) : null,
+    desktopCrashFreePct: reliability.crashFreeSessionsPct
   };
 
   const triggers = evaluateLaunchGuardrails({

@@ -71,10 +71,25 @@ Slice 1 cutover flags:
 - `DESCRIPT_PLUS_MAX_QUEUE_FAILED=200`
 - `DESCRIPT_PLUS_MAX_EDITOR_OPEN_P95_MS=2500`
 - `DESCRIPT_PLUS_MAX_COMMAND_P95_MS=100`
+- `DESCRIPT_PLUS_MIN_DESKTOP_CRASH_FREE_PCT=99.5`
+- `DESCRIPT_PARITY_BASELINE_DATE=2026-02-26` pins the frozen Descript baseline date used by certification gates.
+- `DESCRIPT_PARITY_STREAK_DAYS_REQUIRED=30` requires 30 consecutive daily certification passes.
+- `DESCRIPT_PARITY_DIFF_MAX_AGE_DAYS=35` max allowed age for monthly Descript diff evidence.
+- `DESCRIPT_PARITY_DOGFOOD_MIN_DAYS=14` required release-candidate freeze window before final certification.
+- `DESCRIPT_PARITY_DOGFOOD_MIN_SESSIONS=10` minimum internal dogfood sessions for certification.
+- `DESCRIPT_PARITY_PILOT_MIN_SESSIONS=5` minimum controlled external pilot sessions for certification.
+- `DESCRIPT_PARITY_REQUIRED_QUALITY_CAPABILITIES=asr,translation,dubbing,lipsync,chat_edit,ai_edit` quality gates that must be green.
 - `NEXT_PUBLIC_AI_EDITOR_DEFAULT=true` makes AI editor creation the dashboard default CTA.
 - `NEXT_PUBLIC_SHOW_TEMPLATES_NAV=false` relabels top-nav template entry to Quick Start.
 - `AI_EDITOR_DEFAULT_TEMPLATE_SLUG=green-screen-commentator` fallback template for seeded AI-editor project creation.
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` enable managed Studio Room join tokens for remote recording.
+- `OPENAI_API_BASE_URL`, `DEEPGRAM_API_BASE_URL`, `ELEVENLABS_API_BASE_URL`, `ELEVENLABS_VOICE_CLONE_BASE_URL`, `LIPSYNC_API_URL`, `GENERATIVE_MEDIA_API_URL`, `MUSIC_SFX_API_URL` override provider API endpoints when needed.
+- `PROVIDER_HTTP_TIMEOUT_MS=20000` controls outbound provider request timeout.
+- `ALLOW_MOCK_PROVIDERS=false` keeps non-dev runtimes strict (mock providers are blocked unless explicitly enabled).
+- `PARITY_GATE_TARGET_ENV=development|staging|production` controls parity-gate strictness for provider enforcement.
+- `PARITY_GATE_ENFORCE_REAL_PROVIDERS=true` requires configured non-mock providers for all capabilities when target env is `staging` or `production`.
+- `PARITY_GATE_ENFORCE_FEATURE_MATRIX=true` enforces full matrix coverage + baseline date check in parity gate.
+- `PARITY_GATE_ENFORCE_PHASE6_CERTIFICATION=true` enforces Phase 6 certification in parity gates (auto-on by default in staging/prod).
 
 ### 3) Install dependencies
 
@@ -201,6 +216,23 @@ Implemented route handlers:
 - `POST /api/projects-v2/:id/autopilot/undo` undo autopilot apply with lineage guardrails
 - `POST /api/projects-v2/:id/autopilot/replay` replay prior autopilot session with optional immediate apply
 - `GET /api/projects-v2/:id/autopilot/sessions` list autopilot sessions and actions
+- `POST /api/projects-v2/:id/underlord/plan` Underlord-compatible alias for autopilot plan surface
+- `POST /api/projects-v2/:id/underlord/apply` Underlord-compatible alias for autopilot apply
+- `POST /api/projects-v2/:id/underlord/undo` Underlord-compatible alias for autopilot undo
+- `POST /api/projects-v2/:id/underlord/replay` Underlord-compatible alias for autopilot replay
+- `GET /api/projects-v2/:id/underlord/sessions` Underlord-compatible alias for autopilot session history
+- `GET /api/projects-v2/:id/underlord/commands` list command-family catalog and macro aliases
+- `GET /api/projects-v2/:id/underlord/history` list project-level Underlord action history with conflict flags
+- `POST /api/projects-v2/:id/eye-contact/preview` queue eye-contact preview job
+- `POST /api/projects-v2/:id/eye-contact/apply` queue eye-contact apply job
+- `POST /api/projects-v2/:id/eye-contact/undo` queue eye-contact undo job
+- `POST /api/projects-v2/:id/background/preview` queue background replacement preview job
+- `POST /api/projects-v2/:id/background/apply` queue background replacement apply job
+- `POST /api/projects-v2/:id/background/undo` queue background replacement undo job
+- `GET /api/projects-v2/:id/multicam/recommendations` return transcript-aware multicam switch suggestions
+- `POST /api/projects-v2/:id/multicam/apply` queue multicam apply job
+- `GET /api/projects-v2/:id/studio/control-room/state` return room diagnostics for control-room panels
+- `GET/POST /api/workspace/brand-studio` workspace-level brand studio config
 - `POST /api/projects-v2/:id/render/final` enqueue final render for v2 project
 - `GET /api/projects/:id` fetch project + assets
 - `PATCH /api/projects/:id` update config/title
@@ -314,12 +346,21 @@ Implemented route handlers:
 - `POST /api/parity/benchmarks/run` run persisted parity benchmark execution
 - `GET /api/parity/benchmarks/:runId` fetch benchmark run summary/results
 - `GET /api/parity/launch/readiness` launch guardrail status (rollout stage, SLO/queue/perf thresholds, rollback recommendations)
+- `GET /api/parity/certification/readout` compute full Phase 6 certification readout (feature/workflow/UX-SLO/quality/ecosystem/operations)
+- `POST /api/parity/certification/run` persist Phase 6 certification run and incident sync
+- `GET /api/parity/descript-diff` read latest monthly Descript diff/drift status
+- `POST /api/parity/descript-diff` record monthly Descript diff and unresolved drift counts
+- `GET /api/parity/release-candidate` read release-candidate freeze status
+- `POST /api/parity/release-candidate/freeze` freeze release candidate for dogfood/pilot window
+- `POST /api/parity/release-candidate/unfreeze` unfreeze release candidate
+- `POST /api/parity/pilot-feedback` record dogfood/pilot workflow session metrics for certification
 
 Descript+ program validation commands:
 
 - `pnpm test:e2e:descript-plus`
 - `pnpm quality:parity-gate`
 - baseline report artifact: `progress/DESCRIPT_PLUS_BASELINE_REPORT.md`
+- parity gate now also validates `docs/parity/descript_feature_matrix.json` and configured real providers per capability (`PARITY_GATE_ENFORCE_REAL_PROVIDERS`, `PARITY_GATE_ENFORCE_FEATURE_MATRIX`).
 
 Autopilot Phase 4 highlights:
 
@@ -393,9 +434,10 @@ The repository now includes parity-ready foundations for the 12-month roadmap:
 
 - Expanded Prisma domain for workspaces, plans/subscriptions, credits, timeline graph, AI jobs, trust/safety, consent, media artifacts, and public API keys.
 - Queue topology extensions: `ingest`, `transcribe`, `caption-style`, `translate`, `dub-lipsync`, `ai-edit`, `ai-generate`, `render-preview`, `render-final`, `notify`, `billing-meter`.
-- AI orchestration layer with provider registry and deterministic mock adapters (safe defaults until provider keys are configured).
+- AI orchestration layer with capability-typed provider contracts, real HTTP adapters, and strict non-dev mock-provider guardrails.
 - Worker now processes both render jobs and AI jobs.
 - New environment variables in `.env.example` for provider keys, starter credits, URL import controls, and language defaults.
+- Parity feature matrix baseline is tracked in `docs/parity/descript_feature_matrix.json` (frozen to `2026-02-26`).
 
 Important:
 - URL ingestion endpoints are implemented as rights-attested scaffolding and queue jobs.
